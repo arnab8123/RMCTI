@@ -114,13 +114,16 @@ Open `http://127.0.0.1:5500/login.html`.
 ## Fee workflow
 1. Admin creates a fee structure for a class.
 2. The monthly fee becomes a calculated due amount for enrolled students.
-3. Admin searches the student and selects the fee month.
+3. Admin searches the student; the payment form automatically selects the student's oldest unpaid due month.
 4. A payment is recorded only once for a student/month and the payment amount is validated against the applicable fee structure.
-5. A receipt record is generated and the printable receipt page can be opened.
+5. A receipt record is generated and the same receipt design is shown immediately with Download JPEG and Print actions.
 6. Students can see the resulting PAID/DUE status and receipt number but cannot make payments.
 
+## Date and time standard
+All displayed dates use `dd/mm/yyyy`. Stored timestamps are presented in Indian Standard Time (IST / Asia/Kolkata).
+
 ## Historical records
-Teacher and student unregister operations use inactive status and deactivate active allocations instead of destroying the underlying records. This preserves historical fee, receipt, homework, classwork, and schedule information.
+Teacher and student unregister operations use inactive status and deactivate active allocations instead of destroying the underlying records. Class deletion is intentionally different: an admin's Delete Class action permanently removes the class and its class-owned allocations, fee structures, homework, classwork, and attendance records, so that deleted classes no longer appear anywhere.
 
 ## API groups
 - `/api/auth/*`
@@ -210,3 +213,7 @@ python scripts/migrate.py
 ```
 
 Then submit a test message from the landing page and open **Admin → Enquire**. The name, phone, message, timestamp, and status shown there come from the same `enquiries` database row.
+
+
+## Persistent photo storage
+Uploaded teacher and student profile photos are stored in the `photo_assets` MySQL table and served through `/uploads/photos/<filename>`. This makes profile images survive local API restarts and redeploys instead of depending only on the backend filesystem. Existing legacy disk uploads remain supported and are imported into the durable table automatically when the application can access them.

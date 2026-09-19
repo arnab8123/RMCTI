@@ -27,7 +27,9 @@ class Config:
         "connect_args": {
             "ssl": {
                 "check_hostname": False
-            }
+            },
+            # Keep database CURRENT_TIMESTAMP values in UTC; the app displays them in IST.
+            "init_command": "SET time_zone = '+00:00'"
         }
     }
 

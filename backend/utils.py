@@ -1,10 +1,27 @@
-from datetime import date,datetime,time,timedelta
+from datetime import date,datetime,time,timedelta,timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 from flask import jsonify
 from .database import db
 from .models import AuditLog,FeeStructure,StudentClass,TeacherClass,Class,Subject
 import bcrypt,secrets
 DAYS=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+IST=ZoneInfo("Asia/Kolkata")
+
+def now_ist():
+    return datetime.now(IST)
+
+def today_ist():
+    return now_ist().date()
+
+def iso_ist(dt):
+    """Serialize database timestamps as explicit IST timestamps. DB values are stored as UTC-naive."""
+    if not dt:
+        return None
+    value=dt
+    if value.tzinfo is None:
+        value=value.replace(tzinfo=timezone.utc)
+    return value.astimezone(IST).isoformat()
 def ok(data=None,message="",status=200):
     x={"success":True,"message":message}
     if data is not None:x["data"]=data
@@ -33,7 +50,7 @@ def audit(uid,action,etype,eid=None,desc=None):
 def teacher_has(tid,cid): return TeacherClass.query.filter_by(teacher_id=tid,class_id=cid,status="active").first() is not None
 def class_fee_structure(class_id,month=None,active_only=True):
     """Return the latest fee structure that is applicable to the given month."""
-    m=(month or date.today()).replace(day=1)
+    m=(month or today_ist()).replace(day=1)
     q=FeeStructure.query.filter_by(class_id=class_id)
     if active_only:
         q=q.filter(FeeStructure.status=="active")

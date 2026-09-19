@@ -1,28 +1,115 @@
-"""Idempotent database bootstrap for RMCTI. Run from the project root: python scripts/migrate.py"""
+"""Idempotent database bootstrap/migration for RMCTI.
+Run from the project root: python scripts/migrate.py
+"""
 import sys
 from pathlib import Path
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.app import app
 from backend.database import db
 
-ENQUIRIES_SQL = """
-CREATE TABLE IF NOT EXISTS enquiries (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(150) NOT NULL,
-    phone VARCHAR(30) NOT NULL,
-    message TEXT NOT NULL,
-    status ENUM('new','read','resolved') NOT NULL DEFAULT 'new',
-    admin_note TEXT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_enquiries_status_created(status,created_at)
-) ENGINE=InnoDB;
-"""
+ENQUIRY_COLUMNS={
+    "name":"VARCHAR(150) NOT NULL",
+    "phone":"VARCHAR(30) NOT NULL",
+    "message":"TEXT NOT NULL",
+    "status":"ENUM('new','read','resolved') NOT NULL DEFAULT 'new'",
+    "admin_note":"TEXT NULL",
+    "created_at":"DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+    "updated_at":"DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+}
+
+def ensure_enquiries():
+    inspector=inspect(db.engine)
+    if "enquiries" not in inspector.get_table_names():
+        db.session.execute(text("""CREATE TABLE enquiries (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(150) NOT NULL,
+            phone VARCHAR(30) NOT NULL,
+            message TEXT NOT NULL,
+            status ENUM('new','read','resolved') NOT NULL DEFAULT 'new',
+            admin_note TEXT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_enquiries_status_created(status,created_at)
+        ) ENGINE=InnoDB"""))
+        return
+
+    existing={c["name"] for c in inspector.get_columns("enquiries")}
+    for name,definition in ENQUIRY_COLUMNS.items():
+        if name not in existing:
+            db.session.execute(text(f"ALTER TABLE enquiries ADD COLUMN {name} {definition}"))
+
+    # Ensure the admin inbox query remains fast on larger deployments.
+    try:
+        indexes=inspector.get_indexes("enquiries")
+        have={ix.get("name") for ix in indexes}
+        if "idx_enquiries_status_created" not in have:
+            db.session.execute(text("CREATE INDEX idx_enquiries_status_created ON enquiries(status,created_at)"))
+    except Exception:
+        # A pre-existing equivalent index is fine; do not make migration fail.
+        pass
+
+
+def ensure_attendance_marker():
+    inspector=inspect(db.engine)
+    if "attendance" not in inspector.get_table_names():
+        return
+    existing={c["name"] for c in inspector.get_columns("attendance")}
+    if "marked_by" not in existing:
+        # Add nullable first so existing attendance rows can be backfilled safely.
+        db.session.execute(text("ALTER TABLE attendance ADD COLUMN marked_by BIGINT UNSIGNED NULL AFTER status"))
+        inspector=inspect(db.engine)
+        existing={c["name"] for c in inspector.get_columns("attendance")}
+    if "marked_by" in existing:
+        missing=int(db.session.execute(text("SELECT COUNT(*) FROM attendance WHERE marked_by IS NULL")).scalar() or 0)
+        if missing:
+            marker=db.session.execute(text("SELECT id FROM users WHERE role IN ('admin','teacher') ORDER BY id LIMIT 1")).scalar()
+            if marker is not None:
+                db.session.execute(text("UPDATE attendance SET marked_by=:marker WHERE marked_by IS NULL"),{"marker":marker})
+        try:
+            db.session.execute(text("ALTER TABLE attendance MODIFY COLUMN marked_by BIGINT UNSIGNED NOT NULL"))
+        except Exception:
+            # It may already be NOT NULL on an existing deployment.
+            db.session.rollback()
+        # Add the FK only when one is not already present.
+        try:
+            fk_rows=db.session.execute(text("""SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='attendance'
+                  AND COLUMN_NAME='marked_by' AND REFERENCED_TABLE_NAME='users'""")).all()
+            if not fk_rows:
+                db.session.execute(text("ALTER TABLE attendance ADD CONSTRAINT fk_attendance_marker FOREIGN KEY (marked_by) REFERENCES users(id)"))
+        except Exception:
+            # Existing equivalent constraint/index should not fail the migration.
+            db.session.rollback()
+
+
+def ensure_complaint_class():
+    inspector=inspect(db.engine)
+    if "complaints" not in inspector.get_table_names() or "classes" not in inspector.get_table_names():
+        return
+    existing={c["name"] for c in inspector.get_columns("complaints")}
+    if "class_id" not in existing:
+        db.session.execute(text("ALTER TABLE complaints ADD COLUMN class_id BIGINT UNSIGNED NULL AFTER student_id"))
+    try:
+        fks=db.session.execute(text("""SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='complaints'
+              AND COLUMN_NAME='class_id' AND REFERENCED_TABLE_NAME='classes'""")).all()
+        if not fks:
+            db.session.execute(text("ALTER TABLE complaints ADD CONSTRAINT fk_complaints_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE SET NULL"))
+    except Exception:
+        db.session.rollback()
+    try:
+        indexes={ix.get("name") for ix in inspect(db.engine).get_indexes("complaints")}
+        if "idx_complaints_class_id" not in indexes:
+            db.session.execute(text("CREATE INDEX idx_complaints_class_id ON complaints(class_id)"))
+    except Exception:
+        db.session.rollback()
 
 with app.app_context():
     db.create_all()
-    db.session.execute(text(ENQUIRIES_SQL))
+    ensure_enquiries()
+    ensure_attendance_marker()
+    ensure_complaint_class()
     db.session.commit()
-    print("RMCTI database schema is ready. Enquiries table is ready. Existing data is preserved.")
+    print("RMCTI database schema is ready. Enquiries, attendance marker, optional complaint class, and persistent photo storage are ready. Existing data is preserved.")

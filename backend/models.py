@@ -1,4 +1,5 @@
 from datetime import datetime
+from sqlalchemy.dialects.mysql import MEDIUMBLOB
 from .database import db
 class User(db.Model):
     __tablename__="users"; id=db.Column(db.BigInteger,primary_key=True); username=db.Column(db.String(100),unique=True,nullable=False); password_hash=db.Column(db.String(255),nullable=False); role=db.Column(db.Enum("admin","teacher","student"),nullable=False); is_active=db.Column(db.Boolean,default=True,nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
@@ -44,6 +45,7 @@ class Complaint(db.Model):
     __tablename__="complaints"
     id=db.Column(db.BigInteger,primary_key=True)
     student_id=db.Column(db.BigInteger,db.ForeignKey("students.id"),nullable=False)
+    class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id", ondelete="SET NULL"),nullable=True)
     complaint_date=db.Column(db.Date,nullable=False)
     subject=db.Column(db.String(255),nullable=False)
     description=db.Column(db.Text,nullable=False)
@@ -67,3 +69,11 @@ class Enquiry(db.Model):
     admin_note=db.Column(db.Text)
     created_at=db.Column(db.DateTime,default=datetime.utcnow)
     updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
+
+
+class PhotoAsset(db.Model):
+    __tablename__ = "photo_assets"
+    id = db.Column(db.String(100), primary_key=True)
+    mime_type = db.Column(db.String(50), nullable=False)
+    data = db.Column(MEDIUMBLOB, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

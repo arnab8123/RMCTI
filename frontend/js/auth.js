@@ -1,33 +1,4 @@
-const Notifications = (() => {
-  const map = {
-    admin: { complaints: 'complaints.html', fees: 'fee-payment.html', enquiries: 'enquiries.html' },
-    student: { homework: 'homework.html', complaints: 'complaints.html' }
-  };
-  const key = (role, type) => `rmcti_notif_seen_${role}_${type}`;
-  const currentPageMatches = target => location.pathname.endsWith(`/${target}`) || location.pathname.endsWith(target);
-  const valueFor = (type, data) => type === 'fees' ? JSON.stringify(data.fees || {}) : String((data[type] || {}).latest || '');
-  async function refresh(role) {
-    const data = await Api.get('/notifications');
-    Object.entries(map[role] || {}).forEach(([type, target]) => {
-      const link = [...document.querySelectorAll('.nav a')].find(a => a.getAttribute('href') === target);
-      if (!link) return;
-      const current = currentPageMatches(target);
-      const currentValue = valueFor(type, data);
-      const seenKey = key(role, type);
-      if (current) localStorage.setItem(seenKey, currentValue);
-      const shouldShow = !current && currentValue && localStorage.getItem(seenKey) !== currentValue;
-      let dot = link.querySelector('[data-notification-dot]');
-      if (shouldShow && !dot) {
-        dot = document.createElement('span');
-        dot.dataset.notificationDot='1';
-        dot.className='notification-dot';
-        dot.setAttribute('aria-label','New notification');
-        link.appendChild(dot);
-      } else if (!shouldShow && dot) dot.remove();
-    });
-  }
-  return { refresh };
-})();
+const Notifications = { refresh: async () => {} };
 
 const Auth = {
   async role(role) {
@@ -65,11 +36,6 @@ const Auth = {
         side.querySelectorAll('a, button').forEach((item)=>item.addEventListener('click',closeMenu));
       }
 
-      try {
-        await Notifications.refresh(role);
-        clearInterval(window.__rmctiNotifTimer);
-        window.__rmctiNotifTimer=setInterval(()=>Notifications.refresh(role).catch(()=>{}),60000);
-      } catch (notificationError) { console.warn('Notification refresh failed', notificationError); }
       return user;
     } catch (error) { console.error(error); return null; }
   }

@@ -1,3 +1,33 @@
+
+function prepareMobileTables(root = document) {
+  root.querySelectorAll('.table table').forEach((table) => {
+    let headers = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+    let legacyHeaderRow = null;
+
+    // Some generated history tables use <table><tr><th>...</th></tr> without a <thead>.
+    if (!headers.length) {
+      legacyHeaderRow = [...table.querySelectorAll('tr')].find((row) => row.querySelector('th'));
+      if (legacyHeaderRow) {
+        headers = [...legacyHeaderRow.querySelectorAll('th')].map((th) => th.textContent.trim());
+        legacyHeaderRow.classList.add('mobile-table-header');
+      }
+    }
+
+    if (!headers.length) return;
+
+    table.querySelectorAll('tbody tr, tr').forEach((row) => {
+      if (row === legacyHeaderRow) return;
+      const cells = [...row.children].filter((cell) => cell.tagName === 'TD');
+      if (!cells.length || cells.length !== headers.length) return;
+      cells.forEach((cell, index) => {
+        if (!cell.dataset.label) cell.dataset.label = headers[index];
+      });
+    });
+
+    table.closest('.table')?.classList.add('mobile-stack-table');
+  });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const role = document.body.dataset.role;
   const page = document.body.dataset.page;
@@ -42,6 +72,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const fn = dispatch[`${role}:${page}`];
     if (typeof fn === 'function') await fn();
     else console.warn(`No frontend handler for ${role}:${page}`);
+    prepareMobileTables();
+    if (!window.__rmctiMobileTableObserver) {
+      window.__rmctiMobileTableObserver = new MutationObserver(() => prepareMobileTables());
+      window.__rmctiMobileTableObserver.observe(document.body, {subtree:true, childList:true});
+    }
   } catch (error) {
     console.error(error);
     if (window.U?.toast) U.toast(error.message || 'Unable to load this page.', 'error');

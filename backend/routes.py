@@ -31,8 +31,8 @@ def _enquiry_row(e):
         "message": e.message,
         "status": e.status,
         "admin_note": e.admin_note,
-        "created_at": e.created_at.isoformat() if e.created_at else None,
-        "updated_at": e.updated_at.isoformat() if e.updated_at else None,
+        "created_at": iso_ist(e.created_at),
+        "updated_at": iso_ist(e.updated_at),
     }
 
 
@@ -152,17 +152,17 @@ def me(): return ok(user_profile(current_user()))
 def notifications():
     u=current_user();out={"role":u.role}
     if u.role=="admin":
-        month=date.today().replace(day=1);due_ids=[]
+        month=today_ist().replace(day=1);due_ids=[]
         for s in Student.query.filter_by(status="active").all():
             if applicable_fee(s.id,month)>0 and not FeePayment.query.filter_by(student_id=s.id,fee_month=month).first():
                 due_ids.append(str(s.id))
         due_ids.sort()
         latest_complaint=Complaint.query.order_by(Complaint.created_at.desc(),Complaint.id.desc()).first()
-        out["complaints"]={"latest":latest_complaint.created_at.isoformat() if latest_complaint and latest_complaint.created_at else None,"count":Complaint.query.filter(Complaint.status!="resolved").count()}
+        out["complaints"]={"latest":iso_ist(latest_complaint.created_at) if latest_complaint else None,"count":Complaint.query.filter(Complaint.status!="resolved").count()}
         out["fees"]={"count":len(due_ids),"signature":f"{month.isoformat()}:{','.join(due_ids)}"}
         try:
             latest_enquiry=Enquiry.query.order_by(Enquiry.created_at.desc(),Enquiry.id.desc()).first()
-            out["enquiries"]={"latest":latest_enquiry.created_at.isoformat() if latest_enquiry and latest_enquiry.created_at else None,"count":Enquiry.query.filter_by(status="new").count()}
+            out["enquiries"]={"latest":iso_ist(latest_enquiry.created_at) if latest_enquiry else None,"count":Enquiry.query.filter_by(status="new").count()}
         except Exception:
             db.session.rollback();out["enquiries"]={"latest":None,"count":0}
     elif u.role=="student":
@@ -174,8 +174,8 @@ def notifications():
             for complaint in Complaint.query.filter_by(student_id=s.id).order_by(Complaint.updated_at.desc(),Complaint.id.desc()).all():
                 if complaint.status!="open" or (complaint.updated_at and complaint.created_at and complaint.updated_at>complaint.created_at):
                     latest_complaint=complaint;break
-        out["homework"]={"latest":latest_hw.created_at.isoformat() if latest_hw and latest_hw.created_at else None}
-        out["complaints"]={"latest":latest_complaint.updated_at.isoformat() if latest_complaint and latest_complaint.updated_at else None}
+        out["homework"]={"latest":iso_ist(latest_hw.created_at) if latest_hw and latest_hw.created_at else None}
+        out["complaints"]={"latest":iso_ist(latest_complaint.updated_at) if latest_complaint and latest_complaint.updated_at else None}
     return ok(out)
 
 @api.post("/uploads/photo")
@@ -188,10 +188,30 @@ def upload_photo():
     if not ext:return err("Only JPG, PNG or WEBP images are allowed")
     f.seek(0,2); size=f.tell(); f.seek(0)
     if size>2*1024*1024:return err("Photo must be 2 MB or smaller")
+    data=f.read()
     name=f"{uuid.uuid4().hex}.{ext}"
-    folder=os.path.join(os.path.dirname(__file__),"uploads","photos")
-    os.makedirs(folder,exist_ok=True)
-    f.save(os.path.join(folder,secure_filename(name)))
+
+    # Store the original bytes in MySQL so uploaded photos survive local API
+    # restarts, project restarts/redeploys, and do not depend on an ephemeral
+    # filesystem. Disk storage is retained as a fast local fallback/cache.
+    asset=PhotoAsset(id=name,mime_type=f.mimetype or "application/octet-stream",data=data)
+    try:
+        db.session.add(asset)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        return err("Could not save photo. Please try again.",500)
+
+    try:
+        folder=os.path.join(os.path.dirname(__file__),"uploads","photos")
+        os.makedirs(folder,exist_ok=True)
+        with open(os.path.join(folder,secure_filename(name)),"wb") as out:
+            out.write(data)
+    except Exception:
+        # DB copy is the durable source of truth; a disk write failure should
+        # not make a successfully stored photo unusable.
+        pass
+
     return ok({"photo":f"/uploads/photos/{name}"},"Photo uploaded",201)
 
 def subject_obj(id):
@@ -219,7 +239,7 @@ def student_obj(s,private=True):
         for tc in TeacherClass.query.filter_by(class_id=sc.class_id,status="active").all():
             t=Teacher.query.get(tc.teacher_id)
             cls.append({"class_id":c.id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "","teacher_id":t.teacher_id if t else None,"teacher_name":t.name if t else None,"day":DAYS[tc.day_of_week],"day_of_week":tc.day_of_week,"start_time":tc.start_time.strftime("%H:%M"),"end_time":tc.end_time.strftime("%H:%M"),"room":c.room})
-    current_month=date.today().replace(day=1)
+    current_month=today_ist().replace(day=1)
     current_due=applicable_fee(s.id,current_month)
     current_payment=FeePayment.query.filter_by(student_id=s.id,fee_month=current_month).first()
     current_month_status="PAID" if current_payment else ("DUE" if current_due > 0 else "N/A")
@@ -249,11 +269,20 @@ def create_subject():
 @api.get("/admin/dashboard")
 @roles("admin")
 def admin_dashboard():
-    m=date.today().replace(day=1); due=0
+    m=today_ist().replace(day=1); due=0
     for s in Student.query.filter_by(status="active").all():
-        if applicable_fee(s.id,m)>0 and not FeePayment.query.filter_by(student_id=s.id,fee_month=m).first():due+=1
-    pays=FeePayment.query.order_by(FeePayment.payment_date.desc()).limit(8).all()
-    return ok({"total_students":Student.query.filter_by(status="active").count(),"total_teachers":Teacher.query.filter_by(status="active").count(),"total_classes":Class.query.filter_by(status="active").count(),"fees_due":due,"recent_payments":[{"receipt_number":p.receipt_number,"student_name":Student.query.get(p.student_id).name,"month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount)} for p in pays]})
+        if applicable_fee(s.id,m)>0 and not FeePayment.query.filter_by(student_id=s.id,fee_month=m).first():
+            due+=1
+    unresolved_complaints=Complaint.query.filter(Complaint.status!="resolved").count()
+    new_enquiries=Enquiry.query.filter_by(status="new").count()
+    return ok({
+        "total_students":Student.query.filter_by(status="active").count(),
+        "total_teachers":Teacher.query.filter_by(status="active").count(),
+        "total_classes":Class.query.filter_by(status="active").count(),
+        "fees_due":due,
+        "complaints":unresolved_complaints,
+        "enquiries":new_enquiries
+    })
 
 @api.get("/teachers")
 @roles("admin")
@@ -290,12 +319,25 @@ def add_teacher():
 def edit_teacher(id):
     t=Teacher.query.get(id)
     if not t:return err("Teacher not found",404)
-    b=request.get_json() or {}
-    for k in ("name","photo","gender","phone","email","address","qualification","experience","status"):
-        if k in b:setattr(t,k,b[k])
-    if "dob" in b:t.dob=pd(b["dob"])
-    if "joining_date" in b:t.joining_date=pd(b["joining_date"])
-    audit(current_user().id,"update","teacher",t.id,t.teacher_id);db.session.commit();return ok(teacher_obj(t),"Teacher updated")
+    u=User.query.get(t.user_id)
+    b=request.get_json(silent=True) or {}
+    try:
+        for k in ("name","photo","gender","phone","email","address","qualification","experience","status"):
+            if k in b:setattr(t,k,b[k])
+        if t.status not in ("active","inactive"): return err("Invalid teacher status")
+        if "dob" in b:t.dob=pd(b.get("dob"))
+        if "joining_date" in b:t.joining_date=pd(b.get("joining_date"))
+        if "password" in b and str(b.get("password") or "").strip():
+            u.password_hash=hp(str(b.get("password")).strip())
+        if u:
+            u.is_active=(t.status=="active")
+        audit(current_user().id,"update","teacher",t.id,t.teacher_id);
+        db.session.commit()
+        return ok(teacher_obj(t),"Teacher updated")
+    except (TypeError,ValueError):
+        db.session.rollback();return err("Invalid teacher details")
+    except Exception:
+        db.session.rollback();return err("Could not update teacher")
 @api.delete("/teachers/<int:id>")
 @roles("admin")
 def remove_teacher(id):
@@ -308,15 +350,17 @@ def remove_teacher(id):
 @api.get("/classes")
 @roles("admin","teacher","student")
 def classes():
-    st=request.args.get("status");q=request.args.get("q","").strip();query=Class.query
-    if st in ("active","inactive"):query=query.filter_by(status=st)
+    # The public/admin application should only ever receive active classes.
+    # A deactivated class is permanently deleted by the admin mutation above.
+    q=request.args.get("q","").strip()
+    query=Class.query.filter_by(status="active")
     if q:query=query.filter(or_(Class.class_name.like(f"%{q}%"),Class.batch.like(f"%{q}%")))
     return ok([class_obj(c) for c in query.order_by(Class.class_name,Class.batch).all()])
 @api.get("/classes/<int:id>")
 @roles("admin")
 def get_class(id):
     c=Class.query.get(id)
-    if not c:return err("Course not found",404)
+    if not c or c.status!="active":return err("Course not found",404)
     students=(Student.query.join(StudentClass,StudentClass.student_id==Student.id)
               .filter(StudentClass.class_id==id,StudentClass.status=="active")
               .order_by(Student.name.asc()).all())
@@ -347,26 +391,55 @@ def add_class():
     b=request.get_json() or {}
     try:c=Class(class_name=str(b["class_name"]).strip(),batch=str(b["batch"]).strip(),subject_id=int(b["subject_id"]),room=b.get("room"),max_students=int(b.get("max_students",30)));db.session.add(c);db.session.flush();audit(current_user().id,"create","class",c.id,c.class_name);db.session.commit();return ok(class_obj(c),"Class created",201)
     except Exception:db.session.rollback();return err("Invalid class data")
+def _permanently_delete_class(c):
+    """Remove a class and every class-owned record so it cannot surface anywhere."""
+    cid=c.id
+    # Clear optional complaint references explicitly; this keeps the behavior
+    # correct even on MySQL installs where the SET NULL FK was not recreated.
+    Complaint.query.filter_by(class_id=cid).update({Complaint.class_id:None}, synchronize_session=False)
+    TeacherClass.query.filter_by(class_id=cid).delete(synchronize_session=False)
+    StudentClass.query.filter_by(class_id=cid).delete(synchronize_session=False)
+    FeeStructure.query.filter_by(class_id=cid).delete(synchronize_session=False)
+    Homework.query.filter_by(class_id=cid).delete(synchronize_session=False)
+    Classwork.query.filter_by(class_id=cid).delete(synchronize_session=False)
+    Attendance.query.filter_by(class_id=cid).delete(synchronize_session=False)
+    audit(current_user().id,"delete","class",cid,f"Deleted course {c.class_name} · {c.batch}")
+    db.session.delete(c)
+
 @api.put("/classes/<int:id>")
 @roles("admin")
 def edit_class(id):
     c=Class.query.get(id)
     if not c:return err("Class not found",404)
     b=request.get_json() or {}
-    for k in ("class_name","batch","room","status"): 
+    # "Inactive" is treated as permanent deletion everywhere.
+    if str(b.get("status", "")).lower() == "inactive":
+        try:
+            _permanently_delete_class(c)
+            db.session.commit()
+            return ok(message="Class deleted permanently")
+        except Exception:
+            db.session.rollback()
+            return err("Could not delete class. Please try again.",500)
+    for k in ("class_name","batch","room"): 
         if k in b:setattr(c,k,b[k])
     for k in ("subject_id","max_students"):
         if k in b:setattr(c,k,int(b[k]))
+    c.status="active"
     db.session.commit();return ok(class_obj(c),"Class updated")
+
 @api.delete("/classes/<int:id>")
 @roles("admin")
 def deactivate_class(id):
     c=Class.query.get(id)
     if not c:return err("Class not found",404)
-    c.status="inactive"
-    for x in TeacherClass.query.filter_by(class_id=id).all():x.status="inactive"
-    for x in StudentClass.query.filter_by(class_id=id).all():x.status="inactive"
-    db.session.commit();return ok(message="Class deactivated")
+    try:
+        _permanently_delete_class(c)
+        db.session.commit()
+        return ok(message="Class deleted permanently")
+    except Exception:
+        db.session.rollback()
+        return err("Could not delete class. Please try again.",500)
 
 @api.post("/teacher-classes")
 @roles("admin")
@@ -458,16 +531,41 @@ def add_student():
 def edit_student(id):
     s=Student.query.get(id)
     if not s:return err("Student not found",404)
-    b=request.get_json() or {}
-    for k in ("name","photo","gender","phone","address","school_name","status"):
-        if k in b:setattr(s,k,b[k])
-    if "dob" in b:s.dob=pd(b["dob"])
-    if "admission_date" in b:s.admission_date=pd(b["admission_date"])
-    if "parent" in b and s.parent_id:
-        p=Parent.query.get(s.parent_id);pdat=b["parent"]
-        for k in ("name","relationship","phone","email","address"):
-            if k in pdat:setattr(p,k,pdat[k])
-    db.session.commit();return ok(student_obj(s),"Student updated")
+    u=User.query.get(s.user_id)
+    b=request.get_json(silent=True) or {}
+    try:
+        for k in ("name","photo","gender","phone","address","school_name","status"):
+            if k in b:setattr(s,k,b[k])
+        if s.status not in ("active","inactive"): return err("Invalid student status")
+        if "dob" in b:s.dob=pd(b.get("dob"))
+        if "admission_date" in b:s.admission_date=pd(b.get("admission_date"))
+        if "password" in b and str(b.get("password") or "").strip():
+            u.password_hash=hp(str(b.get("password")).strip())
+        if u:
+            u.is_active=(s.status=="active")
+
+        pdat=b.get("parent")
+        if isinstance(pdat,dict):
+            if s.parent_id:
+                p=Parent.query.get(s.parent_id)
+            else:
+                p=None
+            has_parent_data=any(str(pdat.get(k) or "").strip() for k in ("name","relationship","phone","email","address"))
+            if p is None and has_parent_data:
+                if not str(pdat.get("name") or "").strip():
+                    return err("Guardian name is required when guardian details are supplied")
+                p=Parent(name=str(pdat.get("name")).strip())
+                db.session.add(p);db.session.flush();s.parent_id=p.id
+            if p:
+                for k in ("name","relationship","phone","email","address"):
+                    if k in pdat:setattr(p,k,pdat[k])
+        audit(current_user().id,"update","student",s.id,s.student_id)
+        db.session.commit()
+        return ok(student_obj(s),"Student updated")
+    except (TypeError,ValueError):
+        db.session.rollback();return err("Invalid student details")
+    except Exception:
+        db.session.rollback();return err("Could not update student")
 @api.delete("/students/<int:id>")
 @roles("admin")
 def remove_student(id):
@@ -482,7 +580,7 @@ def remove_student(id):
 def admin_student_attendance(id):
     s=Student.query.get(id)
     if not s:return err("Student not found",404)
-    month_raw=request.args.get("month",date.today().strftime("%Y-%m"))
+    month_raw=request.args.get("month",today_ist().strftime("%Y-%m"))
     try:
         month_start=date.fromisoformat(month_raw+"-01")
     except ValueError:
@@ -501,6 +599,48 @@ def admin_student_attendance(id):
         item["courses"].append({"class_id":r.class_id,"course":c.class_name if c else "","batch":c.batch if c else "","subject":sub.name if sub else "","status":r.status})
     return ok({"student":{"id":s.id,"student_id":s.student_id,"name":s.name},"month":month_start.strftime("%Y-%m"),"records":grouped})
 
+@api.get("/admin/classes/<int:class_id>/attendance/history")
+@roles("admin")
+def admin_class_attendance_history(class_id):
+    c=Class.query.get(class_id)
+    if not c:return err("Course not found",404)
+    if c.status!="active":return err("Course is inactive",404)
+    date_filter=request.args.get("date","").strip()
+    from_date=request.args.get("from","").strip()
+    to_date=request.args.get("to","").strip()
+    query=Attendance.query.filter_by(class_id=class_id)
+    try:
+        if date_filter:
+            query=query.filter(Attendance.attendance_date==date.fromisoformat(date_filter))
+        elif from_date or to_date:
+            if from_date: query=query.filter(Attendance.attendance_date>=date.fromisoformat(from_date))
+            if to_date: query=query.filter(Attendance.attendance_date<=date.fromisoformat(to_date))
+    except ValueError:
+        return err("Invalid attendance date")
+    records=query.order_by(Attendance.attendance_date.desc(),Attendance.student_id.asc()).all()
+    student_ids={r.student_id for r in records}
+    students={s.id:s for s in Student.query.filter(Student.id.in_(student_ids)).all()} if student_ids else {}
+    grouped={}
+    for r in records:
+        key=r.attendance_date.isoformat()
+        grouped.setdefault(key,[]).append({
+            "student_id":students[r.student_id].student_id if r.student_id in students else "",
+            "name":students[r.student_id].name if r.student_id in students else "Unknown",
+            "status":r.status
+        })
+    days=[]
+    for day,items in grouped.items():
+        items.sort(key=lambda x:x["name"].lower())
+        days.append({
+            "date":day,
+            "day":date.fromisoformat(day).strftime("%A"),
+            "present":sum(1 for x in items if x["status"]=="present"),
+            "absent":sum(1 for x in items if x["status"]=="absent"),
+            "students":items
+        })
+    sub=subject_obj(c.subject_id)
+    return ok({"class_id":class_id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "","history":days})
+
 @api.get("/complaints")
 @roles("admin")
 def admin_complaints():
@@ -508,9 +648,21 @@ def admin_complaints():
     query=Complaint.query
     if status in ("open","in_progress","resolved"): query=query.filter_by(status=status)
     out=[]
-    for c in query.order_by(Complaint.complaint_date.desc(),Complaint.created_at.desc()).all():
-        st=Student.query.get(c.student_id)
-        out.append({"id":c.id,"student_id":c.student_id,"student_code":st.student_id if st else "","student_name":st.name if st else "","complaint_date":c.complaint_date.isoformat(),"subject":c.subject,"description":c.description,"status":c.status,"admin_note":c.admin_note,"created_at":c.created_at.isoformat() if c.created_at else None})
+    for c in query.order_by(Complaint.created_at.desc(),Complaint.id.desc()).all():
+        cls=Class.query.get(c.class_id) if c.class_id else None
+        sub=subject_obj(cls.subject_id) if cls else None
+        class_label=(f"{cls.class_name} · {cls.batch}" if cls else "Not mentioned")
+        out.append({
+            "id":c.id,
+            "complaint_date":c.complaint_date.isoformat(),
+            "subject":c.subject,
+            "description":c.description,
+            "class_name":class_label,
+            "class_subject":sub.name if sub else "",
+            "status":c.status,
+            "admin_note":c.admin_note,
+            "created_at":iso_ist(c.created_at)
+        })
     return ok(out)
 
 @api.put("/complaints/<int:id>")
@@ -529,7 +681,22 @@ def update_complaint(id):
 def student_complaints():
     s=student_for_user()
     rows=Complaint.query.filter_by(student_id=s.id).order_by(Complaint.complaint_date.desc(),Complaint.created_at.desc()).all()
-    return ok([{"id":c.id,"complaint_date":c.complaint_date.isoformat(),"subject":c.subject,"description":c.description,"status":c.status,"admin_note":c.admin_note,"created_at":c.created_at.isoformat() if c.created_at else None} for c in rows])
+    return ok([{"id":c.id,"complaint_date":c.complaint_date.isoformat(),"subject":c.subject,"description":c.description,"class_id":c.class_id,"status":c.status,"admin_note":c.admin_note,"created_at":iso_ist(c.created_at)} for c in rows])
+
+@api.get("/student/complaint-classes")
+@roles("student")
+def student_complaint_classes():
+    s=student_for_user()
+    seen=set(); out=[]
+    for sc in StudentClass.query.filter_by(student_id=s.id,status="active").all():
+        if sc.class_id in seen: continue
+        c=Class.query.get(sc.class_id)
+        if not c or c.status!="active": continue
+        sub=subject_obj(c.subject_id)
+        out.append({"id":c.id,"label":f"{c.class_name} · {c.batch}","subject":sub.name if sub else ""})
+        seen.add(c.id)
+    out.sort(key=lambda x:x["label"].lower())
+    return ok(out)
 
 @api.post("/student/complaints")
 @roles("student")
@@ -539,9 +706,19 @@ def create_student_complaint():
         d=pd(b.get("complaint_date"),True)
         subject=str(b.get("subject","")).strip()
         description=str(b.get("description","")).strip()
+        mention_class=bool(b.get("mention_class"))
+        class_id=b.get("class_id")
         if not subject:return err("Complaint subject is required")
         if not description:return err("Complaint description is required")
-        c=Complaint(student_id=s.id,complaint_date=d,subject=subject,description=description,status="open")
+        selected_class=None
+        if mention_class:
+            try: class_id=int(class_id)
+            except (TypeError,ValueError): return err("Please select the class you want to mention")
+            assigned=StudentClass.query.filter_by(student_id=s.id,class_id=class_id,status="active").first()
+            selected_class=Class.query.get(class_id)
+            if not assigned or not selected_class or selected_class.status!="active":
+                return err("You can only mention a class currently assigned to you",403)
+        c=Complaint(student_id=s.id,class_id=(selected_class.id if selected_class else None),complaint_date=d,subject=subject,description=description,status="open")
         db.session.add(c); db.session.commit()
         return ok({"id":c.id},"Complaint submitted successfully",201)
     except ValueError:return err("Please enter a valid complaint date")
@@ -566,57 +743,149 @@ def fee_structures():
 @api.post("/fee-structures")
 @roles("admin")
 def add_fee_structure():
-    b=request.get_json() or {}
+    b=request.get_json(silent=True) or {}
     try:
-        class_id=int(b["class_id"]);effective_from=pd(b["effective_from"],True);effective_to=pd(b.get("effective_to"));
-        if effective_to and effective_to<effective_from:return err("Effective To cannot be before Effective From")
+        class_id=int(b.get("class_id"))
+        effective_from=pd(b.get("effective_from"),True)
+        effective_to=pd(b.get("effective_to"))
+        monthly_fee=money(b.get("monthly_fee"))
         c=Class.query.get(class_id)
-        if not c:return err("Course not found",404)
-        existing=FeeStructure.query.filter_by(class_id=class_id).all()
+        if not c or c.status!="active":
+            return err("Please select an active course/class",404)
+        if effective_to and effective_to<effective_from:
+            return err("Effective To cannot be before Effective From")
+
+        # Only ACTIVE structures should prevent a new assignment. An inactive
+        # record is historical data and must not block a new fee plan.
+        existing=FeeStructure.query.filter(
+            FeeStructure.class_id==class_id,
+            FeeStructure.status=="active"
+        ).all()
         new_end=effective_to or date.max
         for oldf in existing:
             old_end=oldf.effective_to or date.max
             if effective_from<=old_end and oldf.effective_from<=new_end:
-                return err("A fee structure already exists for this course and period. Use Edit or choose a non-overlapping period.",409)
-        f=FeeStructure(class_id=class_id,monthly_fee=money(b["monthly_fee"]),effective_from=effective_from,effective_to=effective_to,created_by=current_user().id);db.session.add(f);db.session.commit();return ok({"id":f.id},"Fee structure created",201)
+                return err("An active fee structure already covers this course/class for the selected period. Edit it or choose a different period.",409)
+
+        f=FeeStructure(
+            class_id=class_id,
+            monthly_fee=monthly_fee,
+            effective_from=effective_from,
+            effective_to=effective_to,
+            created_by=current_user().id,
+            status="active"
+        )
+        db.session.add(f)
+        db.session.commit()
+        return ok({"id":f.id,"class_id":f.class_id,"monthly_fee":float(f.monthly_fee),"effective_from":f.effective_from.isoformat(),"effective_to":f.effective_to.isoformat() if f.effective_to else None,"status":f.status},"Fee structure created and assigned to course/class",201)
+    except (TypeError,ValueError,KeyError):
+        db.session.rollback()
+        return err("Please enter a valid course/class, monthly fee and effective date")
+    except IntegrityError:
+        db.session.rollback()
+        return err("Could not save the fee structure. Check the selected course/class and try again.",409)
     except Exception:
-        db.session.rollback();return err("Invalid fee structure")
+        db.session.rollback()
+        return err("Could not create the fee structure. Please try again.",500)
 
 @api.put("/fee-structures/<int:id>")
 @roles("admin")
 def edit_fee_structure(id):
     f=FeeStructure.query.get(id)
     if not f:return err("Fee structure not found",404)
-    b=request.get_json() or {}
+    b=request.get_json(silent=True) or {}
     try:
-        class_id=int(b.get("class_id",f.class_id));effective_from=pd(b.get("effective_from",f.effective_from.isoformat()),True);effective_to=pd(b.get("effective_to",f.effective_to.isoformat() if f.effective_to else None));status=b.get("status",f.status)
-        if effective_to and effective_to<effective_from:return err("Effective To cannot be before Effective From")
+        class_id=int(b.get("class_id",f.class_id))
+        effective_from=pd(b.get("effective_from",f.effective_from.isoformat()),True)
+        effective_to=pd(b.get("effective_to",f.effective_to.isoformat() if f.effective_to else None))
+        status=str(b.get("status",f.status)).strip().lower()
+        monthly_fee=money(b.get("monthly_fee",f.monthly_fee))
+        c=Class.query.get(class_id)
+        if not c:
+            return err("Selected course/class was not found",404)
+        if status not in ("active","inactive"):
+            return err("Invalid fee structure status")
+        if effective_to and effective_to<effective_from:
+            return err("Effective To cannot be before Effective From")
         if status=="active":
+            if c.status!="active":
+                return err("An active fee structure can only be assigned to an active course/class")
             new_end=effective_to or date.max
-            for oldf in FeeStructure.query.filter(FeeStructure.class_id==class_id,FeeStructure.id!=id,FeeStructure.status=="active").all():
+            for oldf in FeeStructure.query.filter(
+                FeeStructure.class_id==class_id,
+                FeeStructure.id!=id,
+                FeeStructure.status=="active"
+            ).all():
                 old_end=oldf.effective_to or date.max
-                if effective_from<=old_end and oldf.effective_from<=new_end:return err("Another active fee structure overlaps this course and period.",409)
-        f.class_id=class_id;f.monthly_fee=money(b.get("monthly_fee",f.monthly_fee));f.effective_from=effective_from;f.effective_to=effective_to;f.status=status;db.session.commit();return ok({"id":f.id},"Fee structure updated")
+                if effective_from<=old_end and oldf.effective_from<=new_end:
+                    return err("Another active fee structure overlaps this course/class for the selected period.",409)
+        f.class_id=class_id
+        f.monthly_fee=monthly_fee
+        f.effective_from=effective_from
+        f.effective_to=effective_to
+        f.status=status
+        db.session.commit()
+        return ok({"id":f.id,"class_id":f.class_id,"monthly_fee":float(f.monthly_fee),"effective_from":f.effective_from.isoformat(),"effective_to":f.effective_to.isoformat() if f.effective_to else None,"status":f.status},"Fee structure updated")
+    except (TypeError,ValueError,KeyError):
+        db.session.rollback()
+        return err("Please enter valid fee structure details")
+    except IntegrityError:
+        db.session.rollback()
+        return err("Could not update the fee structure.",409)
     except Exception:
-        db.session.rollback();return err("Invalid fee structure")
+        db.session.rollback()
+        return err("Could not update the fee structure. Please try again.",500)
 
 @api.delete("/fee-structures/<int:id>")
 @roles("admin")
 def remove_fee_structure(id):
     f=FeeStructure.query.get(id)
     if not f:return err("Fee structure not found",404)
-    f.status="inactive";db.session.commit();return ok(message="Fee structure deactivated")
+    if f.status!="inactive":
+        return err("Only inactive fee structures can be deleted",409)
+    try:
+        audit(current_user().id,"delete","fee_structure",f.id,f"Deleted inactive fee structure for class {f.class_id}")
+        db.session.delete(f)
+        db.session.commit()
+        return ok(message="Inactive fee structure deleted permanently")
+    except Exception:
+        db.session.rollback()
+        return err("Could not delete fee structure",500)
+
+def oldest_due_month(sid):
+    """Return the oldest unpaid month from the student's fee timeline up to the current IST month."""
+    student=Student.query.get(sid)
+    if not student:
+        return None,None
+    today=today_ist().replace(day=1)
+    starts=[today]
+    if student.admission_date:
+        starts.append(student.admission_date.replace(day=1))
+    assigned=StudentClass.query.filter_by(student_id=sid).all()
+    class_ids={x.class_id for x in assigned}
+    if class_ids:
+        fee_starts=FeeStructure.query.filter(FeeStructure.class_id.in_(class_ids)).with_entities(FeeStructure.effective_from).all()
+        starts.extend(x[0].replace(day=1) for x in fee_starts if x[0])
+    start=min(starts) if starts else today
+    paid_months={p.fee_month.replace(day=1) for p in FeePayment.query.filter_by(student_id=sid).all()}
+    m=start
+    while m<=today:
+        due=applicable_fee(sid,m)
+        if due>0 and m not in paid_months:
+            return m,due
+        m=(m+timedelta(days=32)).replace(day=1)
+    return None,None
 
 def history(sid):
-    pay={p.fee_month:p for p in FeePayment.query.filter_by(student_id=sid).all()};m=date.today().replace(day=1);out=[]
+    pay={p.fee_month:p for p in FeePayment.query.filter_by(student_id=sid).all()};m=today_ist().replace(day=1);out=[]
     for _ in range(12):
-        due=applicable_fee(sid,m);p=pay.get(m);out.append({"month":m.strftime("%Y-%m"),"month_label":m.strftime("%B %Y"),"amount":float(p.amount if p else due),"due_amount":float(due),"status":"PAID" if p else ("DUE" if due else "N/A"),"payment_date":p.payment_date.isoformat() if p else None,"receipt_number":p.receipt_number if p else None});m=(m-timedelta(days=1)).replace(day=1)
+        due=applicable_fee(sid,m);p=pay.get(m);out.append({"month":m.strftime("%Y-%m"),"month_label":m.strftime("%B %Y"),"amount":float(p.amount if p else due),"due_amount":float(due),"status":"PAID" if p else ("DUE" if due else "N/A"),"payment_date":iso_ist(p.payment_date) if p else None,"receipt_number":p.receipt_number if p else None});m=(m-timedelta(days=1)).replace(day=1)
     return out
 
 @api.get("/fees")
 @roles("admin")
 def fees():
-    m=date.fromisoformat((request.args.get("month") or date.today().strftime("%Y-%m"))+"-01");q=request.args.get("q","").lower();st=request.args.get("status","").upper();out=[]
+    m=date.fromisoformat((request.args.get("month") or today_ist().strftime("%Y-%m"))+"-01");q=request.args.get("q","").lower();st=request.args.get("status","").upper();out=[]
     for s in Student.query.filter_by(status="active").all():
         if q not in f"{s.student_id} {s.name} {s.phone or ''}".lower():continue
         due=applicable_fee(s.id,m);p=FeePayment.query.filter_by(student_id=s.id,fee_month=m).first();status="PAID" if p else ("DUE" if due else "N/A")
@@ -629,21 +898,57 @@ def student_fees(id):
     s=Student.query.get(id);u=current_user()
     if not s:return err("Student not found",404)
     if u.role=="student" and s.user_id!=u.id:return err("Unauthorized",403)
-    return ok({"student":student_obj(s,private=u.role=="admin"),"current_monthly_fee":float(applicable_fee(s.id,date.today().replace(day=1))),"history":history(s.id)})
+    oldest_month,oldest_amount=oldest_due_month(s.id)
+    return ok({
+        "student":student_obj(s,private=u.role=="admin"),
+        "current_monthly_fee":float(applicable_fee(s.id,today_ist().replace(day=1))),
+        "oldest_due_month":oldest_month.strftime("%Y-%m") if oldest_month else None,
+        "oldest_due_amount":float(oldest_amount) if oldest_amount is not None else 0,
+        "history":history(s.id)
+    })
 @api.post("/fees/payment")
 @roles("admin")
 def pay_fee():
-    b=request.get_json() or {}
+    b=request.get_json(silent=True) or {}
     try:
-        sid=int(b["student_id"]);m=date.fromisoformat(str(b["month"])+"-01");amount=money(b["amount"]);s=Student.query.get(sid);expected=applicable_fee(sid,m)
-        if not s:return err("Student not found",404)
-        if FeePayment.query.filter_by(student_id=sid,fee_month=m).first():return err("Fee already paid for this month",409)
-        if expected<=0:return err("No fee structure applies to this month")
-        if amount!=expected:return err(f"Amount must equal ₹{expected:.2f}")
-        rno=f"RCPT-{datetime.utcnow():%Y%m%d%H%M%S}-{__import__('secrets').token_hex(2).upper()}"
-        p=FeePayment(student_id=sid,fee_month=m,amount=amount,payment_method=b["payment_method"],collected_by=current_user().id,receipt_number=rno,notes=b.get("notes"));db.session.add(p);db.session.flush();r=Receipt(fee_payment_id=p.id,receipt_number=rno);db.session.add(r);audit(current_user().id,"collect_fee","fee_payment",p.id,rno);db.session.commit();return ok({"id":p.id,"receipt_id":r.id,"receipt_number":rno},"Fee payment recorded",201)
+        sid=int(b.get("student_id")); s=Student.query.get(sid)
+        if not s or s.status!="active": return err("Active student not found",404)
+        oldest_month,oldest_amount=oldest_due_month(sid)
+        requested_month=str(b.get("month") or "").strip()
+        m=date.fromisoformat(requested_month+"-01")
+        amount=money(b.get("amount"))
+        method=str(b.get("payment_method") or "").strip().lower()
+        if method not in ("cash","upi","bank_transfer","other"): return err("Please select a valid payment method")
+        if oldest_month and m!=oldest_month:
+            return err(f"Please collect the oldest due month first: {oldest_month.strftime('%B %Y')}",409)
+        expected=applicable_fee(sid,m)
+        if FeePayment.query.filter_by(student_id=sid,fee_month=m).first(): return err("Fee already paid for this month",409)
+        if expected<=0: return err("No fee structure applies to this month")
+        if amount!=expected: return err(f"Amount must equal ₹{expected:.2f}")
+        rno=f"RCPT-{now_ist():%Y%m%d%H%M%S}-{__import__('secrets').token_hex(2).upper()}"
+        p=FeePayment(student_id=sid,fee_month=m,amount=amount,payment_method=method,collected_by=current_user().id,receipt_number=rno,notes=str(b.get("notes") or "").strip() or None)
+        db.session.add(p); db.session.flush()
+        r=Receipt(fee_payment_id=p.id,receipt_number=rno); db.session.add(r)
+        audit(current_user().id,"collect_fee","fee_payment",p.id,rno); db.session.commit()
+        a=Admin.query.filter_by(user_id=current_user().id).first()
+        sobj=student_obj(s)
+        first=sobj["classes"][0] if sobj["classes"] else {}
+        receipt_data={
+            "receipt_number":rno,
+            "student":s.name,
+            "student_id":s.student_id,
+            "class":first.get("class_name", ""),
+            "teacher":first.get("teacher_name", ""),
+            "fee_month":m.strftime("%B %Y"),
+            "amount":float(p.amount),
+            "payment_method":p.payment_method,
+            "payment_date":iso_ist(p.payment_date),
+            "collected_by":a.name if a else "Admin"
+        }
+        return ok({"id":p.id,"receipt_id":r.id,"receipt_number":rno,"receipt":receipt_data},"Fee payment recorded",201)
     except IntegrityError:db.session.rollback();return err("Duplicate payment",409)
-    except Exception:db.session.rollback();return err("Invalid payment data")
+    except Exception:
+        db.session.rollback();return err("Invalid payment data")
 
 @api.get("/receipts")
 @roles("admin")
@@ -652,7 +957,7 @@ def receipts():
     for r in Receipt.query.order_by(Receipt.generated_at.desc()).all():
         p=FeePayment.query.get(r.fee_payment_id);s=Student.query.get(p.student_id)
         if q and q not in f"{r.receipt_number} {s.student_id} {s.name}".lower():continue
-        out.append({"id":r.id,"receipt_number":r.receipt_number,"student_name":s.name,"student_id":s.student_id,"month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"method":p.payment_method,"generated_at":r.generated_at.isoformat()})
+        out.append({"id":r.id,"receipt_number":r.receipt_number,"student_name":s.name,"student_id":s.student_id,"month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"method":p.payment_method,"generated_at":iso_ist(r.generated_at)})
     return ok(out)
 @api.get("/receipts/<int:id>")
 @roles("admin")
@@ -660,7 +965,7 @@ def receipt(id):
     r=Receipt.query.get(id)
     if not r:return err("Receipt not found",404)
     p=FeePayment.query.get(r.fee_payment_id);s=Student.query.get(p.student_id);a=Admin.query.filter_by(user_id=p.collected_by).first()
-    return ok({"receipt_number":r.receipt_number,"student":s.name,"student_id":s.student_id,"class":student_obj(s)["classes"][0]["class_name"] if student_obj(s)["classes"] else "","teacher":student_obj(s)["classes"][0]["teacher_name"] if student_obj(s)["classes"] else "","fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"payment_method":p.payment_method,"payment_date":p.payment_date.isoformat(),"collected_by":a.name if a else "Admin"})
+    return ok({"receipt_number":r.receipt_number,"student":s.name,"student_id":s.student_id,"class":student_obj(s)["classes"][0]["class_name"] if student_obj(s)["classes"] else "","teacher":student_obj(s)["classes"][0]["teacher_name"] if student_obj(s)["classes"] else "","fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin"})
 
 def teacher_for_user():
     return Teacher.query.filter_by(user_id=current_user().id).first()
@@ -670,7 +975,7 @@ def student_for_user():
 @api.get("/teacher/dashboard")
 @roles("teacher")
 def teacher_dashboard():
-    t=teacher_for_user();alloc=TeacherClass.query.filter_by(teacher_id=t.id,status="active").all();ids={x.student_id for a in alloc for x in StudentClass.query.filter_by(class_id=a.class_id,status="active").all()};today=date.today()
+    t=teacher_for_user();alloc=TeacherClass.query.filter_by(teacher_id=t.id,status="active").all();ids={x.student_id for a in alloc for x in StudentClass.query.filter_by(class_id=a.class_id,status="active").all()};today=today_ist()
     return ok({"teacher":teacher_obj(t),"total_students":len(ids),"total_classes":len(alloc),"todays_classes":[class_obj(Class.query.get(a.class_id))|{"start_time":a.start_time.strftime("%H:%M"),"end_time":a.end_time.strftime("%H:%M")} for a in alloc if a.day_of_week==today.weekday()],"pending_homework":Homework.query.filter_by(teacher_id=t.id).filter(Homework.due_date>=today).count(),"recent_classwork":[classwork_obj(x) for x in Classwork.query.filter_by(teacher_id=t.id).order_by(Classwork.work_date.desc()).limit(5).all()]})
 @api.get("/teacher/students")
 @roles("teacher")
@@ -932,4 +1237,4 @@ def student_teacher():
 
 @api.get("/audit-logs")
 @roles("admin")
-def audits():return ok([{"id":x.id,"action":x.action,"entity_type":x.entity_type,"entity_id":x.entity_id,"description":x.description,"created_at":x.created_at.isoformat()} for x in AuditLog.query.order_by(AuditLog.created_at.desc()).limit(200).all()])
+def audits():return ok([{"id":x.id,"action":x.action,"entity_type":x.entity_type,"entity_id":x.entity_id,"description":x.description,"created_at":iso_ist(x.created_at)} for x in AuditLog.query.order_by(AuditLog.created_at.desc()).limit(200).all()])

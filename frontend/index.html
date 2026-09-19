@@ -825,12 +825,20 @@
                     phone: form.phone.value.trim(),
                     message: form.message.value.trim()
                 };
-                const response = await fetch(`${LANDING_API}/public/enquiries`, {
+                let response = await fetch(`${LANDING_API}/public/enquiries`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 });
-                const data = await response.json();
+                // Compatibility fallback for an older deployed API.
+                if (response.status === 404) {
+                    response = await fetch(`${LANDING_API}/enquiries`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload)
+                    });
+                }
+                const data = await response.json().catch(() => ({}));
                 if (!response.ok || data.success === false) throw new Error(data.message || 'Could not send your message.');
                 form.reset();
                 showMessage(`Enquiry sent successfully${data.data?.id ? ` · Reference #${data.data.id}` : ''}. Our admin will contact you.`);
