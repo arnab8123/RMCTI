@@ -1,0 +1,1140 @@
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}a{text-decoration:none;color:inherit}button,input,select,textarea{font:inherit}
+/* Login page: centered, compact card on every viewport. */
+.login-page{min-height:100vh;min-height:100dvh;width:100%;display:grid;place-items:center;padding:24px}
+.login-card{width:min(100%,390px);max-width:390px;margin:auto;border-radius:18px;overflow:hidden;padding:24px}
+.login-card .brand{padding-bottom:14px}
+.login-card h1{margin-top:14px;margin-bottom:12px}
+.login-card form{display:grid;gap:2px}
+.login-card .input{width:100%;max-width:100%}
+.login-card .btn{align-self:flex-start}
+button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s ease,filter .16s ease,background-color .16s ease}.hidden{display:none}.muted{color:var(--muted)}.app{display:grid;grid-template-columns:250px 1fr;min-height:100vh}.side{position:sticky;top:0;height:100vh;background:var(--sidebar);color:#fff;padding:18px 12px;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-ms-overflow-style:none}.side::-webkit-scrollbar{width:0;height:0;display:none}.brand{display:flex;align-items:center;gap:10px;font-weight:800;padding:8px 10px 20px}.brandlogo{width:40px;height:40px;flex:0 0 40px;display:block;object-fit:contain;border-radius:10px;background:#fff;padding:2px}.brandmark{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--primary)}.nav{display:grid;gap:4px}.nav a,.nav button{border:0;background:transparent;color:#cbd5e1;text-align:left;padding:10px 12px;border-radius:10px;display:flex;align-items:center;gap:8px}.nav a:hover,.nav button:hover{background:var(--sidebar-hover);color:#fff}.main{min-width:0}.top{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center;padding:14px 22px;background:var(--surface);border-bottom:1px solid var(--border)}.menu{display:none}.content{padding:22px}.grid{display:grid;gap:16px}.g2{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(3,minmax(0,1fr))}.g4{grid-template-columns:repeat(4,minmax(0,1fr))}.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}.pad{padding:18px}.stat{padding:18px;display:block}.statv{font-size:30px;font-weight:800;margin-top:7px}.toolbar{display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap;margin-bottom:14px}.left,.right{display:flex;gap:8px;flex-wrap:wrap}.input,.select,.textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text)}.label{display:block;font-size:13px;font-weight:650;margin:0 0 6px}.form{display:grid;gap:14px;grid-template-columns:repeat(2,minmax(0,1fr))}.full{grid-column:1/-1}.btn{margin:5px;padding:10px 14px;border:0;border-radius:10px;font-weight:700;cursor:pointer;transition:transform .16s ease,box-shadow .16s ease,filter .16s ease,background-color .16s ease}.btn:hover:not(:disabled),button:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 5px 14px rgba(15,23,42,.14);filter:brightness(1.04)}.btn:active:not(:disabled),button:active:not(:disabled){transform:translateY(0);box-shadow:none}.btn:disabled,button:disabled{cursor:not-allowed;opacity:.65}.primary{background:var(--primary);color:#fff}.secondary{background:var(--muted-surface);color:var(--text);border:1px solid var(--border)}.success{background:var(--success);color:#fff}.danger{background:var(--danger);color:#fff}.warning{background:var(--warning);color:#111827}.small{padding:7px 9px;font-size:12px}.table{overflow:auto}table{width:100%;border-collapse:collapse}th,td{padding:11px;border-bottom:1px solid var(--border);text-align:left;font-size:13px}th{font-size:11px;color:var(--muted);text-transform:uppercase}.badge{display:inline-block;padding:5px 8px;border-radius:99px;font-size:11px;font-weight:800}.paid,.active{color:var(--success);background:color-mix(in srgb,var(--success) 15%,transparent)}.due{color:var(--danger);background:color-mix(in srgb,var(--danger) 15%,transparent)}.inactive{color:var(--muted);background:var(--muted-surface)}.empty,.loading{text-align:center;padding:28px;color:var(--muted)}.modalbg{position:fixed;inset:0;background:#0008;display:grid;place-items:center;z-index:50;padding:20px}.modal{width:min(820px,100%);max-height:calc(100vh - 40px);display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:16px}.modalhead{padding:16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between}.modalbody{padding:18px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;min-height:0}/* Desktop profile photo sizing: keep portal photos contained instead of rendering at natural image size. */
+.teacher-students-table tr.teacher-student-row td.photo-cell {
+  width: 78px;
+  min-width: 78px;
+  max-width: 78px;
+  vertical-align: middle;
+}
+.teacher-students-table .passport-thumb {
+  display: block;
+  width: 56px;
+  height: 72px;
+  max-width: 56px;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--muted-surface);
+}
+/* Desktop student portal teacher cards: keep the teacher photo compact on the right. */
+.teacher-card {
+  min-width: 0;
+}
+.teacher-card-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+.teacher-card-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.teacher-card .passport-photo {
+  width: 72px;
+  height: 92px;
+  max-width: 72px;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 9px;
+  flex: 0 0 72px;
+  border: 1px solid var(--border);
+  background: var(--muted-surface);
+}
+
+/* Admin ID cards: real ID-card proportions, with contained profile images on desktop and mobile. */
+.id-card-modal {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+.id-card-export {
+  width: min(100%, 540px);
+  max-width: 540px;
+  min-width: 0;
+}
+.id-card {
+  width: 100%;
+  aspect-ratio: 1.586 / 1;
+  min-height: 0;
+  padding: 18px;
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 18px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--surface), var(--muted-surface));
+  box-shadow: 0 10px 28px rgba(15,23,42,.14);
+  position: relative;
+}
+.id-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 6px;
+  background: linear-gradient(90deg, var(--primary), var(--secondary));
+}
+.id-photo {
+  width: 104px;
+  height: 132px;
+  max-width: 104px;
+  display: block;
+  align-self: center;
+  object-fit: cover;
+  object-position: center;
+  border: 3px solid var(--surface);
+  outline: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--muted-surface);
+}
+.id-card > div {
+  min-width: 0;
+  overflow: hidden;
+}
+.id-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding-bottom: 8px;
+  margin-bottom: 7px;
+  border-bottom: 1px solid var(--border);
+}
+.id-logo {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  display: block;
+  object-fit: contain;
+  border-radius: 7px;
+  background: #fff;
+  padding: 2px;
+}
+.id-head > div {
+  min-width: 0;
+}
+.id-head b {
+  display: block;
+  font-size: 18px;
+  line-height: 1.05;
+  letter-spacing: .04em;
+}
+.id-head .muted {
+  font-size: 9px;
+  margin-top: 3px;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.id-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+.id-field {
+  min-width: 0;
+  line-height: 1.15;
+  overflow: hidden;
+}
+.id-field b {
+  display: block;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.05;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 2px;
+}
+.id-field span {
+  display: block;
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notification-dot{width:8px;height:8px;min-width:8px;border-radius:50%;background:#ef4444;display:inline-block;box-shadow:0 0 0 3px rgba(239,68,68,.16);margin-left:auto}.password-tools{display:flex;gap:8px;align-items:center}.password-tools .input{flex:1}.success-panel{padding:8px 2px}.credential-value{display:inline-block;padding:6px 10px;border-radius:8px;background:var(--muted-surface);border:1px solid var(--border);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em}.toast{position:fixed;right:18px;top:18px;z-index:100;background:var(--surface);border:1px solid var(--border);padding:12px 14px;border-radius:10px;box-shadow:var(--shadow)}.calendar{display:grid;grid-template-columns:repeat(7,minmax(140px,1fr));overflow:auto}.day{min-height:150px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:10px}.item{margin-top:8px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--muted-surface)}@media(max-width:1100px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Mobile-only layout. Desktop/computer rules above are intentionally unchanged. */
+@media (max-width: 767px) {
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    min-width: 0;
+  }
+
+  .app,
+  .main,
+  .content,
+  .grid,
+  .g2,
+  .g3,
+  .g4,
+  .form,
+  .toolbar,
+  .card,
+  .pad,
+  .item,
+  .class-admin-grid,
+  .class-admin-card,
+  .class-admin-meta,
+  .class-admin-schedule,
+  .person-detail-head,
+  .teacher-card,
+  .teacher-card-main,
+  .teacher-card-info,
+  .password-tools,
+  .left,
+  .right {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .app {
+    display: block;
+    width: 100%;
+  }
+
+  .main {
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .content {
+    width: 100%;
+    padding: 12px 10px 26px;
+    overflow: visible;
+  }
+
+  .top {
+    width: 100%;
+    min-height: 56px;
+    padding: 9px 10px;
+    gap: 8px;
+  }
+
+  .top > * {
+    min-width: 0;
+  }
+
+  .top b {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    min-width: 42px;
+    width: 42px;
+    min-height: 42px;
+    padding: 8px;
+  }
+
+  .side {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(280px, 86vw);
+    max-width: 86vw;
+    height: 100dvh;
+    left: calc(-1 * min(300px, 90vw));
+    z-index: 40;
+    padding: 13px 9px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    transition: left .2s ease, box-shadow .2s ease;
+  }
+
+  .side.open {
+    left: 0;
+    box-shadow: 12px 0 34px rgba(15,23,42,.24);
+  }
+
+  .brand {
+    padding: 6px 8px 14px;
+  }
+
+  .brandlogo {
+    width: 40px;
+    height: 40px;
+  }
+
+  .nav {
+    gap: 3px;
+  }
+
+  .nav a,
+  .nav button {
+    width: 100%;
+    min-height: 44px;
+    padding: 11px 12px;
+  }
+
+  .content h1 {
+    font-size: 26px;
+    line-height: 1.12;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .content h2 { font-size: 21px; line-height: 1.18; }
+  .content h3 { font-size: 17px; line-height: 1.2; }
+
+  .grid,
+  .g2,
+  .g3,
+  .g4,
+  .form {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 11px;
+  }
+
+  .card {
+    width: 100%;
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .pad {
+    padding: 13px;
+  }
+
+  .stat {
+    width: 100%;
+    padding: 14px;
+  }
+
+  .statv {
+    font-size: 25px;
+    overflow-wrap: anywhere;
+  }
+
+  .toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .toolbar .left,
+  .toolbar .right {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .toolbar .left > *,
+  .toolbar .right > * {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .left,
+  .right {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .left > *,
+  .right > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .input,
+  .select,
+  .textarea,
+  input[type="file"] {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    font-size: 16px;
+  }
+
+  .input,
+  .select {
+    padding: 11px 12px;
+  }
+
+  .textarea {
+    padding: 11px 12px;
+    min-height: 108px;
+    resize: vertical;
+  }
+
+  .form > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .full {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .password-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    align-items: stretch;
+  }
+
+  .password-tools .input {
+    width: 100%;
+  }
+
+  .btn,
+  button {
+    max-width: 100%;
+    min-height: 42px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .small {
+    min-height: 38px;
+  }
+
+  /* Convert every normal data table into a vertical mobile detail card. */
+  .table,
+  .mobile-stack-table {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow: visible;
+    border-radius: 14px;
+  }
+
+  .mobile-stack-table table {
+    display: block;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .mobile-stack-table thead,
+  .mobile-stack-table .mobile-table-header {
+    display: none !important;
+  }
+
+  .mobile-stack-table tbody {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .mobile-stack-table tr {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 0 0 9px;
+    padding: 10px 11px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: 0 4px 14px rgba(15,23,42,.045);
+    overflow: hidden;
+  }
+
+  .mobile-stack-table td {
+    display: grid;
+    grid-template-columns: minmax(78px, 34%) minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding: 6px 0;
+    border: 0;
+    text-align: left;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .mobile-stack-table td::before {
+    content: attr(data-label);
+    min-width: 0;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .035em;
+    line-height: 1.25;
+  }
+
+  .mobile-stack-table td > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .mobile-stack-table td[colspan] {
+    display: block;
+    padding: 17px 8px;
+    text-align: center;
+  }
+
+  .mobile-stack-table td[colspan]::before {
+    display: none;
+  }
+
+  .mobile-stack-table td[data-label="Complaint"],
+  .mobile-stack-table td[data-label="Description"] {
+    display: block;
+    text-align: left;
+  }
+
+  .mobile-stack-table td[data-label="Complaint"]::before,
+  .mobile-stack-table td[data-label="Description"]::before {
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .mobile-stack-table td[data-label="Action"] {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 5px;
+  }
+
+  .mobile-stack-table td[data-label="Action"]::before {
+    flex: 0 0 34%;
+  }
+
+  .mobile-stack-table td[data-label="Action"] .btn {
+    margin: 0;
+    flex: 1 1 auto;
+  }
+
+  .mobile-stack-table td.photo-cell {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    min-height: 66px;
+  }
+
+  .mobile-stack-table td.photo-cell::before {
+    display: none;
+  }
+
+  .mobile-stack-table img {
+    max-width: 100%;
+  }
+
+  /* Teacher portal: compact student cards with the photo anchored at top-right. */
+  .teacher-students-table {
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
+    border-radius: 14px;
+  }
+
+  .teacher-students-table table {
+    display: block;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .teacher-students-table thead {
+    display: none !important;
+  }
+
+  .teacher-students-table tbody {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .teacher-students-table tr.teacher-student-row {
+    position: relative;
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 0 0 9px;
+    padding: 10px 92px 10px 11px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: 0 4px 14px rgba(15,23,42,.045);
+    overflow: hidden;
+  }
+
+  .teacher-students-table tr.teacher-student-row td {
+    display: grid;
+    grid-template-columns: minmax(54px, 30%) minmax(0, 1fr);
+    align-items: start;
+    gap: 7px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 5px 0;
+    border: 0;
+    text-align: left;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .teacher-students-table tr.teacher-student-row td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .035em;
+    line-height: 1.25;
+  }
+
+  .teacher-students-table tr.teacher-student-row td > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .teacher-students-table tr.teacher-student-row td[data-label="Action"] {
+    display: grid;
+    grid-template-columns: minmax(54px, 30%) minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .teacher-students-table tr.teacher-student-row td[data-label="Action"] .btn {
+    width: 100%;
+    margin: 0;
+  }
+
+  .teacher-students-table tr.teacher-student-row td.photo-cell {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 68px;
+    min-width: 68px;
+    max-width: 68px;
+    min-height: 0;
+    padding: 0;
+    display: block;
+    z-index: 1;
+  }
+
+  .teacher-students-table tr.teacher-student-row td.photo-cell::before {
+    display: none;
+  }
+
+  .teacher-students-table tr.teacher-student-row .passport-thumb {
+    display: block;
+    width: 56px;
+    height: 72px;
+    max-width: 56px;
+    object-fit: cover;
+    border-radius: 8px;
+    margin-left: auto;
+    border: 1px solid var(--border);
+    background: var(--muted-surface);
+  }
+
+  /* Student/teacher profile tiles. */
+  .teacher-card {
+    width: 100%;
+    min-height: 0;
+    padding: 13px;
+  }
+
+  .teacher-card-main {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .teacher-card-info {
+    flex: 1 1 auto;
+  }
+
+  .teacher-card-info h3,
+  .teacher-card-info p,
+  .teacher-card-info .muted,
+  .teacher-card-class,
+  .person-detail-head,
+  .person-detail-head p {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .teacher-card-info p {
+    margin: .42rem 0 0;
+    font-size: 13px;
+  }
+
+  .teacher-card-class {
+    margin-top: 11px;
+    padding-top: 10px;
+  }
+
+  .passport-photo {
+    width: 70px;
+    height: 92px;
+    max-width: 70px;
+    object-fit: cover;
+    border-radius: 9px;
+    flex: 0 0 auto;
+  }
+
+  .passport-thumb {
+    width: 52px;
+    height: 66px;
+    max-width: 52px;
+    object-fit: cover;
+    border-radius: 7px;
+    flex: 0 0 auto;
+  }
+
+  .person-detail-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .person-detail-head > * {
+    min-width: 0;
+  }
+
+  .person-detail-head .passport-photo {
+    width: 76px;
+    height: 98px;
+    max-width: 76px;
+  }
+
+  .class-admin-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 11px;
+  }
+
+  .class-admin-card {
+    padding: 13px;
+    overflow: hidden;
+  }
+
+  .class-admin-head {
+    gap: 8px;
+  }
+
+  .class-admin-head > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .class-admin-meta {
+    flex-direction: column;
+    gap: 7px;
+    margin-top: 11px;
+    padding: 10px;
+  }
+
+  .class-admin-schedule > div {
+    flex-direction: column;
+    gap: 5px;
+    padding: 9px 10px;
+  }
+
+  .class-admin-schedule span {
+    text-align: left;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* Modals: never exceed the phone viewport and keep their own vertical scroll. */
+  .modalbg {
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    padding: 7px;
+    align-items: center;
+    overflow: hidden;
+  }
+
+  .modal {
+    width: 100% !important;
+    max-width: calc(100vw - 14px) !important;
+    min-width: 0 !important;
+    max-height: calc(100dvh - 14px) !important;
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .modalhead {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 12px;
+  }
+
+  .modalhead > b {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .modalhead .btn {
+    width: 42px !important;
+    min-width: 42px;
+    flex: 0 0 42px;
+    padding: 8px;
+  }
+
+  .modalbody {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding: 12px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .modalbody > *,
+  .modalbody .form > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .modalbody .right {
+    width: 100%;
+  }
+
+  .modalbody .table {
+    overflow: visible;
+  }
+
+  /* Receipts / ID cards fit the viewport rather than forcing an oversized document. */
+  .receipt-preview-wrap,
+  .receipt-print-card,
+  .id-card-modal,
+  .id-card-export,
+  .id-card-export .id-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .id-card {
+    width: 100% !important;
+    aspect-ratio: 1.586 / 1;
+    grid-template-columns: 25% minmax(0, 1fr);
+    gap: 8px;
+    padding: 11px;
+    border-radius: 12px;
+  }
+
+  .id-photo {
+    width: 100%;
+    height: auto;
+    max-width: 100%;
+    aspect-ratio: 0.79 / 1;
+    align-self: center;
+    border-width: 2px;
+    border-radius: 7px;
+  }
+
+  .id-head {
+    gap: 6px;
+    padding-bottom: 5px;
+    margin-bottom: 5px;
+  }
+
+  .id-logo {
+    width: 27px;
+    height: 27px;
+    flex-basis: 27px;
+    border-radius: 5px;
+  }
+
+  .id-head b {
+    font-size: clamp(12px, 3.7vw, 16px);
+  }
+
+  .id-head .muted {
+    font-size: 7px;
+  }
+
+  .id-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3px 6px;
+  }
+
+  .id-field b {
+    font-size: 6px;
+  }
+
+  .id-field span {
+    font-size: clamp(7px, 2vw, 9px);
+  }
+
+  /* Generated receipt markup contains inline desktop widths; mobile overrides keep it inside the card. */
+  .receipt-doc,
+  .receipt-doc > div {
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .receipt-doc > div:first-child {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+    padding: 15px 14px !important;
+    gap: 10px !important;
+  }
+
+  .receipt-doc > div:first-child > * {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .receipt-doc > div:first-child img {
+    width: 46px !important;
+    height: 46px !important;
+  }
+
+  .receipt-doc > div:first-child > div:last-child {
+    margin-left: auto;
+    text-align: right;
+  }
+
+  .receipt-doc > div:nth-child(2) {
+    padding: 16px 14px !important;
+  }
+
+  .receipt-doc > div:nth-child(2) > div:first-child {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px !important;
+  }
+
+  .receipt-doc > div:nth-child(2) > div:last-child,
+  .receipt-doc > div:nth-child(2) > div:nth-last-child(2) {
+    min-width: 0 !important;
+    flex-wrap: wrap;
+  }
+
+  .receipt-doc span,
+  .receipt-doc div,
+  .receipt-doc b {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* Weekly routine is stacked vertically for readability on phones. */
+  .calendar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  .calendar .day {
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+    border-right: 0;
+  }
+
+  /* Attendance calendar stays a compact seven-column calendar. */
+  .attendance-calendar {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .att-day {
+    min-width: 0;
+    min-height: 44px;
+  }
+
+  .att-date-number {
+    width: 26px;
+    height: 26px;
+    font-size: 11px;
+  }
+
+  .att-weekday {
+    min-width: 0;
+    padding: 8px 1px;
+    font-size: 9px;
+  }
+
+  .attendance-topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .attendance-nav {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .attendance-month {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .attendance-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .item,
+  .complaint-description,
+  .complaint-readonly p {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .toast {
+    left: 10px;
+    right: 10px;
+    top: 10px;
+    max-width: calc(100vw - 20px);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .login-page {
+    width: 100%;
+    min-height: 100dvh;
+    padding: 14px;
+  }
+
+  .login-card {
+    width: min(100%, 380px);
+    max-width: 380px;
+  }
+
+  .login-card .card,
+  .login-card .btn,
+  .login-card .input {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 390px) {
+  .content { padding-left: 8px; padding-right: 8px; }
+  .pad { padding: 11px; }
+  .passport-photo { width: 64px; height: 84px; max-width: 64px; }
+  .person-detail-head .passport-photo { width: 70px; height: 90px; max-width: 70px; }
+  .modalbody { padding: 10px; }
+  .mobile-stack-table tr { padding: 9px 10px; }
+  .mobile-stack-table td { grid-template-columns: minmax(70px, 32%) minmax(0, 1fr); gap: 7px; }
+  .mobile-stack-table td::before { font-size: 9px; }
+  .statv { font-size: 23px; }
+}
+
+@media print {
+  .side,
+  .top,
+  .no-print { display: none !important; }
+  .app { display: block; }
+  .content { padding: 0; }
+  .card { box-shadow: none; }
+  body { background: #fff; color: #111; }
+}
+
+/* Admin edit teacher/student profile image picker */
+.edit-photo-picker{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  width:100%;
+  min-width:0;
+  padding:10px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--muted-surface);
+}
+.edit-photo-preview-wrap{
+  width:82px;
+  height:104px;
+  flex:0 0 82px;
+  overflow:hidden;
+  border:1px solid var(--border);
+  border-radius:9px;
+  background:var(--surface);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.edit-photo-preview{
+  display:block;
+  width:100%;
+  height:100%;
+  max-width:100%;
+  object-fit:cover;
+  object-position:center;
+}
+.edit-photo-preview.is-cleared{opacity:.55}
+.edit-photo-controls{
+  flex:1 1 auto;
+  min-width:0;
+}
+.edit-photo-file-label{margin-bottom:6px}
+.edit-photo-file{
+  display:block;
+  width:100%;
+  min-width:0;
+}
+.edit-photo-remove{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  margin-top:9px;
+  font-size:12px;
+  color:var(--text);
+  cursor:pointer;
+}
+.edit-photo-remove input{
+  width:15px;
+  height:15px;
+  margin:0;
+  flex:0 0 auto;
+}
+@media (max-width:600px){
+  .edit-photo-picker{align-items:center;gap:10px;padding:9px}
+  .edit-photo-preview-wrap{width:72px;height:92px;flex-basis:72px}
+  .edit-photo-file{font-size:12px;padding:8px}
+  .edit-photo-remove{margin-top:8px}
+}
