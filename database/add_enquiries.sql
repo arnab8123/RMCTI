@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS enquiries (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ name VARCHAR(150) NOT NULL,
+ phone VARCHAR(30) NOT NULL,
+ message TEXT NOT NULL,
+ status ENUM('new','read','resolved') NOT NULL DEFAULT 'new',
+ admin_note TEXT NULL,
+ created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+ INDEX idx_enquiries_status_created(status,created_at)
+) ENGINE=InnoDB;
