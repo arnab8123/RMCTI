@@ -17,13 +17,24 @@ const Page = (() => {
   function idCard(person,kind) {
     const isStudent=kind==='student';
     const fields=isStudent
-      ? [['Name',person.name],['ID',person.student_id],['Course', (person.classes||[]).map(c=>c.class_name).join(', ')||'—'],['Phone',person.phone],['DOB',person.dob],['Status',person.status]]
-      : [['Name',person.name],['ID',person.teacher_id],['Qualification',person.qualification],['Experience',person.experience],['Phone',person.phone],['Status',person.status]];
+      ? [['Name',person.name,true],['Student ID',person.student_id,true],['Phone',person.phone],['Date of Birth',person.dob],['Address',person.address]]
+      : [['Name',person.name,true],['Teacher ID',person.teacher_id,true],['Phone',person.phone],['Email',person.email],['Date of Birth',person.dob],['Address',person.address]];
     const target=`id-card-${kind}-${person.id}`;
-    const title=isStudent?'Student Identification Card':'Teacher Identification Card';
     return `<div class="id-card-modal"><div id="${target}" class="id-card-export"><div class="id-card">
-      <div class="id-card-header"><div class="id-card-brand"><img class="id-logo" crossorigin="anonymous" src="${U.photoUrl('/asset/image.jpeg')}" alt="RMCTI"><div><b>RMCTI</b><strong>Ratna's Modern Computer Training Institute</strong></div></div><span class="id-card-type">${title}</span></div>
-      <div class="id-card-body"><div class="id-card-details">${fields.map(([k,v])=>`<div class="id-field ${k==='Name'||k==='ID'?'important':''}"><b>${U.esc(k)}</b><span>${U.esc(v||'—')}</span></div>`).join('')}</div><div class="id-photo-wrap"><img class="id-photo" crossorigin="anonymous" src="${U.photoUrl(person.photo)}" alt="${U.esc(person.name)} photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}'"><small>PHOTO</small></div></div>
+      <div class="id-card-header">
+        <div class="id-card-brand">
+          <img class="id-logo" crossorigin="anonymous" src="${U.photoUrl('/asset/image.jpeg')}" alt="RMCTI">
+          <div><b>RMCTI</b><strong>Ratna's Modern Computer Training Institute</strong></div>
+        </div>
+      </div>
+      <div class="id-card-body">
+        <div class="id-photo-wrap">
+          <img class="id-photo" crossorigin="anonymous" src="${U.photoUrl(person.photo)}" alt="${U.esc(person.name)} photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}'">
+        </div>
+        <div class="id-card-details">
+          ${fields.map(([k,v,important])=>`<div class="id-field ${important?'important':''}"><b>${U.esc(k)}</b><span>${U.esc(v||'—')}</span></div>`).join('')}
+        </div>
+      </div>
     </div></div><div class="right" style="justify-content:flex-end;margin-top:14px"><button type="button" class="btn secondary" data-download-id-card data-target-id="${target}">Download JPEG</button><button type="button" class="btn primary" data-close>Close</button></div></div>`;
   }
 
