@@ -323,6 +323,59 @@
             opacity: 0.8;
         }
 
+        /* RMCTI landing page refinements */
+        .est-badge { display:flex; align-items:center; gap:9px; }
+        .est-badge img { width:34px; height:34px; object-fit:contain; background:#fff; border-radius:50%; padding:3px; }
+        .faculty-heading { display:flex; flex-direction:column; align-items:center; gap:10px; }
+        .faculty-heading img { width:64px; height:64px; object-fit:contain; background:#fff; border-radius:18px; padding:6px; box-shadow:0 8px 22px rgba(11,26,48,.14); border:1px solid rgba(11,26,48,.08); }
+        .whatsapp-section { margin: 0 auto; max-width: 1200px; padding: 18px 24px; }
+        .whatsapp-card { display:flex; align-items:center; justify-content:space-between; gap:24px; padding:24px 28px; border-radius:22px; background:linear-gradient(135deg,#0b1a30,#004b87); color:#fff; box-shadow:0 16px 40px rgba(11,26,48,.16); }
+        .whatsapp-card h3 { margin:0 0 5px; font-size:1.35rem; }
+        .whatsapp-card p { margin:0; color:rgba(255,255,255,.78); }
+        .whatsapp-btn { display:inline-flex; align-items:center; justify-content:center; gap:9px; flex:0 0 auto; background:#25D366; color:#fff; padding:12px 20px; border-radius:999px; font-weight:800; box-shadow:0 8px 20px rgba(37,211,102,.28); }
+        .whatsapp-btn:hover { transform:translateY(-2px); filter:brightness(1.04); }
+        .gallery-item { cursor:pointer; }
+        .gallery-lightbox[hidden] { display:none !important; }
+        .gallery-lightbox { position:fixed; inset:0; z-index:20000; background:rgba(3,10,20,.9); display:flex; align-items:center; justify-content:center; padding:18px; }
+        .gallery-lightbox-panel { width:min(1100px,100%); max-height:94vh; overflow:auto; background:var(--background); border-radius:22px; padding:18px; box-shadow:0 25px 80px rgba(0,0,0,.35); }
+        .gallery-lightbox-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+        .gallery-lightbox-head h3 { margin:0; color:var(--primary-dark); font-size:1.25rem; }
+        .gallery-close { width:42px; height:42px; border:0; border-radius:50%; background:var(--primary-dark); color:#fff; font-size:22px; cursor:pointer; }
+        .gallery-lightbox-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+        .gallery-lightbox-grid img { width:100%; aspect-ratio:3/2; object-fit:cover; border-radius:14px; cursor:pointer; border:3px solid transparent; transition:.2s ease; }
+        .gallery-lightbox-grid img:hover,.gallery-lightbox-grid img.active { border-color:var(--accent); transform:translateY(-2px); }
+        .gallery-selected { width:100%; max-height:52vh; object-fit:contain; background:#07111f; border-radius:16px; margin-bottom:14px; }
+        @media (max-width: 640px) {
+            body { overflow-x:hidden; }
+            main.pt-32 { padding-top:88px !important; }
+            #home { min-height:calc(100dvh - 72px); padding:28px 16px 44px !important; }
+            #home .reveal { width:100%; margin-top:0; }
+            #home h1 { font-size:clamp(2.05rem,9vw,2.8rem); line-height:1.08; margin-bottom:16px; }
+            #home p { font-size:.98rem; line-height:1.6; margin-bottom:24px; }
+            #home .flex.flex-col.sm\:flex-row { width:100%; }
+            #home .flex.flex-col.sm\:flex-row a { width:100%; padding:13px 16px !important; font-size:.98rem; }
+            #about, #gallery { padding-left:16px !important; padding-right:16px !important; padding-top:52px !important; padding-bottom:52px !important; }
+            #about .grid { gap:24px !important; }
+            #about .grid-cols-2 { gap:10px !important; }
+            #about .glass-card { padding:12px !important; }
+            #teachers { padding-top:52px !important; padding-bottom:52px !important; }
+            #teachers > div, #admission > div, #contact > div { padding-left:16px !important; padding-right:16px !important; }
+            #teachers .grid { gap:16px !important; }
+            #teachers .glass-card { width:100%; }
+            #admission { padding-top:52px !important; padding-bottom:52px !important; }
+            #admission .glass-card { padding:20px !important; }
+            #contact { padding-top:52px !important; padding-bottom:52px !important; }
+            .whatsapp-section { padding:10px 16px 22px; }
+            .whatsapp-card { flex-direction:column; align-items:stretch; text-align:center; padding:20px 16px; gap:15px; }
+            .whatsapp-btn { width:100%; }
+            .gallery-lightbox { padding:10px; }
+            .gallery-lightbox-panel { padding:12px; border-radius:16px; }
+            .gallery-lightbox-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+            .gallery-selected { max-height:38vh; }
+            .gallery-item { height:190px !important; }
+            .gallery-overlay { opacity:.7; }
+        }
+
         ::-webkit-scrollbar {
             width: 10px;
         }
@@ -439,8 +492,9 @@
                     <div class="reveal-left">
                         <div class="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-white dark:border-gray-800">
                             <img src="https://placehold.co/800x600/0b1a30/ffffff?text=RMCTI+Center" alt="Institute" class="w-full h-auto object-cover hover:scale-105 transition-transform duration-700">
-                            <div class="absolute bottom-0 left-0 bg-rmcti-gold text-white p-4 rounded-tr-2xl font-bold text-xl">
-                                Est. 2019
+                            <div class="absolute bottom-0 left-0 bg-rmcti-gold text-white px-4 py-3 rounded-tr-2xl font-bold text-xl est-badge">
+                                <img src="asset/image.jpeg" alt="RMCTI">
+                                <span>Est. 2019</span>
                             </div>
                         </div>
                     </div>
@@ -470,12 +524,25 @@
                 </div>
             </section>
 
+            <section class="whatsapp-section relative z-10" aria-label="WhatsApp chat">
+                <div class="whatsapp-card reveal">
+                    <div>
+                        <h3><i class="fab fa-whatsapp mr-2"></i>Have a question about RMCTI?</h3>
+                        <p>Chat with us directly on WhatsApp for admission, courses, fees and other enquiries.</p>
+                    </div>
+                    <a class="whatsapp-btn" href="https://wa.me/message/MVTJF7S3XSEGM1" target="_blank" rel="noopener noreferrer">
+                        <i class="fab fa-whatsapp text-xl"></i> Chat on WhatsApp
+                    </a>
+                </div>
+            </section>
+
             <section id="teachers" class="py-20 bg-black/5 dark:bg-white/5 relative z-10">
                 <div class="max-w-7xl mx-auto px-6">
-                    <div class="text-center mb-16 reveal">
-                        <h2 class="text-3xl md:text-4xl font-bold mb-4" style="color: var(--primary-dark)">Our Expert Faculty</h2>
+                    <div class="text-center mb-16 reveal faculty-heading">
+                        <img src="asset/image.jpeg" alt="RMCTI Faculty">
+                        <h2 class="text-3xl md:text-4xl font-bold mb-1" style="color: var(--primary-dark)">Our Expert Faculty</h2>
                         <div class="w-24 h-1 bg-rmcti-gold mx-auto rounded-full"></div>
-                        <p class="mt-4 max-w-2xl mx-auto" style="color: var(--text-light)">Learn directly from experienced professionals dedicated to your success.</p>
+                        <p class="mt-2 max-w-2xl mx-auto" style="color: var(--text-light)">Learn directly from experienced professionals dedicated to your success.</p>
                     </div>
 
                     <div class="grid sm:grid-cols-2 md:grid-cols-3 gap-8">
@@ -616,6 +683,17 @@
                             <h4 class="text-white font-semibold transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">Student Success Stories</h4>
                         </div>
                     </div>
+                </div>
+            </section>
+
+            <section id="gallery-lightbox" class="gallery-lightbox" hidden aria-modal="true" role="dialog" aria-label="Institute Gallery Preview">
+                <div class="gallery-lightbox-panel">
+                    <div class="gallery-lightbox-head">
+                        <h3>Institute Gallery</h3>
+                        <button type="button" class="gallery-close" aria-label="Close gallery">&times;</button>
+                    </div>
+                    <img class="gallery-selected" src="" alt="Selected gallery image">
+                    <div class="gallery-lightbox-grid"></div>
                 </div>
             </section>
 
@@ -850,6 +928,24 @@
             }
         });
     </script>
+<script>
+(function(){
+    const items=[...document.querySelectorAll('.gallery-item')];
+    const lightbox=document.getElementById('gallery-lightbox');
+    if(!items.length||!lightbox)return;
+    const selected=lightbox.querySelector('.gallery-selected');
+    const grid=lightbox.querySelector('.gallery-lightbox-grid');
+    const close=()=>{lightbox.hidden=true;document.body.style.overflow='';};
+    const images=items.map(item=>{const img=item.querySelector('img');return {src:img?.src||'',alt:img?.alt||'RMCTI Gallery'};});
+    grid.innerHTML=images.map((im,i)=>`<img src="${im.src}" alt="${im.alt}" data-gallery-index="${i}" loading="lazy">`).join('');
+    const select=i=>{const im=images[i];if(!im)return;selected.src=im.src;selected.alt=im.alt;grid.querySelectorAll('img').forEach((x,n)=>x.classList.toggle('active',n===i));};
+    items.forEach((item,i)=>item.addEventListener('click',()=>{lightbox.hidden=false;document.body.style.overflow='hidden';select(i);}));
+    grid.addEventListener('click',e=>{const img=e.target.closest('[data-gallery-index]');if(img)select(Number(img.dataset.galleryIndex));});
+    lightbox.querySelector('.gallery-close').addEventListener('click',close);
+    lightbox.addEventListener('click',e=>{if(e.target===lightbox)close();});
+    document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!lightbox.hidden)close();});
+})();
+</script>
 <script>
 document.querySelectorAll('[data-certificate]').forEach(btn => {
     btn.addEventListener('click', () => {

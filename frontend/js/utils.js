@@ -46,6 +46,22 @@ const U={photoUrl:x=>{
       const a=document.createElement("a");a.href=canvas.toDataURL("image/jpeg",0.94);a.download=filename;document.body.appendChild(a);a.click();a.remove();
     }finally{URL.revokeObjectURL(url);base.remove()}
   },
+  downloadIdCardAsJpeg:async(el,filename="id-card.jpg")=>{
+    if(!el)throw new Error("Nothing to download");
+    if(!window.html2canvas){
+      await new Promise((resolve,reject)=>{
+        const existing=document.querySelector('script[data-html2canvas]');
+        if(existing){existing.addEventListener('load',resolve,{once:true});existing.addEventListener('error',reject,{once:true});return;}
+        const script=document.createElement('script');script.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';script.async=true;script.dataset.html2canvas='1';
+        script.onload=resolve;script.onerror=()=>reject(new Error('Image download library could not be loaded'));document.head.appendChild(script);
+      });
+    }
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    const canvas=await window.html2canvas(el,{backgroundColor:'#ffffff',useCORS:true,allowTaint:false,scale:2,logging:false,imageTimeout:15000});
+    const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Could not create image')), 'image/jpeg', .95));
+    const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  },
 openPrintWindow:(title,html)=>{
     const w=window.open("","_blank","width=920,height=800");
     if(!w){U.toast("Please allow pop-ups to print the receipt.","error");return false;}
