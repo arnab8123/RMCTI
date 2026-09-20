@@ -372,7 +372,7 @@
   .mx-12, .mx-10, .mx-8 { margin-left:0 !important; margin-right:0 !important; }
 }
 </style>
-</head>
+<style>#galleryLightbox button[data-thumb]:hover{border-color:#c9972e!important} @media(max-width:640px){#galleryThumbs{grid-template-columns:repeat(3,minmax(0,1fr))!important}#galleryThumbs img{height:62px!important}}</style></head>
 <body class="antialiased">
 
     <div id="loader-wrapper">
@@ -473,10 +473,9 @@
                 <div class="grid md:grid-cols-2 gap-12 items-center">
                     <div class="reveal-left">
                         <div class="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-white dark:border-gray-800">
-                            <img src="https://placehold.co/800x600/0b1a30/ffffff?text=RMCTI+Center" alt="Institute" class="w-full h-auto object-cover hover:scale-105 transition-transform duration-700">
-                            <div class="absolute bottom-0 left-0 bg-rmcti-gold text-white px-5 py-3 rounded-tr-2xl font-bold text-xl flex items-center gap-3 shadow-lg">
-                                <img src="asset/image.jpeg" alt="RMCTI Logo" class="w-9 h-9 rounded-full bg-white p-1 object-contain">
-                                <span>Est. 2019</span>
+                            <img src="asset/rmcti-est-2019.svg" alt="RMCTI Institute" class="w-full h-auto object-cover hover:scale-105 transition-transform duration-700">
+                            <div class="absolute bottom-0 left-0 bg-rmcti-gold text-white p-4 rounded-tr-2xl font-bold text-xl">
+                                Est. 2019
                             </div>
                         </div>
                     </div>
@@ -493,12 +492,12 @@
                         <div class="grid grid-cols-2 gap-6">
                             <div class="glass-card p-4 rounded-xl text-center group">
                                 <i class="fas fa-user-graduate text-3xl mb-2 group-hover:scale-125 transition-transform duration-300" style="color: var(--primary)"></i>
-                                <h4 class="font-bold text-xl">500+</h4>
+                                <h4 id="landingStudentCount" class="font-bold text-xl">—</h4>
                                 <p class="text-sm" style="color: var(--text-light)">Happy Students</p>
                             </div>
                             <div class="glass-card p-4 rounded-xl text-center group">
                                 <i class="fas fa-chalkboard-teacher text-3xl mb-2 group-hover:scale-125 transition-transform duration-300" style="color: var(--accent)"></i>
-                                <h4 class="font-bold text-xl">10+</h4>
+                                <h4 id="landingTeacherCount" class="font-bold text-xl">—</h4>
                                 <p class="text-sm" style="color: var(--text-light)">Expert Teachers</p>
                             </div>
                         </div>
@@ -506,22 +505,16 @@
                 </div>
             </section>
 
-            <section id="whatsapp-contact" class="py-10 px-6 relative z-10">
+            <section id="whatsapp" class="py-10 px-6 relative z-10">
                 <div class="max-w-7xl mx-auto">
-                    <a href="https://wa.me/message/MVTJF7S3XSEGM1" target="_blank" rel="noopener noreferrer"
-                       class="whatsapp-redirect-card glass-card rounded-2xl p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-5 group">
-                        <div class="flex items-center gap-4 text-center md:text-left">
-                            <div class="whatsapp-icon">
-                                <i class="fab fa-whatsapp"></i>
+                    <a href="https://wa.me/message/MVTJF7S3XSEGM1" target="_blank" rel="noopener noreferrer" class="block rounded-3xl p-8 md:p-10 shadow-xl transition-transform hover:-translate-y-1" style="background:#25D366;color:#fff">
+                        <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+                            <div class="flex items-center gap-5 text-center md:text-left">
+                                <span class="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center text-4xl"><i class="fab fa-whatsapp"></i></span>
+                                <div><h2 class="text-2xl md:text-3xl font-bold">Chat with RMCTI on WhatsApp</h2><p class="mt-2 text-white/90">Have a question about courses, fees or admission? Message us directly.</p></div>
                             </div>
-                            <div>
-                                <h3 class="text-xl md:text-2xl font-bold">Have a Question? Chat with RMCTI</h3>
-                                <p class="mt-1" style="color: var(--text-light)">Connect with us directly on WhatsApp for quick assistance and course enquiries.</p>
-                            </div>
+                            <span class="bg-white text-[#128C7E] px-7 py-3 rounded-full font-bold whitespace-nowrap">Start Chat <i class="fas fa-arrow-right ml-2"></i></span>
                         </div>
-                        <span class="btn-accent px-6 py-3 rounded-full font-bold inline-flex items-center gap-2 whitespace-nowrap">
-                            Chat on WhatsApp <i class="fas fa-arrow-right"></i>
-                        </span>
                     </a>
                 </div>
             </section>
@@ -529,9 +522,6 @@
             <section id="teachers" class="py-20 bg-black/5 dark:bg-white/5 relative z-10">
                 <div class="max-w-7xl mx-auto px-6">
                     <div class="text-center mb-16 reveal">
-                        <div class="faculty-heading-logo mx-auto mb-4">
-                            <img src="asset/image.jpeg" alt="RMCTI Logo">
-                        </div>
                         <h2 class="text-3xl md:text-4xl font-bold mb-4" style="color: var(--primary-dark)">Our Expert Faculty</h2>
                         <div class="w-24 h-1 bg-rmcti-gold mx-auto rounded-full"></div>
                         <p class="mt-4 max-w-2xl mx-auto" style="color: var(--text-light)">Learn directly from experienced professionals dedicated to your success.</p>
@@ -541,7 +531,7 @@
                         <div class="glass-card rounded-2xl reveal relative overflow-hidden group text-center">
                             <div class="h-32 bg-rmcti-blue w-full absolute top-0 left-0 -z-10 group-hover:h-40 transition-all duration-500"></div>
                             <div class="pt-12 pb-8 px-6">
-                                <img src="https://placehold.co/150x150/ffffff/004b87?text=T1" alt="Teacher 1" class="w-32 h-32 mx-auto rounded-full border-4 border-white shadow-lg mb-4 group-hover:scale-110 transition-transform duration-300">
+                                <img src="asset/faculty-1.svg" alt="Teacher 1" class="w-32 h-32 mx-auto rounded-full border-4 border-white shadow-lg mb-4 group-hover:scale-110 transition-transform duration-300">
                                 <h3 class="text-xl font-bold mb-1">A. Kumar</h3>
                                 <p class="text-rmcti-gold font-semibold mb-3">Programming Instructor</p>
                                 <p class="text-sm" style="color: var(--text-light)">Specializes in C, C++, and Java with 5 years of teaching experience.</p>
@@ -551,7 +541,7 @@
                         <div class="glass-card rounded-2xl reveal relative overflow-hidden group text-center" style="transition-delay: 100ms;">
                             <div class="h-32 bg-rmcti-gold w-full absolute top-0 left-0 -z-10 group-hover:h-40 transition-all duration-500"></div>
                             <div class="pt-12 pb-8 px-6">
-                                <img src="https://placehold.co/150x150/ffffff/9e6429?text=T2" alt="Teacher 2" class="w-32 h-32 mx-auto rounded-full border-4 border-white shadow-lg mb-4 group-hover:scale-110 transition-transform duration-300">
+                                <img src="asset/faculty-2.svg" alt="Teacher 2" class="w-32 h-32 mx-auto rounded-full border-4 border-white shadow-lg mb-4 group-hover:scale-110 transition-transform duration-300">
                                 <h3 class="text-xl font-bold mb-1">S. Roy</h3>
                                 <p class="text-rmcti-blue font-semibold mb-3">Web Design Expert</p>
                                 <p class="text-sm" style="color: var(--text-light)">Teaches HTML, CSS, JavaScript, and creative UI/UX design fundamentals.</p>
@@ -561,7 +551,7 @@
                         <div class="glass-card rounded-2xl reveal relative overflow-hidden group text-center" style="transition-delay: 200ms;">
                             <div class="h-32 bg-rmcti-red w-full absolute top-0 left-0 -z-10 group-hover:h-40 transition-all duration-500"></div>
                             <div class="pt-12 pb-8 px-6">
-                                <img src="https://placehold.co/150x150/ffffff/b81d24?text=T3" alt="Teacher 3" class="w-32 h-32 mx-auto rounded-full border-4 border-white shadow-lg mb-4 group-hover:scale-110 transition-transform duration-300">
+                                <img src="asset/faculty-3.svg" alt="Teacher 3" class="w-32 h-32 mx-auto rounded-full border-4 border-white shadow-lg mb-4 group-hover:scale-110 transition-transform duration-300">
                                 <h3 class="text-xl font-bold mb-1">P. Das</h3>
                                 <p class="text-rmcti-gold font-semibold mb-3">Tally & Accounts</p>
                                 <p class="text-sm" style="color: var(--text-light)">Expert in financial accounting, Tally Prime, and basic computer skills.</p>
@@ -639,55 +629,44 @@
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-                    <div class="gallery-item group reveal h-64 shadow-md rounded-2xl border border-gray-200 dark:border-gray-800">
-                        <img src="https://placehold.co/600x400/0b1a30/ffffff?text=Computer+Lab" alt="Lab" class="w-full h-full object-cover gallery-lightbox-trigger" loading="lazy">
+                    <div data-gallery-index="0" class="gallery-item group reveal h-64 cursor-pointer shadow-md rounded-2xl border border-gray-200 dark:border-gray-800">
+                        <img src="asset/gallery-1.svg" alt="Lab" class="w-full h-full object-cover">
                         <div class="gallery-overlay rounded-2xl">
                             <h4 class="text-white font-semibold transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">Modern Practice Lab</h4>
                         </div>
                     </div>
-                    <div class="gallery-item group reveal h-64 shadow-md rounded-2xl border border-gray-200 dark:border-gray-800" style="transition-delay: 100ms;">
-                        <img src="https://placehold.co/600x400/9e6429/ffffff?text=Small+Batches" alt="Batches" class="w-full h-full object-cover gallery-lightbox-trigger" loading="lazy">
+                    <div data-gallery-index="1" class="gallery-item group reveal h-64 cursor-pointer shadow-md rounded-2xl border border-gray-200 dark:border-gray-800" style="transition-delay: 100ms;">
+                        <img src="asset/gallery-2.svg" alt="Batches" class="w-full h-full object-cover">
                         <div class="gallery-overlay rounded-2xl">
                             <h4 class="text-white font-semibold transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">Focused Small Batches</h4>
                         </div>
                     </div>
-                    <div class="gallery-item group reveal h-64 shadow-md rounded-2xl border border-gray-200 dark:border-gray-800" style="transition-delay: 200ms;">
-                        <img src="https://placehold.co/600x400/004b87/ffffff?text=Doubt+Clearing" alt="Doubt Clearing" class="w-full h-full object-cover gallery-lightbox-trigger" loading="lazy">
+                    <div data-gallery-index="2" class="gallery-item group reveal h-64 cursor-pointer shadow-md rounded-2xl border border-gray-200 dark:border-gray-800" style="transition-delay: 200ms;">
+                        <img src="asset/gallery-3.svg" alt="Doubt Clearing" class="w-full h-full object-cover">
                         <div class="gallery-overlay rounded-2xl">
                             <h4 class="text-white font-semibold transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">One-on-One Support</h4>
                         </div>
                     </div>
-                    <div class="gallery-item group reveal h-64 shadow-md rounded-2xl border border-gray-200 dark:border-gray-800">
-                        <img src="https://placehold.co/600x400/b81d24/ffffff?text=Coding+Practice" alt="Coding" class="w-full h-full object-cover gallery-lightbox-trigger" loading="lazy">
+                    <div data-gallery-index="3" class="gallery-item group reveal h-64 cursor-pointer shadow-md rounded-2xl border border-gray-200 dark:border-gray-800">
+                        <img src="asset/gallery-4.svg" alt="Coding" class="w-full h-full object-cover">
                         <div class="gallery-overlay rounded-2xl">
                             <h4 class="text-white font-semibold transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">Hands-on Coding Practice</h4>
                         </div>
                     </div>
-                    <div class="gallery-item group reveal h-64 shadow-md rounded-2xl border border-gray-200 dark:border-gray-800" style="transition-delay: 100ms;">
-                        <img src="https://placehold.co/600x400/0b1a30/ffffff?text=Student+Projects" alt="Projects" class="w-full h-full object-cover gallery-lightbox-trigger" loading="lazy">
+                    <div data-gallery-index="4" class="gallery-item group reveal h-64 cursor-pointer shadow-md rounded-2xl border border-gray-200 dark:border-gray-800" style="transition-delay: 100ms;">
+                        <img src="asset/gallery-5.svg" alt="Projects" class="w-full h-full object-cover">
                         <div class="gallery-overlay rounded-2xl">
                             <h4 class="text-white font-semibold transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">Real-World Projects</h4>
                         </div>
                     </div>
-                    <div class="gallery-item group reveal h-64 shadow-md rounded-2xl border border-gray-200 dark:border-gray-800" style="transition-delay: 200ms;">
-                        <img src="https://placehold.co/600x400/9e6429/ffffff?text=Successful+Students" alt="Success" class="w-full h-full object-cover gallery-lightbox-trigger" loading="lazy">
+                    <div data-gallery-index="5" class="gallery-item group reveal h-64 cursor-pointer shadow-md rounded-2xl border border-gray-200 dark:border-gray-800" style="transition-delay: 200ms;">
+                        <img src="asset/gallery-6.svg" alt="Success" class="w-full h-full object-cover">
                         <div class="gallery-overlay rounded-2xl">
                             <h4 class="text-white font-semibold transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">Student Success Stories</h4>
                         </div>
                     </div>
                 </div>
             </section>
-
-            <div id="galleryLightbox" class="gallery-lightbox" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Gallery image viewer">
-                <button type="button" class="gallery-lightbox-close" aria-label="Close gallery">&times;</button>
-                <button type="button" class="gallery-lightbox-prev" aria-label="Previous image">&#10094;</button>
-                <div class="gallery-lightbox-content">
-                    <img id="galleryLightboxImage" src="" alt="Gallery preview">
-                    <div class="gallery-lightbox-caption" id="galleryLightboxCaption"></div>
-                    <div class="gallery-lightbox-counter" id="galleryLightboxCounter"></div>
-                </div>
-                <button type="button" class="gallery-lightbox-next" aria-label="Next image">&#10095;</button>
-            </div>
 
             <section id="contact" class="py-20 bg-black/5 dark:bg-white/5 relative z-10">
                 <div class="max-w-7xl mx-auto px-6">
@@ -934,44 +913,31 @@ document.querySelectorAll('[data-certificate]').forEach(btn => {
     });
 });
 </script>
+
 <script>
 (() => {
-    const items = Array.from(document.querySelectorAll('.gallery-lightbox-trigger'));
-    const box = document.getElementById('galleryLightbox');
-    const image = document.getElementById('galleryLightboxImage');
-    const caption = document.getElementById('galleryLightboxCaption');
-    const counter = document.getElementById('galleryLightboxCounter');
-    if (!items.length || !box || !image) return;
-    let current = 0;
+  const galleryImages = [
+    {src:'asset/gallery-1.svg',title:'Modern Practice Lab'},
+    {src:'asset/gallery-2.svg',title:'Focused Small Batches'},
+    {src:'asset/gallery-3.svg',title:'One-on-One Support'},
+    {src:'asset/gallery-4.svg',title:'Hands-on Coding Practice'},
+    {src:'asset/gallery-5.svg',title:'Real-World Projects'},
+    {src:'asset/gallery-6.svg',title:'Student Success Stories'}
+  ];
+  const overlay=document.createElement('div');
+  overlay.id='galleryLightbox';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(3,10,20,.88);z-index:10050;display:none;align-items:center;justify-content:center;padding:18px';
+  overlay.innerHTML=`<div style="position:relative;width:min(1100px,100%);max-height:95vh;background:#fff;border-radius:20px;padding:18px;overflow:auto"><button type="button" data-gallery-close aria-label="Close" style="position:absolute;right:12px;top:12px;width:42px;height:42px;border:0;border-radius:50%;background:#082b52;color:#fff;font-size:25px;cursor:pointer;z-index:2">&times;</button><h3 id="galleryTitle" style="margin:0 55px 14px 0;color:#082b52;font-size:22px">Institute Gallery</h3><div style="display:grid;grid-template-columns:minmax(0,1fr);gap:12px"><div style="background:#eef2f7;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:320px"><img id="galleryMainImage" style="width:100%;max-height:62vh;object-fit:contain" alt="Gallery preview"></div><div id="galleryThumbs" style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px"></div></div></div>`;
+  document.body.appendChild(overlay);
+  const main=overlay.querySelector('#galleryMainImage'),title=overlay.querySelector('#galleryTitle'),thumbs=overlay.querySelector('#galleryThumbs');
+  function show(i){const item=galleryImages[i];main.src=item.src;main.alt=item.title;title.textContent=item.title;thumbs.innerHTML=galleryImages.map((x,n)=>`<button type="button" data-thumb="${n}" style="border:2px solid ${n===i?'#c9972e':'transparent'};border-radius:10px;overflow:hidden;padding:0;background:#eef2f7;cursor:pointer"><img src="${x.src}" alt="${x.title}" style="display:block;width:100%;height:76px;object-fit:cover"></button>`).join('');thumbs.querySelectorAll('[data-thumb]').forEach(b=>b.onclick=()=>show(Number(b.dataset.thumb)));}
+  document.querySelectorAll('[data-gallery-index]').forEach(card=>card.addEventListener('click',()=>{show(Number(card.dataset.galleryIndex));overlay.style.display='flex';document.body.style.overflow='hidden';}));
+  overlay.querySelector('[data-gallery-close]').onclick=()=>{overlay.style.display='none';document.body.style.overflow='';};
+  overlay.addEventListener('click',e=>{if(e.target===overlay){overlay.style.display='none';document.body.style.overflow='';}});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&overlay.style.display==='flex'){overlay.style.display='none';document.body.style.overflow='';}});
 
-    const show = (index) => {
-        current = (index + items.length) % items.length;
-        const item = items[current];
-        image.src = item.src;
-        image.alt = item.alt || 'RMCTI gallery image';
-        caption.textContent = item.alt || '';
-        counter.textContent = `${current + 1} / ${items.length}`;
-        box.classList.add('open');
-        box.setAttribute('aria-hidden', 'false');
-        document.body.classList.add('gallery-lightbox-open');
-    };
-    const close = () => {
-        box.classList.remove('open');
-        box.setAttribute('aria-hidden', 'true');
-        document.body.classList.remove('gallery-lightbox-open');
-    };
-
-    items.forEach((item, index) => item.addEventListener('click', () => show(index)));
-    box.querySelector('.gallery-lightbox-close').addEventListener('click', close);
-    box.querySelector('.gallery-lightbox-prev').addEventListener('click', () => show(current - 1));
-    box.querySelector('.gallery-lightbox-next').addEventListener('click', () => show(current + 1));
-    box.addEventListener('click', (e) => { if (e.target === box) close(); });
-    document.addEventListener('keydown', (e) => {
-        if (!box.classList.contains('open')) return;
-        if (e.key === 'Escape') close();
-        if (e.key === 'ArrowLeft') show(current - 1);
-        if (e.key === 'ArrowRight') show(current + 1);
-    });
+  const statsApi=(location.hostname==='localhost'||location.hostname==='127.0.0.1')&&location.port==='5500'?'http://127.0.0.1:5000/api':'/api';
+  fetch(`${statsApi}/public/stats`).then(r=>r.json()).then(d=>{const x=d.data||{};const s=document.getElementById('landingStudentCount'),t=document.getElementById('landingTeacherCount');if(s)s.textContent=`${Number(x.total_students||0)}+`;if(t)t.textContent=`${Number(x.total_teachers||0)}+`;}).catch(()=>{});
 })();
 </script>
 </body>

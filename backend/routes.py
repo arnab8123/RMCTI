@@ -459,6 +459,14 @@ def create_subject():
     if Subject.query.filter(func.lower(Subject.name)==n.lower()).first():return err("Subject already exists",409)
     s=Subject(name=n);db.session.add(s);audit(current_user().id,"create","subject",None,n);db.session.commit();return ok({"id":s.id,"name":s.name},"Subject created",201)
 
+@api.get("/public/stats")
+def public_stats():
+    """Public landing-page counters. Only aggregate active totals are exposed."""
+    return ok({
+        "total_students": Student.query.filter_by(status="active").count(),
+        "total_teachers": Teacher.query.filter_by(status="active").count(),
+    })
+
 @api.get("/admin/dashboard")
 @roles("admin")
 def admin_dashboard():
