@@ -336,7 +336,29 @@
         ::-webkit-scrollbar-thumb:hover {
             background: var(--primary-dark);
         }
-    </style>
+    
+        /* Public landing-page image protection: discourage direct save/dragging. */
+        .rmcti-image-protected {
+            position: relative;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .rmcti-image-protected > img,
+        img.rmcti-protected-image {
+            -webkit-user-drag: none;
+            user-drag: none;
+            user-select: none;
+            -webkit-user-select: none;
+            pointer-events: none;
+        }
+        .rmcti-image-protected::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: transparent;
+            z-index: 2;
+        }
+</style>
 
 <style id="rmcti-mobile-overflow-fix">
 @media (max-width: 640px) {
@@ -940,5 +962,41 @@ document.querySelectorAll('[data-certificate]').forEach(btn => {
   fetch(`${statsApi}/public/stats`).then(r=>r.json()).then(d=>{const x=d.data||{};const s=document.getElementById('landingStudentCount'),t=document.getElementById('landingTeacherCount');if(s)s.textContent=`${Number(x.total_students||0)}+`;if(t)t.textContent=`${Number(x.total_teachers||0)}+`;}).catch(()=>{});
 })();
 </script>
+
+<script>
+(() => {
+  // This is client-side protection: it prevents the normal right-click/save and drag UI.
+  // It cannot make publicly delivered image bytes impossible to obtain with developer tools.
+  const protectImage = (img) => {
+    if (!img || img.dataset.rmctiProtected) return;
+    img.dataset.rmctiProtected = '1';
+    img.draggable = false;
+    img.classList.add('rmcti-protected-image');
+    const parent = img.parentElement;
+    if (parent && !parent.classList.contains('rmcti-image-protected')) {
+      const wrap = document.createElement('div');
+      wrap.className = 'rmcti-image-protected';
+      wrap.style.cssText = `position:relative;display:${getComputedStyle(img).display === 'block' ? 'block' : 'inline-block'};width:${img.style.width || 'auto'};height:${img.style.height || 'auto'};`;
+      parent.insertBefore(wrap, img);
+      wrap.appendChild(img);
+    }
+  };
+
+  const protectAllImages = () => document.querySelectorAll('img').forEach(protectImage);
+  document.addEventListener('contextmenu', e => {
+    if (e.target.closest('img, .rmcti-image-protected')) e.preventDefault();
+  }, true);
+  document.addEventListener('dragstart', e => {
+    if (e.target.closest('img, .rmcti-image-protected')) e.preventDefault();
+  }, true);
+  document.addEventListener('selectstart', e => {
+    if (e.target.closest('img, .rmcti-image-protected')) e.preventDefault();
+  }, true);
+
+  protectAllImages();
+  new MutationObserver(protectAllImages).observe(document.documentElement, {childList:true, subtree:true});
+})();
+</script>
+
 </body>
 </html>
