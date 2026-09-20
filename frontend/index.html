@@ -938,28 +938,142 @@ document.querySelectorAll('[data-certificate]').forEach(btn => {
 
 <script>
 (() => {
-  const galleryImages = [
-    {src:'asset/gallery-1.svg',title:'Modern Practice Lab'},
-    {src:'asset/gallery-2.svg',title:'Focused Small Batches'},
-    {src:'asset/gallery-3.svg',title:'One-on-One Support'},
-    {src:'asset/gallery-4.svg',title:'Hands-on Coding Practice'},
-    {src:'asset/gallery-5.svg',title:'Real-World Projects'},
-    {src:'asset/gallery-6.svg',title:'Student Success Stories'}
+  // Six gallery cards. Each popup contains six individually selectable images.
+  // Replace any of these asset paths later with real institute photos without changing the UI.
+  const gallerySets = [
+    {
+      title:'Modern Practice Lab',
+      images:[
+        {src:'asset/gallery-1.svg',title:'Practice Lab — 01'},
+        {src:'asset/gallery-2.svg',title:'Practice Lab — 02'},
+        {src:'asset/gallery-3.svg',title:'Practice Lab — 03'},
+        {src:'asset/gallery-4.svg',title:'Practice Lab — 04'},
+        {src:'asset/gallery-5.svg',title:'Practice Lab — 05'},
+        {src:'asset/gallery-6.svg',title:'Practice Lab — 06'}
+      ]
+    },
+    {
+      title:'Focused Small Batches',
+      images:[
+        {src:'asset/gallery-2.svg',title:'Small Batches — 01'},
+        {src:'asset/gallery-3.svg',title:'Small Batches — 02'},
+        {src:'asset/gallery-4.svg',title:'Small Batches — 03'},
+        {src:'asset/gallery-5.svg',title:'Small Batches — 04'},
+        {src:'asset/gallery-6.svg',title:'Small Batches — 05'},
+        {src:'asset/gallery-1.svg',title:'Small Batches — 06'}
+      ]
+    },
+    {
+      title:'One-on-One Support',
+      images:[
+        {src:'asset/gallery-3.svg',title:'One-on-One Support — 01'},
+        {src:'asset/gallery-4.svg',title:'One-on-One Support — 02'},
+        {src:'asset/gallery-5.svg',title:'One-on-One Support — 03'},
+        {src:'asset/gallery-6.svg',title:'One-on-One Support — 04'},
+        {src:'asset/gallery-1.svg',title:'One-on-One Support — 05'},
+        {src:'asset/gallery-2.svg',title:'One-on-One Support — 06'}
+      ]
+    },
+    {
+      title:'Hands-on Coding Practice',
+      images:[
+        {src:'asset/gallery-4.svg',title:'Coding Practice — 01'},
+        {src:'asset/gallery-5.svg',title:'Coding Practice — 02'},
+        {src:'asset/gallery-6.svg',title:'Coding Practice — 03'},
+        {src:'asset/gallery-1.svg',title:'Coding Practice — 04'},
+        {src:'asset/gallery-2.svg',title:'Coding Practice — 05'},
+        {src:'asset/gallery-3.svg',title:'Coding Practice — 06'}
+      ]
+    },
+    {
+      title:'Real-World Projects',
+      images:[
+        {src:'asset/gallery-5.svg',title:'Projects — 01'},
+        {src:'asset/gallery-6.svg',title:'Projects — 02'},
+        {src:'asset/gallery-1.svg',title:'Projects — 03'},
+        {src:'asset/gallery-2.svg',title:'Projects — 04'},
+        {src:'asset/gallery-3.svg',title:'Projects — 05'},
+        {src:'asset/gallery-4.svg',title:'Projects — 06'}
+      ]
+    },
+    {
+      title:'Student Success Stories',
+      images:[
+        {src:'asset/gallery-6.svg',title:'Success Stories — 01'},
+        {src:'asset/gallery-1.svg',title:'Success Stories — 02'},
+        {src:'asset/gallery-2.svg',title:'Success Stories — 03'},
+        {src:'asset/gallery-3.svg',title:'Success Stories — 04'},
+        {src:'asset/gallery-4.svg',title:'Success Stories — 05'},
+        {src:'asset/gallery-5.svg',title:'Success Stories — 06'}
+      ]
+    }
   ];
+
   const overlay=document.createElement('div');
   overlay.id='galleryLightbox';
   overlay.style.cssText='position:fixed;inset:0;background:rgba(3,10,20,.88);z-index:10050;display:none;align-items:center;justify-content:center;padding:18px';
-  overlay.innerHTML=`<div style="position:relative;width:min(1100px,100%);max-height:95vh;background:#fff;border-radius:20px;padding:18px;overflow:auto"><button type="button" data-gallery-close aria-label="Close" style="position:absolute;right:12px;top:12px;width:42px;height:42px;border:0;border-radius:50%;background:#082b52;color:#fff;font-size:25px;cursor:pointer;z-index:2">&times;</button><h3 id="galleryTitle" style="margin:0 55px 14px 0;color:#082b52;font-size:22px">Institute Gallery</h3><div style="display:grid;grid-template-columns:minmax(0,1fr);gap:12px"><div style="background:#eef2f7;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:320px"><img id="galleryMainImage" style="width:100%;max-height:62vh;object-fit:contain" alt="Gallery preview"></div><div id="galleryThumbs" style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px"></div></div></div>`;
+  overlay.innerHTML=`<div style="position:relative;width:min(1100px,100%);max-height:95vh;background:#fff;border-radius:20px;padding:18px;overflow:auto">
+    <button type="button" data-gallery-close aria-label="Close" style="position:absolute;right:12px;top:12px;width:42px;height:42px;border:0;border-radius:50%;background:#082b52;color:#fff;font-size:25px;cursor:pointer;z-index:2">&times;</button>
+    <h3 id="galleryTitle" style="margin:0 55px 14px 0;color:#082b52;font-size:22px">Institute Gallery</h3>
+    <div style="background:#eef2f7;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:320px">
+      <img id="galleryMainImage" style="display:block;width:100%;max-height:62vh;object-fit:contain" alt="Gallery preview">
+    </div>
+    <div id="galleryThumbs" style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-top:12px"></div>
+  </div>`;
   document.body.appendChild(overlay);
-  const main=overlay.querySelector('#galleryMainImage'),title=overlay.querySelector('#galleryTitle'),thumbs=overlay.querySelector('#galleryThumbs');
-  function show(i){const item=galleryImages[i];main.src=item.src;main.alt=item.title;title.textContent=item.title;thumbs.innerHTML=galleryImages.map((x,n)=>`<button type="button" data-thumb="${n}" style="border:2px solid ${n===i?'#c9972e':'transparent'};border-radius:10px;overflow:hidden;padding:0;background:#eef2f7;cursor:pointer"><img src="${x.src}" alt="${x.title}" style="display:block;width:100%;height:76px;object-fit:cover"></button>`).join('');thumbs.querySelectorAll('[data-thumb]').forEach(b=>b.onclick=()=>show(Number(b.dataset.thumb)));}
-  document.querySelectorAll('[data-gallery-index]').forEach(card=>card.addEventListener('click',()=>{show(Number(card.dataset.galleryIndex));overlay.style.display='flex';document.body.style.overflow='hidden';}));
-  overlay.querySelector('[data-gallery-close]').onclick=()=>{overlay.style.display='none';document.body.style.overflow='';};
-  overlay.addEventListener('click',e=>{if(e.target===overlay){overlay.style.display='none';document.body.style.overflow='';}});
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&overlay.style.display==='flex'){overlay.style.display='none';document.body.style.overflow='';}});
+
+  const main=overlay.querySelector('#galleryMainImage');
+  const title=overlay.querySelector('#galleryTitle');
+  const thumbs=overlay.querySelector('#galleryThumbs');
+
+  function showGallery(galleryIndex,imageIndex=0){
+    const gallery=gallerySets[galleryIndex];
+    if(!gallery) return;
+    const item=gallery.images[imageIndex] || gallery.images[0];
+    main.src=item.src;
+    main.alt=item.title;
+    title.textContent=gallery.title;
+    thumbs.innerHTML=gallery.images.map((x,n)=>`
+      <button type="button" data-thumb="${n}" aria-label="${x.title}"
+        style="border:2px solid ${n===imageIndex?'#c9972e':'transparent'};border-radius:10px;overflow:hidden;padding:0;background:#eef2f7;cursor:pointer">
+        <img src="${x.src}" alt="${x.title}" style="display:block;width:100%;height:76px;object-fit:cover">
+      </button>`).join('');
+    thumbs.querySelectorAll('[data-thumb]').forEach(b=>{
+      b.onclick=()=>showGallery(galleryIndex,Number(b.dataset.thumb));
+    });
+  }
+
+  document.querySelectorAll('[data-gallery-index]').forEach(card=>{
+    card.addEventListener('click',()=>{
+      showGallery(Number(card.dataset.galleryIndex),0);
+      overlay.style.display='flex';
+      document.body.style.overflow='hidden';
+    });
+  });
+  overlay.querySelector('[data-gallery-close]').onclick=()=>{
+    overlay.style.display='none';
+    document.body.style.overflow='';
+  };
+  overlay.addEventListener('click',e=>{
+    if(e.target===overlay){
+      overlay.style.display='none';
+      document.body.style.overflow='';
+    }
+  });
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&overlay.style.display==='flex'){
+      overlay.style.display='none';
+      document.body.style.overflow='';
+    }
+  });
 
   const statsApi=(location.hostname==='localhost'||location.hostname==='127.0.0.1')&&location.port==='5500'?'http://127.0.0.1:5000/api':'/api';
-  fetch(`${statsApi}/public/stats`).then(r=>r.json()).then(d=>{const x=d.data||{};const s=document.getElementById('landingStudentCount'),t=document.getElementById('landingTeacherCount');if(s)s.textContent=`${Number(x.total_students||0)}+`;if(t)t.textContent=`${Number(x.total_teachers||0)}+`;}).catch(()=>{});
+  fetch(`${statsApi}/public/stats`).then(r=>r.json()).then(d=>{
+    const x=d.data||{};
+    const s=document.getElementById('landingStudentCount'),t=document.getElementById('landingTeacherCount');
+    if(s)s.textContent=`${Number(x.total_students||0)}+`;
+    if(t)t.textContent=`${Number(x.total_teachers||0)}+`;
+  }).catch(()=>{});
 })();
 </script>
 

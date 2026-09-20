@@ -14,78 +14,74 @@ const U={photoUrl:x=>{
   return apiOrigin+'/uploads/photos/'+raw;
 },esc:x=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])),money:x=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR"}).format(Number(x||0)),today:()=>{const p=new Intl.DateTimeFormat("en-IN",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date()),get=k=>p.find(x=>x.type===k)?.value||"00";return `${get("year")}-${get("month")}-${get("day")}`},date:x=>x?new Intl.DateTimeFormat("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"2-digit",year:"numeric"}).format(new Date(x)):"—",datetime:x=>x?`${new Intl.DateTimeFormat("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(new Date(x))} IST`:"—",toast:(m,type="")=>{let e=document.createElement("div");e.className="toast";e.textContent=m;document.body.appendChild(e);setTimeout(()=>e.remove(),3500)},modal:(title,html)=>{let b=document.createElement("div");b.className="modalbg";b.innerHTML=`<div class="modal"><div class="modalhead"><b>${U.esc(title)}</b><button class="btn secondary" data-close>×</button></div><div class="modalbody">${html}</div></div>`;document.body.appendChild(b);b.onclick=e=>{if(e.target===b||e.target.closest("[data-close]"))b.remove()};return b},confirm:(t,m,fn)=>{let x=U.modal(t,`<p>${U.esc(m)}</p><div class="right" style="justify-content:flex-end"><button class="btn secondary" data-close>Cancel</button><button class="btn danger" data-ok>Confirm</button></div>`);x.querySelector("[data-ok]").onclick=async()=>{x.remove();await fn()}},debounce:(fn,ms=300)=>{let i;return(...a)=>{clearTimeout(i);i=setTimeout(()=>fn(...a),ms)}},downloadElementAsJpeg:async(el,filename="download.jpg")=>{
     if(!el) throw new Error("ID card element not found");
-    const clone=el.cloneNode(true);
-    const base=document.createElement("div");
-    base.style.position="fixed";base.style.left="-100000px";base.style.top="0";base.style.visibility="hidden";base.style.pointerEvents="none";
-    base.style.width=(el.getBoundingClientRect().width||800)+"px";
-    base.appendChild(clone);
-    document.body.appendChild(base);
 
-    const apply=(src,dst)=>{
-      const cs=getComputedStyle(src);
-      for(const p of cs) dst.style.setProperty(p,cs.getPropertyValue(p),cs.getPropertyPriority(p));
-      [...src.children].forEach((child,i)=>{if(dst.children[i]) apply(child,dst.children[i]);});
-    };
-    apply(el,clone);
-
-    clone.style.width=(el.getBoundingClientRect().width||800)+"px";
-    clone.style.height=(el.getBoundingClientRect().height||450)+"px";
-    clone.style.maxHeight="none";
-    clone.style.overflow="hidden";
-    clone.style.background="#fff";
-
-    // Inline same-origin images so the JPEG export is not blocked by CORS.
-    const toDataUrl=async(img)=>{
-      const src=img.currentSrc||img.src;
-      if(!src || src.startsWith("data:")) return;
-      try{
-        const response=await fetch(src,{credentials:"same-origin",cache:"no-store"});
-        if(!response.ok) throw new Error("Image request failed");
-        const blob=await response.blob();
-        const data=await new Promise((resolve,reject)=>{
-          const reader=new FileReader();
-          reader.onload=()=>resolve(reader.result);
-          reader.onerror=reject;
-          reader.readAsDataURL(blob);
-        });
-        img.src=data;
-      }catch(err){
-        // Keep the original source as a fallback; SVG export can still render it.
-        console.warn("Could not inline ID card image:",src,err);
+    // Prefer html2canvas for reliable browser-side JPEG rendering.
+    // It is loaded only when the download button is used.
+    const loadHtml2Canvas=()=>new Promise((resolve,reject)=>{
+      if(window.html2canvas) return resolve(window.html2canvas);
+      const existing=document.querySelector('script[data-rmcti-html2canvas]');
+      if(existing){
+        existing.addEventListener('load',()=>resolve(window.html2canvas),{once:true});
+        existing.addEventListener('error',()=>reject(new Error('Could not load JPEG renderer')),{once:true});
+        return;
       }
-    };
-    await Promise.all([...clone.querySelectorAll("img")].map(toDataUrl));
+      const script=document.createElement('script');
+      script.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+      script.async=true;
+      script.dataset.rmctiHtml2canvas='1';
+      script.onload=()=>window.html2canvas?resolve(window.html2canvas):reject(new Error('JPEG renderer unavailable'));
+      script.onerror=()=>reject(new Error('Could not load JPEG renderer'));
+      document.head.appendChild(script);
+    });
 
-    if(document.fonts?.ready) await document.fonts.ready;
-    await Promise.all([...clone.querySelectorAll("img")].map(img=>new Promise(resolve=>{
-      if(img.complete) return resolve();
-      img.onload=img.onerror=()=>resolve();
-    })));
+    const clone=el.cloneNode(true);
+    const rect=el.getBoundingClientRect();
+    const width=Math.max(320,Math.ceil(rect.width||800));
+    const height=Math.max(180,Math.ceil(rect.height||450));
 
-    const width=Math.ceil(clone.getBoundingClientRect().width||800);
-    const height=Math.ceil(clone.getBoundingClientRect().height||450);
-    const xml=new XMLSerializer().serializeToString(clone);
-    const svg=`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml">${xml}</div></foreignObject></svg>`;
-    const blob=new Blob([svg],{type:"image/svg+xml;charset=utf-8"});
-    const url=URL.createObjectURL(blob);
+    const stage=document.createElement('div');
+    stage.style.cssText=`position:fixed;left:-100000px;top:0;width:${width}px;height:${height}px;background:#fff;z-index:-1;`;
+    clone.style.width='100%';
+    clone.style.height='100%';
+    clone.style.maxWidth='none';
+    clone.style.maxHeight='none';
+    clone.style.margin='0';
+    clone.style.background='#fff';
+    stage.appendChild(clone);
+    document.body.appendChild(stage);
+
     try{
-      const img=new Image();
-      await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;img.src=url;});
-      const canvas=document.createElement("canvas");
-      const scale=Math.min(2,Math.max(1,1600/width));
-      canvas.width=Math.ceil(width*scale);
-      canvas.height=Math.ceil(height*scale);
-      const ctx=canvas.getContext("2d");
-      if(!ctx) throw new Error("Canvas unavailable");
-      ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.drawImage(img,0,0,canvas.width,canvas.height);
-      const dataUrl=canvas.toDataURL("image/jpeg",0.94);
-      const a=document.createElement("a");
-      a.href=dataUrl;a.download=filename;
-      document.body.appendChild(a);a.click();a.remove();
+      // Make image URLs absolute and wait for them before rendering.
+      [...clone.querySelectorAll('img')].forEach(img=>{
+        if(img.getAttribute('src') && !/^data:|^blob:|^https?:/i.test(img.getAttribute('src'))){
+          img.src=new URL(img.getAttribute('src'),location.href).href;
+        }
+        img.crossOrigin='anonymous';
+      });
+      if(document.fonts?.ready) await document.fonts.ready;
+      await Promise.all([...clone.querySelectorAll('img')].map(img=>new Promise(resolve=>{
+        if(img.complete) return resolve();
+        img.onload=img.onerror=()=>resolve();
+      })));
+
+      const html2canvas=await loadHtml2Canvas();
+      const canvas=await html2canvas(clone,{
+        backgroundColor:'#ffffff',
+        useCORS:true,
+        allowTaint:false,
+        scale:Math.min(3,Math.max(2,1800/width)),
+        logging:false,
+        imageTimeout:10000
+      });
+      const dataUrl=canvas.toDataURL('image/jpeg',0.95);
+      const a=document.createElement('a');
+      a.href=dataUrl;
+      a.download=filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     }finally{
-      URL.revokeObjectURL(url);
-      base.remove();
+      stage.remove();
     }
   },
   openPrintWindow:(title,html)=>{
