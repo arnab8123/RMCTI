@@ -107,6 +107,32 @@ def ensure_complaint_class():
         db.session.rollback()
 
 
+
+def ensure_schedule_exceptions():
+    inspector=inspect(db.engine)
+    if "schedule_exceptions" not in inspector.get_table_names():
+        db.session.execute(text("""CREATE TABLE schedule_exceptions (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            class_id BIGINT UNSIGNED NOT NULL,
+            allocation_id BIGINT UNSIGNED NULL,
+            week_start DATE NOT NULL,
+            schedule_date DATE NULL,
+            target_date DATE NULL,
+            kind ENUM('delete','reschedule','extra','weekly_time') NOT NULL,
+            start_time TIME NULL,
+            end_time TIME NULL,
+            teacher_id BIGINT UNSIGNED NULL,
+            created_by BIGINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_schedule_exceptions_class_week(class_id,week_start),
+            INDEX idx_schedule_exceptions_date(class_id,schedule_date),
+            CONSTRAINT fk_schedule_exceptions_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+            CONSTRAINT fk_schedule_exceptions_allocation FOREIGN KEY (allocation_id) REFERENCES teacher_classes(id) ON DELETE CASCADE,
+            CONSTRAINT fk_schedule_exceptions_teacher FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE SET NULL,
+            CONSTRAINT fk_schedule_exceptions_creator FOREIGN KEY (created_by) REFERENCES users(id)
+        ) ENGINE=InnoDB"""))
+        return
+
 def ensure_performance_indexes():
     """Add indexes used by the high-traffic list/dashboard endpoints.
     Safe to run repeatedly; existing indexes are left untouched.
@@ -167,6 +193,7 @@ with app.app_context():
     ensure_enquiries()
     ensure_attendance_marker()
     ensure_complaint_class()
+    ensure_schedule_exceptions()
     ensure_performance_indexes()
     db.session.commit()
     print("RMCTI database schema is ready. Enquiries, attendance marker, optional complaint class, and persistent photo storage are ready. Existing data is preserved.")

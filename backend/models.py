@@ -17,6 +17,22 @@ class Class(db.Model):
     __tablename__="classes"; id=db.Column(db.BigInteger,primary_key=True); class_name=db.Column(db.String(100),nullable=False); batch=db.Column(db.String(100),nullable=False); subject_id=db.Column(db.BigInteger,db.ForeignKey("subjects.id"),nullable=False); room=db.Column(db.String(100)); max_students=db.Column(db.Integer,default=30); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
 class TeacherClass(db.Model):
     __tablename__="teacher_classes"; id=db.Column(db.BigInteger,primary_key=True); teacher_id=db.Column(db.BigInteger,db.ForeignKey("teachers.id"),nullable=False); class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False); day_of_week=db.Column(db.Integer,nullable=False); start_time=db.Column(db.Time,nullable=False); end_time=db.Column(db.Time,nullable=False); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
+
+class ScheduleException(db.Model):
+    __tablename__="schedule_exceptions"
+    id=db.Column(db.BigInteger,primary_key=True)
+    class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False)
+    allocation_id=db.Column(db.BigInteger,db.ForeignKey("teacher_classes.id"),nullable=True)
+    week_start=db.Column(db.Date,nullable=False)
+    schedule_date=db.Column(db.Date,nullable=True)
+    target_date=db.Column(db.Date,nullable=True)
+    kind=db.Column(db.Enum("delete","reschedule","extra","weekly_time"),nullable=False)
+    start_time=db.Column(db.Time,nullable=True)
+    end_time=db.Column(db.Time,nullable=True)
+    teacher_id=db.Column(db.BigInteger,db.ForeignKey("teachers.id"),nullable=True)
+    created_by=db.Column(db.BigInteger,db.ForeignKey("users.id"),nullable=False)
+    created_at=db.Column(db.DateTime,default=datetime.utcnow)
+
 class StudentClass(db.Model):
     __tablename__="student_classes"; id=db.Column(db.BigInteger,primary_key=True); student_id=db.Column(db.BigInteger,db.ForeignKey("students.id"),nullable=False); class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False); assigned_at=db.Column(db.DateTime,default=datetime.utcnow); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False)
 class FeeStructure(db.Model):

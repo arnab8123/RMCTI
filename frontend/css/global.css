@@ -61,22 +61,22 @@ button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s 
   min-width: 0;
 }
 .id-card-export {
-  width: min(100%, 540px);
-  max-width: 540px;
+  width: min(100%, 700px);
+  max-width: 700px;
   min-width: 0;
 }
 .id-card {
   width: 100%;
   aspect-ratio: 1.586 / 1;
   min-height: 0;
-  padding: 18px;
+  padding: 22px;
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: 145px minmax(0, 1fr);
+  gap: 22px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 16px;
-  background: linear-gradient(135deg, var(--surface), var(--muted-surface));
+  background: linear-gradient(135deg, #004b87 0%, #0b1a30 58%, #9e6429 100%);
   box-shadow: 0 10px 28px rgba(15,23,42,.14);
   position: relative;
 }
@@ -85,12 +85,12 @@ button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s 
   position: absolute;
   inset: 0 0 auto;
   height: 6px;
-  background: linear-gradient(90deg, var(--primary), var(--secondary));
+  background: linear-gradient(90deg, #004b87, #9e6429);
 }
 .id-photo {
-  width: 104px;
-  height: 132px;
-  max-width: 104px;
+  width: 132px;
+  height: 168px;
+  max-width: 132px;
   display: block;
   align-self: center;
   object-fit: cover;
@@ -104,6 +104,7 @@ button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s 
   min-width: 0;
   overflow: hidden;
 }
+.id-card .id-head b,.id-card .id-head .muted,.id-card .id-field span{color:#fff}.id-card .id-field b{color:#dbeafe}.id-card .id-head{border-color:rgba(255,255,255,.35)}
 .id-head {
   display: flex;
   align-items: center;
@@ -154,7 +155,7 @@ button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s 
 .id-field b {
   display: block;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 9.5px;
   line-height: 1.05;
   text-transform: uppercase;
   letter-spacing: .04em;
@@ -163,7 +164,7 @@ button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s 
 .id-field span {
   display: block;
   min-width: 0;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.15;
   white-space: nowrap;
   overflow: hidden;
@@ -896,11 +897,13 @@ button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s 
   }
 
   .id-field b {
-    font-size: 6px;
+    font-size: clamp(7.5px, 2.2vw, 9px);
+    line-height: 1.05;
   }
 
   .id-field span {
-    font-size: clamp(7px, 2vw, 9px);
+    font-size: clamp(9px, 2.55vw, 11px);
+    line-height: 1.12;
   }
 
   /* Generated receipt markup contains inline desktop widths; mobile overrides keep it inside the card. */
@@ -1139,34 +1142,5 @@ button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s 
   .edit-photo-remove{margin-top:8px}
 }
 
-/* RMCTI ID card refresh: only affects admin teacher/student ID cards. */
-.id-card-modal .id-card-export{width:min(100%,620px);max-width:620px}
-.id-card-modal .id-card{width:100%;aspect-ratio:1.586/1;padding:0;display:flex;flex-direction:column;overflow:hidden;border:1px solid #cbd5e1;border-radius:16px;background:linear-gradient(145deg,#fff,#f4f7fb);box-shadow:0 12px 30px rgba(15,23,42,.16);position:relative;color:#0f172a}
-.id-card-modal .id-card-topline{height:48px;flex:0 0 48px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 18px;background:linear-gradient(90deg,#0b1a30,#004b87);color:#fff;font-size:10px;letter-spacing:.08em;font-weight:800}
-.id-card-modal .id-card-topline strong{font-size:18px;letter-spacing:.06em}
-.id-card-modal .id-card-body{display:grid;grid-template-columns:118px minmax(0,1fr);gap:15px;padding:14px 18px 8px;min-height:0;flex:1}
-.id-card-modal .id-photo-wrap{display:flex;align-items:center;justify-content:center}
-.id-card-modal .id-photo{width:104px;height:132px;max-width:104px;display:block;object-fit:cover;object-position:center;border:3px solid #fff;outline:1px solid #cbd5e1;border-radius:8px;background:#e2e8f0;box-shadow:0 5px 14px rgba(15,23,42,.12)}
-.id-card-modal .id-card-main{min-width:0;overflow:hidden}
-.id-card-modal .id-head{display:flex;align-items:center;gap:8px;min-width:0;padding-bottom:6px;margin-bottom:4px;border-bottom:1px solid #e2e8f0}
-.id-card-modal .id-logo{width:34px;height:34px;flex:0 0 34px;display:block;object-fit:contain;border-radius:6px;background:#fff;padding:2px;border:1px solid #e2e8f0}
-.id-card-modal .id-head b{display:block;font-size:12px;line-height:1.15;letter-spacing:.02em}
-.id-card-modal .id-head small{display:block;margin-top:2px;font-size:8px;color:#64748b}
-.id-card-modal .id-person-name{margin:4px 0 0;font-size:19px;line-height:1.05;font-weight:850;color:#0b1a30;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.id-card-modal .id-role{display:inline-block;margin:3px 0 6px;padding:3px 7px;border-radius:999px;background:#e8f1f8;color:#004b87;font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
-.id-card-modal .id-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px 10px;max-height:86px;overflow:hidden}
-.id-card-modal .id-field{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px;min-width:0;font-size:8px;line-height:1.2}
-.id-card-modal .id-field b{color:#64748b;font-size:7px;text-transform:uppercase;letter-spacing:.03em}
-.id-card-modal .id-field span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:650}
-.id-card-modal .id-card-footer{height:28px;flex:0 0 28px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:#eef3f7;border-top:1px solid #dbe3ea;color:#475569;font-size:8px;font-weight:800;letter-spacing:.03em}
-.id-card-modal .id-card-footer span:last-child{color:#004b87}
-.id-card-modal>.right{width:min(100%,620px)}
-@media(max-width:767px){
-  .id-card-modal .id-card-export,.id-card-modal>.right{width:100%;max-width:100%}
-  .id-card-modal .id-card{aspect-ratio:1.586/1;border-radius:12px}
-  .id-card-modal .id-card-topline{height:36px;flex-basis:36px;padding:0 10px;font-size:7px}.id-card-modal .id-card-topline strong{font-size:13px}
-  .id-card-modal .id-card-body{grid-template-columns:25% minmax(0,1fr);gap:7px;padding:8px 10px 5px}
-  .id-card-modal .id-photo{width:100%;height:auto;max-width:100%;aspect-ratio:.79/1;border-width:2px;border-radius:6px}
-  .id-card-modal .id-head{gap:5px;padding-bottom:3px;margin-bottom:2px}.id-card-modal .id-logo{width:24px;height:24px;flex-basis:24px}.id-card-modal .id-head b{font-size:8px}.id-card-modal .id-head small{font-size:6px}
-  .id-card-modal .id-person-name{font-size:13px}.id-card-modal .id-role{font-size:6px;padding:2px 5px;margin:2px 0 3px}.id-card-modal .id-grid{gap:2px 6px;max-height:54px}.id-card-modal .id-field{font-size:6px;gap:2px}.id-card-modal .id-field b{font-size:5px}.id-card-modal .id-card-footer{height:20px;flex-basis:20px;padding:0 10px;font-size:6px}
-}
+.day-pick-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.day-pick-grid label{display:flex;align-items:center;gap:7px;padding:9px 10px;border:1px solid var(--border);border-radius:9px;background:var(--muted-surface);font-size:13px}.day-pick-grid input{accent-color:var(--primary)}
+@media(max-width:600px){.day-pick-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.day-pick-grid label{font-size:12px}}

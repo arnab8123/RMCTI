@@ -321,6 +321,55 @@ def _student_objs_bulk(students, private=True):
     return out
 
 
+
+def _week_start(d):
+    return d - timedelta(days=d.weekday())
+
+def _schedule_overrides(class_id, week_start):
+    return ScheduleException.query.filter_by(class_id=class_id, week_start=week_start).all()
+
+def _effective_class_schedule(c, start_date, days=7):
+    overrides=_schedule_overrides(c.id,_week_start(start_date))
+    allocations=TeacherClass.query.filter_by(class_id=c.id,status="active").all()
+    teacher_ids={a.teacher_id for a in allocations}
+    teacher_ids.update(e.teacher_id for e in overrides if e.teacher_id)
+    teachers={t.id:t for t in Teacher.query.filter(Teacher.id.in_(teacher_ids or [-1])).all()}
+    out=[]
+    for off in range(days):
+        d=start_date+timedelta(days=off)
+        for tc in allocations:
+            if tc.day_of_week != d.weekday(): continue
+            specific=next((e for e in overrides if e.allocation_id==tc.id and e.schedule_date==d and e.kind in ("delete","reschedule")),None)
+            if specific and specific.kind=="delete": continue
+            ex=next((e for e in overrides if e.allocation_id==tc.id and e.kind=="weekly_time"),None)
+            start=(specific.start_time if specific and specific.start_time else (ex.start_time if ex and ex.start_time else tc.start_time))
+            end=(specific.end_time if specific and specific.end_time else (ex.end_time if ex and ex.end_time else tc.end_time))
+            tid=(specific.teacher_id if specific and specific.teacher_id else tc.teacher_id)
+            t=teachers.get(tid)
+            out.append({"date":d.isoformat(),"allocation_id":tc.id,"teacher_id":t.id if t else None,
+                        "teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,
+                        "start_time":start.strftime("%H:%M"),"end_time":end.strftime("%H:%M"),
+                        "day_of_week":d.weekday(),"room":c.room,"kind":"rescheduled" if specific else "regular"})
+    for ex in overrides:
+        if ex.kind=="extra" and ex.schedule_date and start_date <= ex.schedule_date < start_date+timedelta(days=days):
+            t=teachers.get(ex.teacher_id)
+            out.append({"date":ex.schedule_date.isoformat(),"allocation_id":None,"teacher_id":t.id if t else None,
+                        "teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,
+                        "start_time":ex.start_time.strftime("%H:%M") if ex.start_time else "",
+                        "end_time":ex.end_time.strftime("%H:%M") if ex.end_time else "",
+                        "day_of_week":ex.schedule_date.weekday(),"room":c.room,"kind":"extra"})
+    for ex in overrides:
+        if ex.kind=="reschedule" and ex.target_date and start_date <= ex.target_date < start_date+timedelta(days=days):
+            t=teachers.get(ex.teacher_id)
+            if t is None and ex.allocation_id:
+                tc=TeacherClass.query.get(ex.allocation_id); t=teachers.get(tc.teacher_id) if tc else None
+            out.append({"date":ex.target_date.isoformat(),"allocation_id":ex.allocation_id,"teacher_id":t.id if t else None,
+                        "teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,
+                        "start_time":ex.start_time.strftime("%H:%M") if ex.start_time else "",
+                        "end_time":ex.end_time.strftime("%H:%M") if ex.end_time else "",
+                        "day_of_week":ex.target_date.weekday(),"room":c.room,"kind":"rescheduled"})
+    return sorted(out,key=lambda x:(x["date"],x["start_time"],x["teacher_name"] or ""))
+
 def class_obj(c):
     subjects={s.id:s for s in Subject.query.filter(Subject.id==c.subject_id).all()}
     alloc_rows=TeacherClass.query.filter_by(class_id=c.id,status="active").all()
@@ -500,6 +549,68 @@ def remove_teacher(id):
     for x in TeacherClass.query.filter_by(teacher_id=t.id).all():x.status="inactive"
     audit(current_user().id,"unregister","teacher",t.id,t.teacher_id);db.session.commit();return ok(message="Teacher unregistered successfully")
 
+
+@api.get("/schedule-exceptions")
+@roles("admin")
+def schedule_exceptions():
+    cid=request.args.get("class_id",type=int)
+    ws=request.args.get("week_start")
+    if not cid:return err("class_id is required")
+    try: week=date.fromisoformat(ws) if ws else _week_start(today_ist())
+    except Exception:return err("Invalid week_start")
+    rows=_schedule_overrides(cid,week)
+    return ok([{"id":x.id,"allocation_id":x.allocation_id,"kind":x.kind,"week_start":x.week_start.isoformat(),
+                "schedule_date":x.schedule_date.isoformat() if x.schedule_date else None,
+                "target_date":x.target_date.isoformat() if x.target_date else None,
+                "start_time":x.start_time.strftime("%H:%M") if x.start_time else None,
+                "end_time":x.end_time.strftime("%H:%M") if x.end_time else None,
+                "teacher_id":x.teacher_id} for x in rows])
+
+@api.post("/schedule-exceptions")
+@roles("admin")
+def create_schedule_exception():
+    b=request.get_json(silent=True) or {}
+    try:
+        cid=int(b["class_id"]); c=Class.query.get(cid)
+        if not c or c.status!="active":return err("Course not found",404)
+        kind=str(b.get("kind","")).strip().lower()
+        if kind not in ("delete","reschedule","extra","weekly_time"):return err("Invalid schedule action")
+        ws=date.fromisoformat(str(b["week_start"]))
+        allocation_id=int(b["allocation_id"]) if b.get("allocation_id") else None
+        schedule_date=date.fromisoformat(b["schedule_date"]) if b.get("schedule_date") else None
+        target_date=date.fromisoformat(b["target_date"]) if b.get("target_date") else None
+        teacher_id=int(b["teacher_id"]) if b.get("teacher_id") else None
+        start=pt(b["start_time"],True) if b.get("start_time") else None
+        end=pt(b["end_time"],True) if b.get("end_time") else None
+        if kind in ("reschedule","extra","weekly_time") and (not start or not end or start>=end):return err("Valid start and end time are required")
+        if kind in ("delete","reschedule") and (not allocation_id or not schedule_date):return err("Original class and date are required")
+        if kind=="reschedule" and not target_date:return err("New date is required")
+        if kind=="extra" and not schedule_date:return err("Extra class date is required")
+        if kind=="weekly_time" and not allocation_id:return err("Class allocation is required")
+        if allocation_id:
+            tc=TeacherClass.query.get(allocation_id)
+            if not tc or tc.class_id!=cid or tc.status!="active":return err("Allocation not found",404)
+            if kind in ("delete","reschedule") and schedule_date.weekday()!=tc.day_of_week:return err("Original date must be the normal class day")
+        if teacher_id and not Teacher.query.get(teacher_id):return err("Teacher not found",404)
+        if kind=="extra" and not teacher_id:return err("Teacher is required for an extra class")
+        if kind=="reschedule" and target_date.weekday()==schedule_date.weekday() and start==tc.start_time and end==tc.end_time:
+            return err("Choose a different date or time")
+        ex=ScheduleException(class_id=cid,allocation_id=allocation_id,week_start=ws,schedule_date=schedule_date,
+            target_date=target_date,kind=kind,start_time=start,end_time=end,
+            teacher_id=teacher_id or (TeacherClass.query.get(allocation_id).teacher_id if allocation_id else None),
+            created_by=current_user().id)
+        db.session.add(ex);audit(current_user().id,"schedule_change","schedule_exception",None,f"{kind} for class {c.class_name} week {ws}");db.session.commit()
+        return ok({"id":ex.id},"Schedule updated",201)
+    except Exception:
+        db.session.rollback();return err("Invalid schedule change")
+
+@api.delete("/schedule-exceptions/<int:id>")
+@roles("admin")
+def delete_schedule_exception(id):
+    ex=ScheduleException.query.get(id)
+    if not ex:return err("Schedule change not found",404)
+    db.session.delete(ex);db.session.commit();return ok(message="Schedule change removed")
+
 @api.get("/classes")
 @roles("admin","teacher","student")
 def classes():
@@ -520,6 +631,17 @@ def get_class(id):
     data=class_obj(c)
     data["students"]=[{"id":s.id,"student_id":s.student_id,"name":s.name,"phone":s.phone,"status":s.status} for s in students]
     return ok(data)
+
+
+@api.get("/classes/<int:id>/schedule-week")
+@roles("admin","teacher","student")
+def class_schedule_week(id):
+    c=Class.query.get(id)
+    if not c or c.status!="active":return err("Course not found",404)
+    ws=request.args.get("week_start")
+    try:start=date.fromisoformat(ws) if ws else _week_start(today_ist())
+    except Exception:return err("Invalid week_start")
+    return ok(_effective_class_schedule(c,start,7))
 
 @api.delete("/student-classes/<int:id>")
 @roles("admin")
@@ -599,10 +721,16 @@ def deactivate_class(id):
 def add_allocation():
     b=request.get_json() or {}
     try:
-        tid=int(b["teacher_id"]);cid=int(b["class_id"]);day=int(b["day_of_week"]);start=pt(b["start_time"],True);end=pt(b["end_time"],True)
+        tid=int(b["teacher_id"]);cid=int(b["class_id"]);start=pt(b["start_time"],True);end=pt(b["end_time"],True)
+        days=b.get("day_of_week_multi") or b.get("day_of_week")
+        if not isinstance(days,list): days=[days]
+        days=[int(x) for x in days if str(x).strip()!=""]
+        if not days: return err("Select at least one day")
         if start>=end:return err("End time must be after start time")
-        if TeacherClass.query.filter(TeacherClass.teacher_id==tid,TeacherClass.day_of_week==day,TeacherClass.status=="active",TeacherClass.start_time<end,TeacherClass.end_time>start).first():return err("Teacher schedule overlaps",409)
-        tc=TeacherClass(teacher_id=tid,class_id=cid,day_of_week=day,start_time=start,end_time=end);db.session.add(tc);db.session.commit();return ok(class_obj(Class.query.get(cid)),"Class assigned",201)
+        for day in days:
+            if TeacherClass.query.filter(TeacherClass.teacher_id==tid,TeacherClass.day_of_week==day,TeacherClass.status=="active",TeacherClass.start_time<end,TeacherClass.end_time>start).first():return err("Teacher schedule overlaps",409)
+        for day in days: db.session.add(TeacherClass(teacher_id=tid,class_id=cid,day_of_week=day,start_time=start,end_time=end))
+        db.session.commit();return ok(class_obj(Class.query.get(cid)),"Class assigned",201)
     except Exception:db.session.rollback();return err("Invalid class allocation")
 @api.put("/teacher-classes/<int:id>")
 @roles("admin")
@@ -1026,7 +1154,15 @@ def _fee_for_month_from_rows(rows, month):
     for row in rows:
         if row.effective_from<=m and (row.effective_to is None or row.effective_to>=m):
             latest.setdefault(row.class_id,row)
-    return sum((Decimal(str(row.monthly_fee)) for row in latest.values()),Decimal("0.00"))
+    base=sum((Decimal(str(row.monthly_fee)) for row in latest.values()),Decimal("0.00"))
+    # Late fee: every 15th that has passed while that month's fee remains unpaid
+    # adds ₹50. Thus a ₹300 fee for January becomes ₹500 after April 15.
+    today=today_ist()
+    if base <= 0 or m > today.replace(day=1):
+        return base
+    months=(today.year-m.year)*12 + (today.month-m.month)
+    penalty_cycles=months + (1 if today.day >= 15 else 0)
+    return base + Decimal("50.00") * Decimal(max(0,penalty_cycles))
 
 
 def oldest_due_month(sid):
@@ -1075,7 +1211,7 @@ def fees():
     payments={p.student_id:p for p in FeePayment.query.filter(FeePayment.student_id.in_(ids or [-1]),FeePayment.fee_month==m).all()}
     out=[]
     for s in students:
-        due=sum((Decimal(str(latest_by_class[cid].monthly_fee)) for cid in class_ids[s.id] if cid in latest_by_class),Decimal("0.00"));p=payments.get(s.id);status="PAID" if p else ("DUE" if due else "N/A")
+        due=_fee_for_month_from_rows([latest_by_class[cid] for cid in class_ids[s.id] if cid in latest_by_class],m);p=payments.get(s.id);status="PAID" if p else ("DUE" if due else "N/A")
         if st and st!=status:continue
         out.append({"student_id":s.id,"student_code":s.student_id,"student_name":s.name,"fee_month":m.strftime("%Y-%m"),"amount":float(p.amount if p else due),"status":status,"receipt_number":p.receipt_number if p else None})
     return ok(out)
@@ -1185,11 +1321,25 @@ def attendance_state(tc, now=None):
 @api.get("/teacher/classes")
 @roles("teacher")
 def my_classes():
-    t=teacher_for_user(); now=datetime.now(ZoneInfo("Asia/Kolkata")); allocations=TeacherClass.query.filter_by(teacher_id=t.id,status="active").all();class_ids=[a.class_id for a in allocations];classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1]),Class.status=="active").all()};items={x["id"]:x for x in _class_objs_bulk(classes.values())};out=[]
+    t=teacher_for_user(); now=datetime.now(ZoneInfo("Asia/Kolkata"))
+    allocations=TeacherClass.query.filter_by(teacher_id=t.id,status="active").all()
+    class_ids=[a.class_id for a in allocations]
+    classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1]),Class.status=="active").all()}
+    items={x["id"]:x for x in _class_objs_bulk(classes.values())};out=[]
     for a in allocations:
         item=items.get(a.class_id)
         if not item:continue
-        item=dict(item);st=attendance_state(a,now);item["attendance_active"]=st["active"];item["attendance_schedule"]={"day_of_week":st["day_of_week"],"start_time":st["start_time"],"end_time":st["end_time"]};out.append(item)
+        item=dict(item)
+        effective=[x for x in _effective_class_schedule(classes[a.class_id],now.date(),1) if x.get("allocation_id")==a.id and x.get("teacher_id")==t.id]
+        row=effective[0] if effective else None
+        if row:
+            active=row["start_time"] <= now.strftime("%H:%M") <= row["end_time"]
+            item["attendance_active"]=active
+            item["attendance_schedule"]={"day_of_week":now.weekday(),"start_time":row["start_time"],"end_time":row["end_time"]}
+        else:
+            item["attendance_active"]=False
+            item["attendance_schedule"]={"day_of_week":now.weekday(),"start_time":None,"end_time":None}
+        out.append(item)
     return ok(out)
 
 @api.get("/teacher/classes/<int:class_id>/attendance")
@@ -1201,9 +1351,12 @@ def get_attendance(class_id):
     now=datetime.now(ZoneInfo("Asia/Kolkata"))
     allocations=TeacherClass.query.filter_by(teacher_id=t.id,class_id=class_id,status="active").all()
     if not allocations:return err("Class not assigned to you",403)
-    active_alloc=next((a for a in allocations if attendance_state(a,now)["active"]),None)
     c=Class.query.get(class_id)
     if not c or c.status!="active":return err("Course not found",404)
+    active_alloc=None
+    for a in allocations:
+        if any(x.get("allocation_id")==a.id and x.get("teacher_id")==t.id and x["start_time"] <= now.strftime("%H:%M") <= x["end_time"] for x in _effective_class_schedule(c,now.date(),1)):
+            active_alloc=a;break
     students=(Student.query.join(StudentClass,StudentClass.student_id==Student.id)
               .filter(StudentClass.class_id==class_id,StudentClass.status=="active",Student.status=="active")
               .order_by(Student.name.asc()).all())
@@ -1220,13 +1373,14 @@ def save_attendance(class_id):
     """Submit the complete attendance sheet in one transaction."""
     t=teacher_for_user()
     now=datetime.now(ZoneInfo("Asia/Kolkata"))
-    allocation=next((a for a in TeacherClass.query.filter_by(
-        teacher_id=t.id,class_id=class_id,status="active").all()
-        if attendance_state(a,now)["active"]),None)
-    if not allocation:
-        return err("Attendance can only be submitted during the scheduled class hours",403)
     c=Class.query.get(class_id)
     if not c or c.status!="active":return err("Course not found",404)
+    allocation=None
+    for a in TeacherClass.query.filter_by(teacher_id=t.id,class_id=class_id,status="active").all():
+        if any(x.get("allocation_id")==a.id and x.get("teacher_id")==t.id and x["start_time"] <= now.strftime("%H:%M") <= x["end_time"] for x in _effective_class_schedule(c,now.date(),1)):
+            allocation=a;break
+    if not allocation:
+        return err("Attendance can only be submitted during the scheduled class hours",403)
 
     b=request.get_json() or {}
     rows=b.get("attendance")
