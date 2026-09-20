@@ -18,7 +18,24 @@ const Page = (() => {
     const isStudent=kind==='student', id=isStudent?person.student_id:person.teacher_id;
     const target=`id-card-${kind}-${person.id}`;
     const fields=isStudent?[['Name',person.name],['ID',id],['Gender',person.gender],['Date of Birth',U.date(person.dob)],['Phone',person.phone],['School',person.school_name],['Guardian',person.parent?.name],['Guardian Phone',person.parent?.phone],['Admission Date',U.date(person.admission_date)],['Status',person.status],['Classes',(person.classes||[]).map(c=>`${c.class_name} · ${c.subject}`).join('; ')||'—']]:[['Name',person.name],['ID',id],['Gender',person.gender],['Date of Birth',U.date(person.dob)],['Phone',person.phone],['Email',person.email],['Qualification',person.qualification],['Experience',person.experience],['Joining Date',U.date(person.joining_date)],['Status',person.status],['Classes',(person.classes||[]).map(c=>`${c.class_name} · ${c.subject}`).join('; ')||'—']];
-    return `<div class="id-card-modal"><div id="${target}" class="id-card-export"><div class="id-card"><img class="id-photo" crossorigin="anonymous" src="${U.photoUrl(person.photo)}" alt="${U.esc(person.name)} photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"><div><div class="id-head"><img class="id-logo" crossorigin="anonymous" src="${U.photoUrl('/asset/image.jpeg')}" alt="RMCTI"><div><b>RMCTI</b><div class="muted">${isStudent?'Student Identification Card':'Teacher Identification Card'}</div></div></div><div class="id-grid">${fields.map(([k,v])=>`<div class="id-field"><b>${U.esc(k)}</b><span>${U.esc(v||'—')}</span></div>`).join('')}</div></div></div></div><div class="right" style="justify-content:flex-end;margin-top:14px"><button type="button" class="btn secondary" data-download-id-card data-target-id="${target}">Download JPEG</button><button type="button" class="btn primary" data-close>Close</button></div></div>`;
+    const detailRows=fields.map(([k,v])=>`<div class="id-field"><b>${U.esc(k)}</b><span>${U.esc(v||'—')}</span></div>`).join('');
+    return `<div class="id-card-modal"><div id="${target}" class="id-card-export">
+      <div class="id-card">
+        <div class="id-card-gold-header">
+          <img class="id-logo" crossorigin="anonymous" src="${U.photoUrl('/asset/image.jpeg')}" alt="RMCTI Logo">
+          <div><b>RMCTI</b><span>Ratna's Modern Computer Training Institute</span></div>
+        </div>
+        <div class="id-card-body">
+          <div class="id-details">
+            <div class="id-card-type">${isStudent?'STUDENT IDENTIFICATION CARD':'TEACHER IDENTIFICATION CARD'}</div>
+            <div class="id-grid">${detailRows}</div>
+          </div>
+          <div class="id-photo-wrap">
+            <img class="id-photo" crossorigin="anonymous" src="${U.photoUrl(person.photo)}" alt="${U.esc(person.name)} photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';">
+          </div>
+        </div>
+      </div>
+    </div><div class="right" style="justify-content:flex-end;margin-top:14px"><button type="button" class="btn secondary" data-download-id-card data-target-id="${target}">Download JPEG</button><button type="button" class="btn primary" data-close>Close</button></div></div>`;
   }
 
   function bindIdCardDownload(modal, person, kind) {
