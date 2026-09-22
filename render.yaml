@@ -3,6 +3,6 @@ services:
     name: rmcti
     runtime: python
     buildCommand: pip install -r requirements.txt && python scripts/migrate.py
-    startCommand: gunicorn --workers 2 --threads 4 --timeout 120 backend.app:app
+    startCommand: gunicorn --workers 2 --threads 4 --timeout 60 --keep-alive 5 backend.app:app
     healthCheckPath: /health
     autoDeploy: true
