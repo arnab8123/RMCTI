@@ -90,7 +90,7 @@ CREATE TABLE fee_payments (
  amount DECIMAL(10,2) NOT NULL, payment_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
  payment_method ENUM('cash','upi','bank_transfer','other') NOT NULL, collected_by BIGINT UNSIGNED NOT NULL,
  receipt_number VARCHAR(50) NOT NULL UNIQUE, notes TEXT,
- UNIQUE KEY uq_student_month(student_id,fee_month),
+ INDEX idx_fee_payments_student_month_payment(student_id,fee_month,payment_date,id),
  FOREIGN KEY(student_id) REFERENCES students(id), FOREIGN KEY(collected_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 CREATE TABLE receipts (

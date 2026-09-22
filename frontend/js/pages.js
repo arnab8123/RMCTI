@@ -17,8 +17,8 @@ const Page = (() => {
   function idCard(person,kind) {
     const isStudent=kind==='student';
     const fields=isStudent
-      ? [['Name',person.name,true],['Student ID',person.student_id,true],['Phone',person.phone],['Date of Birth',person.dob],['Address',person.address]]
-      : [['Name',person.name,true],['Teacher ID',person.teacher_id,true],['Phone',person.phone],['Email',person.email],['Date of Birth',person.dob],['Address',person.address]];
+      ? [['Name',person.name,true],['Student ID',person.student_id,true],['Phone',person.phone],['Date of Birth',person.dob ? U.date(person.dob) : ''],['Address',person.address]]
+      : [['Name',person.name,true],['Teacher ID',person.teacher_id,true],['Phone',person.phone],['Email',person.email],['Date of Birth',person.dob ? U.date(person.dob) : ''],['Address',person.address]];
     const target=`id-card-${kind}-${person.id}`;
     return `<div class="id-card-modal"><div id="${target}" class="id-card-export"><div class="id-card">
       <div class="id-card-header">
@@ -354,7 +354,7 @@ const Page = (() => {
         action.addEventListener('change',refreshFields); refreshFields();
         const loadChanges=async()=>{
           const rows=await Api.get('/schedule-exceptions',{class_id:classId,week_start:m.querySelector('[name="week_start"]').value});
-          fill(m.querySelector('[data-res-list]'),rows.map(x=>`<div class="card pad"><div><b>${U.esc(x.kind.replace('_',' '))}</b> · ${U.esc(x.schedule_date||'week')}</div><div class="muted">${x.target_date?`Moved to ${U.esc(x.target_date)} · `:''}${x.start_time?`${x.start_time}–${x.end_time}`:''}</div><button class="btn danger small" data-res-delete="${x.id}">Remove change</button></div>`).join('')||'<div class="empty">No changes for this week.</div>');
+          fill(m.querySelector('[data-res-list]'),rows.map(x=>`<div class="card pad"><div><b>${U.esc(x.kind.replace('_',' '))}</b> · ${U.date(x.schedule_date)}</div><div class="muted">${x.target_date?`Moved to ${U.date(x.target_date)} · `:''}${x.start_time?`${x.start_time}–${x.end_time}`:''}</div><button class="btn danger small" data-res-delete="${x.id}">Remove change</button></div>`).join('')||'<div class="empty">No changes for this week.</div>');
         };
         form.addEventListener('submit',async ev=>{
           ev.preventDefault();
@@ -530,7 +530,7 @@ const Page = (() => {
   }
 
   async function allocationPage() {
-    const [teachers, classes, subjects] = await Promise.all([Api.get('/teachers', { status: 'active' }), Api.get('/classes', { status: 'active' }), Api.get('/subjects')]);
+    const [teachers, classes, subjects] = await Promise.all([Api.get('/teachers', { status: 'active' }), Api.get('/classes', { status: 'active', include_unassigned: '1' }), Api.get('/subjects')]);
     fill(q('[data-teacher]'), teachers.map((t) => `<option value="${t.id}">${U.esc(t.name)} · ${U.esc(t.teacher_id)}</option>`).join(''));
     fill(q('[data-class]'), classes.map((c) => `<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}</option>`).join(''));
     const classForm = q('form[data-class-form]');
@@ -576,12 +576,37 @@ const Page = (() => {
       })).join('');
       fill(body, html || tableEmpty(8));
     };
-    form?.addEventListener('submit', async (e) => { e.preventDefault(); try { const id = form.dataset.editId; const payload = formObj(form); if (id) { await Api.put(`/teacher-classes/${id}`, payload); delete form.dataset.editId; form.querySelector('button[type=\"submit\"]').textContent = 'Allocate course'; U.toast('Allocation updated'); } else { await Api.post('/teacher-classes', payload); U.toast('Class allocated'); } form.reset(); load(); } catch (x) { U.toast(x.message, 'error'); } });
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const id = form.dataset.editId;
+        const payload = formObj(form);
+        const teachersSelected=[...form.querySelectorAll('[name="teacher_id"]:checked')].map(x=>Number(x.value));
+        const days=[...form.querySelectorAll('[name="day_of_week_multi"]:checked')].map(x=>Number(x.value));
+        if(id){
+          payload.day_of_week=days[0] ?? Number(payload.day_of_week ?? 0);
+          await Api.put(`/teacher-classes/${id}`, payload);
+          delete form.dataset.editId;
+          form.querySelector('button[type="submit"]').textContent='Allocate class';
+          U.toast('Allocation updated');
+        } else {
+          payload.teacher_ids=teachersSelected;
+          payload.days=days;
+          delete payload.teacher_id;
+          delete payload.day_of_week_multi;
+          if(!teachersSelected.length) throw Error('Select at least one teacher');
+          if(!days.length) throw Error('Select at least one day');
+          await Api.post('/teacher-classes', payload);
+          U.toast(`${teachersSelected.length} teacher${teachersSelected.length===1?'':'s'} allocated`);
+        }
+        form.reset(); load();
+      } catch (x) { U.toast(x.message || 'Could not save allocation', 'error'); }
+    });
     body?.addEventListener('click', async (e) => {
       const del = e.target.dataset.del; const edit = e.target.dataset.editAllocation; const deleteClass = e.target.dataset.deleteClass;
       if (deleteClass) return adminVerifiedAction('Delete class','This permanently removes the class, its allocations, fee structures, homework, classwork and attendance. It will no longer appear anywhere on the website.',async()=>{await Api.del(`/classes/${deleteClass}`);U.toast('Class deleted permanently');load();});
       if (del) { await Api.del(`/teacher-classes/${del}`); U.toast('Allocation deactivated'); load(); return; }
-      if (edit) { q('[name="teacher_id"]').value = e.target.dataset.teacher; q('[name="class_id"]').value = e.target.dataset.classId; q('[name="day_of_week"]').value = e.target.dataset.day; form.querySelectorAll('[name="day_of_week_multi"]').forEach(cb=>cb.checked=Number(cb.value)===Number(e.target.dataset.day)); q('[name="start_time"]').value = e.target.dataset.start; q('[name="end_time"]').value = e.target.dataset.end; form.dataset.editId = edit; form.querySelector('button[type="submit"]').textContent = 'Update allocation'; window.scrollTo({ top: 0, behavior: 'smooth' }); }
+      if (edit) { form.querySelectorAll('[name="teacher_id"]').forEach(x=>x.checked=String(x.value)===String(e.target.dataset.teacher)); q('[name="class_id"]').value = e.target.dataset.classId; q('[name="day_of_week"]').value = e.target.dataset.day; form.querySelectorAll('[name="day_of_week_multi"]').forEach(cb=>cb.checked=Number(cb.value)===Number(e.target.dataset.day)); q('[name="start_time"]').value = e.target.dataset.start; q('[name="end_time"]').value = e.target.dataset.end; form.dataset.editId = edit; form.querySelector('button[type="submit"]').textContent = 'Update allocation'; window.scrollTo({ top: 0, behavior: 'smooth' }); }
     });
     await load();
   }
@@ -617,9 +642,9 @@ const Page = (() => {
     const load = async () => {
       if (!studentSelect?.value) { currentFeeData=null; fill(q('[data-history]'), '<div class="empty">No student selected.</div>'); if(monthInput) monthInput.value=''; if(amountInput) amountInput.value=''; return; }
       const d = await Api.get(`/fees/student/${studentSelect.value}`); currentFeeData=d;
-      fill(q('[data-history]'), `<div class="table"><table><tr><th>Month</th><th>Amount</th><th>Status</th><th>Receipt</th></tr>${(d.history || []).map((h) => `<tr><td>${U.esc(h.month_label)}</td><td>${U.money(h.amount)}</td><td><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></td><td>${U.esc(h.receipt_number || '—')}</td></tr>`).join('')}</table></div>`);
+      fill(q('[data-history]'), `<div class="table"><table><tr><th>Month</th><th>Fee + Fine</th><th>Paid</th><th>Remaining</th><th>Status</th><th>Receipt</th></tr>${(d.history || []).map((h) => `<tr><td>${U.esc(h.month_label)}</td><td>${U.money(h.amount)}</td><td>${U.money(h.paid_amount)}</td><td>${U.money(h.due_amount)}</td><td><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'PARTIAL' || h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></td><td>${U.esc(h.receipt_number || '—')}</td></tr>`).join('')}</table></div>`);
       if(monthInput){monthInput.value=d.oldest_due_month || U.today().slice(0,7);monthInput.readOnly=true;monthInput.title=d.oldest_due_month?'Oldest due month is selected automatically':'No unpaid month is due; current month is selected.';}
-      if(amountInput) amountInput.value=d.oldest_due_amount>0?d.oldest_due_amount:d.current_monthly_fee||'';
+      if(amountInput) { amountInput.value=d.oldest_due_amount>0?Math.max(d.minimum_payment||0,d.oldest_due_amount):d.current_monthly_fee||''; amountInput.min=String(d.minimum_payment||0); amountInput.title=`Minimum ₹${Number(d.minimum_payment||0).toFixed(2)} (actual monthly fee). There is no maximum; excess carries forward.`; }
     };
 
     studentSelect?.addEventListener('change', load);
@@ -632,7 +657,7 @@ const Page = (() => {
         const body = formObj(e.currentTarget);
         body.student_id = Number(studentSelect.value);
         body.month = currentFeeData?.oldest_due_month || U.today().slice(0,7);
-        body.amount = currentFeeData?.oldest_due_amount > 0 ? currentFeeData.oldest_due_amount : Number(amountInput.value);
+        body.amount = Number(amountInput.value);
         const btn=e.currentTarget.querySelector('button[type="submit"]') || e.currentTarget.querySelector('button'); if(btn) btn.disabled=true;
         const r = await Api.post('/fees/payment', body);
         U.toast('Fee payment recorded');

@@ -689,6 +689,8 @@ def classes():
     # A deactivated class is permanently deleted by the admin mutation above.
     q=request.args.get("q","").strip()
     query=Class.query.filter_by(status="active")
+    if request.args.get("include_unassigned") not in ("1","true","yes"):
+        query=query.join(TeacherClass,TeacherClass.class_id==Class.id).filter(TeacherClass.status=="active").distinct()
     if q:query=query.filter(or_(Class.class_name.like(f"%{q}%"),Class.batch.like(f"%{q}%")))
     return ok(_class_objs_bulk(query.order_by(Class.class_name,Class.batch).limit(_bounded_limit()).all()))
 @api.get("/classes/<int:id>")
@@ -818,19 +820,32 @@ def _schedule_conflict(teacher_id, class_id, day, start, end, exclude_id=None):
 def add_allocation():
     b=request.get_json() or {}
     try:
-        tid=int(b["teacher_id"]);cid=int(b["class_id"]);start=pt(b["start_time"],True);end=pt(b["end_time"],True)
+        raw_teacher_ids=b.get("teacher_ids")
+        if isinstance(raw_teacher_ids,list):
+            teacher_ids=[]
+            for value in raw_teacher_ids:
+                try: teacher_ids.append(int(value))
+                except (TypeError,ValueError): pass
+            teacher_ids=list(dict.fromkeys(teacher_ids))
+        else:
+            teacher_ids=[int(b["teacher_id"])] if b.get("teacher_id") else []
+        cid=int(b["class_id"]);start=pt(b["start_time"],True);end=pt(b["end_time"],True)
         days=b.get("day_of_week_multi") or b.get("day_of_week")
         if not isinstance(days,list): days=[days]
         days=[int(x) for x in days if str(x).strip()!=""]
-        if not days: return err("Select at least one day")
+        if not teacher_ids:return err("Select at least one teacher")
+        if not days:return err("Select at least one day")
         if start>=end:return err("End time must be after start time")
-        teacher=Teacher.query.get(tid); course=Class.query.get(cid)
-        if not teacher or teacher.status!="active" or not course or course.status!="active":
-            return err("Teacher or course is not active",409)
-        for day in days:
-            conflict=_schedule_conflict(tid,cid,day,start,end)
-            if conflict:return err(conflict,409)
-        for day in days: db.session.add(TeacherClass(teacher_id=tid,class_id=cid,day_of_week=day,start_time=start,end_time=end))
+        selected=Teacher.query.filter(Teacher.id.in_(teacher_ids),Teacher.status=="active").all()
+        if len(selected)!=len(teacher_ids):return err("One or more selected teachers are not active",409)
+        course=Class.query.get(cid)
+        if not course or course.status!="active":return err("Course is not active",409)
+        for tid in teacher_ids:
+            for day in days:
+                conflict=_schedule_conflict(tid,cid,day,start,end)
+                if conflict:return err(conflict,409)
+        for tid in teacher_ids:
+            for day in days: db.session.add(TeacherClass(teacher_id=tid,class_id=cid,day_of_week=day,start_time=start,end_time=end))
         db.session.commit();return ok(class_obj(Class.query.get(cid)),"Class assigned",201)
     except Exception:db.session.rollback();return err("Invalid class allocation")
 @api.put("/teacher-classes/<int:id>")
@@ -1257,15 +1272,18 @@ def _fee_rows_for_student(sid):
         .order_by(FeeStructure.class_id.asc(),FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all())
 
 
-def _fee_for_month_from_rows(rows, month):
+def _fee_base_for_month(rows, month):
     m=month.replace(day=1)
     latest={}
     for row in rows:
         if row.effective_from<=m and (row.effective_to is None or row.effective_to>=m):
             latest.setdefault(row.class_id,row)
-    base=sum((Decimal(str(row.monthly_fee)) for row in latest.values()),Decimal("0.00"))
-    # Late fee: every 15th that has passed while that month's fee remains unpaid
-    # adds ₹50. Thus a ₹300 fee for January becomes ₹500 after April 15.
+    return sum((Decimal(str(row.monthly_fee)) for row in latest.values()),Decimal("0.00"))
+
+
+def _fee_for_month_from_rows(rows, month):
+    m=month.replace(day=1)
+    base=_fee_base_for_month(rows,m)
     today=today_ist()
     if base <= 0 or m > today.replace(day=1):
         return base
@@ -1274,36 +1292,67 @@ def _fee_for_month_from_rows(rows, month):
     return base + Decimal("50.00") * Decimal(max(0,penalty_cycles))
 
 
-def oldest_due_month(sid):
-    """Return the oldest unpaid month using one fee-structure query instead of one query per month."""
+def _fee_month_balances(sid):
+    """Return chronological fee balances; excess payments carry into later months."""
     student=Student.query.get(sid)
-    if not student:
-        return None,None
-    today=today_ist().replace(day=1)
+    if not student:return []
     rows=_fee_rows_for_student(sid)
+    if not rows:return []
+    today=today_ist().replace(day=1)
     starts=[today]
     if student.admission_date: starts.append(student.admission_date.replace(day=1))
     starts.extend(r.effective_from.replace(day=1) for r in rows if r.effective_from)
     start=min(starts) if starts else today
-    paid_months={p.fee_month.replace(day=1) for p in FeePayment.query.filter_by(student_id=sid).all()}
+    payments=(FeePayment.query.filter_by(student_id=sid)
+              .order_by(FeePayment.payment_date.asc(),FeePayment.id.asc()).all())
+    paid_by_month={}
+    for p in payments:
+        m=p.fee_month.replace(day=1)
+        paid_by_month[m]=paid_by_month.get(m,Decimal("0.00"))+Decimal(str(p.amount))
+    months=[]
     m=start
     while m<=today:
         due=_fee_for_month_from_rows(rows,m)
-        if due>0 and m not in paid_months:
-            return m,due
+        months.append({"month":m,"base":_fee_base_for_month(rows,m),"due":due,"paid":Decimal("0.00"),"credit":Decimal("0.00")})
         m=(m+timedelta(days=32)).replace(day=1)
+    credit=Decimal("0.00")
+    for item in months:
+        incoming=paid_by_month.get(item["month"],Decimal("0.00"))+credit
+        item["paid"]=min(incoming,item["due"])
+        credit=max(Decimal("0.00"),incoming-item["due"])
+    for item in months:
+        item["balance"]=max(Decimal("0.00"),item["due"]-item["paid"])
+        item["status"]="PAID" if item["due"]>0 and item["balance"]<=0 else ("PARTIAL" if item["paid"]>0 else ("DUE" if item["due"]>0 else "N/A"))
+    if credit and months: months[-1]["credit"]=credit
+    return months
+
+
+def oldest_due_month(sid):
+    for x in _fee_month_balances(sid):
+        if x["balance"]>Decimal("0.00"): return x["month"],x["balance"]
     return None,None
 
 
 def history(sid):
-    rows=_fee_rows_for_student(sid)
-    pay={p.fee_month:p for p in FeePayment.query.filter_by(student_id=sid).all()}
-    m=today_ist().replace(day=1);out=[]
-    for _ in range(12):
-        due=_fee_for_month_from_rows(rows,m);p=pay.get(m)
-        out.append({"month":m.strftime("%Y-%m"),"month_label":m.strftime("%B %Y"),"amount":float(p.amount if p else due),"due_amount":float(due),"status":"PAID" if p else ("DUE" if due else "N/A"),"payment_date":iso_ist(p.payment_date) if p else None,"receipt_number":p.receipt_number if p else None})
-        m=(m-timedelta(days=1)).replace(day=1)
+    balances=_fee_month_balances(sid)
+    current=today_ist().replace(day=1)
+    selected=[x for x in balances if x["month"]<=current][-12:]
+    oldest=next((x for x in balances if x["balance"]>Decimal("0.00")),None)
+    if oldest and oldest not in selected:selected=[oldest]+selected
+    selected=sorted({x["month"]:x for x in selected}.values(),key=lambda x:x["month"],reverse=True)
+    payment_map={}
+    for p in FeePayment.query.filter_by(student_id=sid).order_by(FeePayment.payment_date.desc(),FeePayment.id.desc()).all():
+        payment_map.setdefault(p.fee_month.replace(day=1),[]).append(p)
+    out=[]
+    for x in selected:
+        latest=(payment_map.get(x["month"]) or [None])[0]
+        out.append({"month":x["month"].strftime("%Y-%m"),"month_label":x["month"].strftime("%B %Y"),
+                    "amount":float(x["due"]),"due_amount":float(x["balance"]),"base_fee":float(x["base"]),
+                    "paid_amount":float(x["paid"]),"credit":float(x.get("credit",0)),
+                    "status":x["status"],"payment_date":iso_ist(latest.payment_date) if latest else None,
+                    "receipt_number":latest.receipt_number if latest else None})
     return out
+
 
 @api.get("/fees")
 @roles("admin")
@@ -1321,12 +1370,18 @@ def fees():
     for f in fee_rows:latest_by_class.setdefault(f.class_id,f)
     class_ids={sid:set() for sid in ids}
     for sc in sc_rows:class_ids[sc.student_id].add(sc.class_id)
-    payments={p.student_id:p for p in FeePayment.query.filter(FeePayment.student_id.in_(ids or [-1]),FeePayment.fee_month==m).all()}
     out=[]
     for s in students:
-        due=_fee_for_month_from_rows([latest_by_class[cid] for cid in class_ids[s.id] if cid in latest_by_class],m);p=payments.get(s.id);status="PAID" if p else ("DUE" if due else "N/A")
+        rows_for_student=[latest_by_class[cid] for cid in class_ids[s.id] if cid in latest_by_class]
+        due=_fee_for_month_from_rows(rows_for_student,m)
+        month_paid=sum((Decimal(str(p.amount)) for p in FeePayment.query.filter_by(student_id=s.id,fee_month=m).all()),Decimal("0.00"))
+        remaining=max(Decimal("0.00"),due-month_paid)
+        status="PAID" if due>0 and remaining<=0 else ("PARTIAL" if month_paid>0 else ("DUE" if due else "N/A"))
+        latest=FeePayment.query.filter_by(student_id=s.id,fee_month=m).order_by(FeePayment.payment_date.desc(),FeePayment.id.desc()).first()
         if st and st!=status:continue
-        out.append({"student_id":s.id,"student_code":s.student_id,"student_name":s.name,"fee_month":m.strftime("%Y-%m"),"amount":float(p.amount if p else due),"status":status,"receipt_number":p.receipt_number if p else None})
+        out.append({"student_id":s.id,"student_code":s.student_id,"student_name":s.name,"fee_month":m.strftime("%Y-%m"),
+                    "amount":float(due),"paid_amount":float(month_paid),"remaining":float(remaining),"status":status,
+                    "receipt_number":latest.receipt_number if latest else None})
     return ok(out)
 @api.get("/fees/student/<int:id>")
 @roles("admin","student")
@@ -1335,11 +1390,15 @@ def student_fees(id):
     if not s:return err("Student not found",404)
     if u.role=="student" and s.user_id!=u.id:return err("Unauthorized",403)
     oldest_month,oldest_amount=oldest_due_month(s.id)
+    rows=_fee_rows_for_student(s.id)
+    actual_fee=_fee_base_for_month(rows,today_ist().replace(day=1))
     return ok({
         "student":student_obj(s,private=u.role=="admin"),
-        "current_monthly_fee":float(applicable_fee(s.id,today_ist().replace(day=1))),
+        "current_monthly_fee":float(actual_fee),
+        "actual_monthly_fee":float(actual_fee),
         "oldest_due_month":oldest_month.strftime("%Y-%m") if oldest_month else None,
         "oldest_due_amount":float(oldest_amount) if oldest_amount is not None else 0,
+        "minimum_payment":float(actual_fee),
         "history":history(s.id)
     })
 @api.post("/fees/payment")
@@ -1349,43 +1408,33 @@ def pay_fee():
     try:
         sid=int(b.get("student_id")); s=Student.query.get(sid)
         if not s or s.status!="active": return err("Active student not found",404)
-        oldest_month,oldest_amount=oldest_due_month(sid)
+        oldest_month,oldest_balance=oldest_due_month(sid)
         requested_month=str(b.get("month") or "").strip()
         m=date.fromisoformat(requested_month+"-01")
         amount=money(b.get("amount"))
         method=str(b.get("payment_method") or "").strip().lower()
         if method not in ("cash","upi","bank_transfer","other"): return err("Please select a valid payment method")
-        if oldest_month and m!=oldest_month:
-            return err(f"Please collect the oldest due month first: {oldest_month.strftime('%B %Y')}",409)
-        expected=applicable_fee(sid,m)
-        if FeePayment.query.filter_by(student_id=sid,fee_month=m).first(): return err("Fee already paid for this month",409)
-        if expected<=0: return err("No fee structure applies to this month")
-        if amount!=expected: return err(f"Amount must equal ₹{expected:.2f}")
+        if not oldest_month:return err("No outstanding fee is due for this student",409)
+        if m!=oldest_month:return err(f"Please collect the oldest outstanding month first: {oldest_month.strftime('%B %Y')}",409)
+        rows=_fee_rows_for_student(sid)
+        actual_fee=_fee_base_for_month(rows,m)
+        if actual_fee<=0:return err("No fee structure applies to this month")
+        if amount < actual_fee:return err(f"Minimum payment is the student's actual monthly fee: ₹{actual_fee:.2f}",409)
         rno=f"RCPT-{now_ist():%Y%m%d%H%M%S}-{__import__('secrets').token_hex(2).upper()}"
         p=FeePayment(student_id=sid,fee_month=m,amount=amount,payment_method=method,collected_by=current_user().id,receipt_number=rno,notes=str(b.get("notes") or "").strip() or None)
         db.session.add(p); db.session.flush()
         r=Receipt(fee_payment_id=p.id,receipt_number=rno); db.session.add(r)
         audit(current_user().id,"collect_fee","fee_payment",p.id,rno); db.session.commit()
         a=Admin.query.filter_by(user_id=current_user().id).first()
-        sobj=student_obj(s)
-        first=sobj["classes"][0] if sobj["classes"] else {}
-        receipt_data={
-            "receipt_number":rno,
-            "student":s.name,
-            "student_id":s.student_id,
-            "class":first.get("class_name", ""),
-            "teacher":first.get("teacher_name", ""),
-            "fee_month":m.strftime("%B %Y"),
-            "amount":float(p.amount),
-            "payment_method":p.payment_method,
-            "payment_date":iso_ist(p.payment_date),
-            "collected_by":a.name if a else "Admin"
-        }
+        sobj=student_obj(s); first=sobj["classes"][0] if sobj["classes"] else {}
+        receipt_data={"receipt_number":rno,"student":s.name,"student_id":s.student_id,"class":first.get("class_name",""),
+                      "teacher":first.get("teacher_name",""),"fee_month":m.strftime("%B %Y"),"amount":float(p.amount),
+                      "payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin"}
         return ok({"id":p.id,"receipt_id":r.id,"receipt_number":rno,"receipt":receipt_data},"Fee payment recorded",201)
-    except IntegrityError:db.session.rollback();return err("Duplicate payment",409)
+    except IntegrityError:
+        db.session.rollback();return err("Payment could not be recorded because of a database constraint. Run the fee-payment migration included with this update.",409)
     except Exception:
         db.session.rollback();return err("Invalid payment data")
-
 @api.get("/receipts")
 @roles("admin")
 def receipts():
