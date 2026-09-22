@@ -23,7 +23,7 @@ class Config:
     JWT_ERROR_MESSAGE_KEY = "message"
 
     # Reject unexpectedly large request bodies before Flask parses them.
-    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", str(3 * 1024 * 1024)))
+    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", str(12 * 1024 * 1024)))
 
     SQLALCHEMY_DATABASE_URI = (
         f"mysql+pymysql://"

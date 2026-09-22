@@ -1099,3 +1099,22 @@ button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s 
   .id-card-header{height:54px !important;min-height:54px !important;flex-basis:54px !important;padding:7px 11px !important;border-radius:10px !important;}
   .id-card-body{height:auto !important;flex:1 !important;}
 }
+
+/* RMCTI mobile fixes for ID cards and modal actions */
+.modalbg{padding:14px}
+.modal{width:min(96vw,900px);max-height:92vh;overflow:auto}
+.id-card-modal{max-width:100%}
+@media(max-width:600px){
+  .modalbg{padding:8px;align-items:flex-start}
+  .modal{width:100%;max-width:none;max-height:96vh;border-radius:12px}
+  .modalbody{padding:12px}
+  .id-card-export{width:100%;max-width:100%;overflow:hidden}
+  .id-card{font-size:clamp(8px,2.5vw,13px)}
+  .id-card-brand{gap:7px}
+  .id-card-brand strong{max-width:52vw;white-space:normal}
+  .id-card-body{grid-template-columns:72px minmax(0,1fr);gap:8px}
+  .id-card-details{gap:4px 7px}
+  .id-photo{width:64px;height:82px}
+  .id-field span{white-space:normal;word-break:break-word}
+  .id-card-modal>.right{width:100%;flex-wrap:wrap}
+}

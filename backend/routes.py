@@ -10,7 +10,7 @@ import os,uuid
 from werkzeug.utils import secure_filename
 from PIL import Image, ImageOps, UnidentifiedImageError
 import io
-from flask import Response
+from flask import Response,send_file
 from .database import db
 from .extensions import limiter
 from .models import *
@@ -522,6 +522,60 @@ def _classwork_objs_bulk(rows):
 
 def classwork_obj(w): return _classwork_objs_bulk([w])[0]
 
+@api.get("/attachments")
+@roles("admin","teacher","student")
+def attachments():
+    rows=NoticeAttachment.query.order_by(NoticeAttachment.created_at.desc(),NoticeAttachment.id.desc()).limit(_bounded_limit(100,200)).all()
+    return ok([{"id":x.id,"title":x.title,"filename":x.original_filename,"mime_type":x.mime_type,"file_size":x.file_size,"created_at":iso_ist(x.created_at)} for x in rows])
+
+@api.post("/admin/attachments")
+@roles("admin")
+def upload_attachment():
+    f=request.files.get("file")
+    title=str(request.form.get("title") or "").strip()
+    if not f or not f.filename:return err("Please select a file")
+    if not title:title=secure_filename(f.filename) or "Notice"
+    allowed={
+        "application/pdf","text/plain","text/csv","application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint","application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "image/jpeg","image/png","image/webp"
+    }
+    mime=(f.mimetype or "application/octet-stream").lower()
+    if mime not in allowed:
+        ext=os.path.splitext(secure_filename(f.filename or ""))[1].lower()
+        ext_mimes={".pdf":"application/pdf",".txt":"text/plain",".csv":"text/csv",".doc":"application/msword",".docx":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",".xls":"application/vnd.ms-excel",".xlsx":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",".ppt":"application/vnd.ms-powerpoint",".pptx":"application/vnd.openxmlformats-officedocument.presentationml.presentation",".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".webp":"image/webp"}
+        mime=ext_mimes.get(ext,mime)
+    if mime not in allowed:return err("Unsupported file type. Use PDF, Office document, image, CSV or text file.")
+    data=f.read()
+    if not data:return err("The selected file is empty")
+    if len(data)>10*1024*1024:return err("File is too large. Maximum size is 10 MB")
+    name=secure_filename(f.filename) or f"notice-{uuid.uuid4().hex}"
+    row=NoticeAttachment(title=title[:255],original_filename=name,mime_type=mime,file_size=len(data),data=data,uploaded_by=current_user().id)
+    try:
+        db.session.add(row);db.session.flush();audit(current_user().id,"upload","notice_attachment",row.id,name);db.session.commit()
+        return ok({"id":row.id,"title":row.title,"filename":row.original_filename,"mime_type":row.mime_type,"file_size":row.file_size,"created_at":iso_ist(row.created_at)},"File attached to notice board",201)
+    except Exception:
+        db.session.rollback();return err("Could not upload the file")
+
+@api.delete("/admin/attachments/<int:id>")
+@roles("admin")
+def delete_attachment(id):
+    row=NoticeAttachment.query.get(id)
+    if not row:return err("Attachment not found",404)
+    try:
+        db.session.delete(row);audit(current_user().id,"delete","notice_attachment",id,row.original_filename);db.session.commit();return ok(message="Attachment deleted")
+    except Exception:
+        db.session.rollback();return err("Could not delete attachment")
+
+@api.get("/attachments/<int:id>/download")
+@roles("admin","teacher","student")
+def download_attachment(id):
+    row=NoticeAttachment.query.get(id)
+    if not row:return err("Attachment not found",404)
+    return send_file(io.BytesIO(bytes(row.data)),mimetype=row.mime_type,as_attachment=False,download_name=row.original_filename,max_age=300)
+
 @api.get("/subjects")
 @roles("admin","teacher","student")
 def subjects(): return ok([{"id":s.id,"name":s.name} for s in Subject.query.filter_by(is_active=True).order_by(Subject.name).all()])
@@ -786,10 +840,18 @@ def edit_class(id):
         except Exception:
             db.session.rollback()
             return err("Could not delete class. Please try again.",500)
-    for k in ("class_name","batch","room"): 
-        if k in b:setattr(c,k,b[k])
-    for k in ("subject_id","max_students"):
-        if k in b:setattr(c,k,int(b[k]))
+    for k in ("class_name","batch","room"):
+        if k in b:setattr(c,k,str(b[k]).strip())
+    if "subject_name" in b:
+        n=str(b.get("subject_name") or "").strip()
+        if not n:return err("Subject name is required")
+        existing=Subject.query.filter(func.lower(Subject.name)==n.lower()).first()
+        if existing:c.subject_id=existing.id
+        else:
+            sub=Subject(name=n);db.session.add(sub);db.session.flush();c.subject_id=sub.id
+    elif "subject_id" in b:
+        c.subject_id=int(b["subject_id"])
+    if "max_students" in b:c.max_students=int(b["max_students"])
     c.status="active"
     db.session.commit();return ok(class_obj(c),"Class updated")
 
@@ -1439,7 +1501,8 @@ def pay_fee():
         rows=_fee_rows_for_student(sid)
         actual_fee=_fee_base_for_month(rows,m)
         if actual_fee<=0:return err("No fee structure applies to this month")
-        if amount < actual_fee:return err(f"Minimum payment is the student's actual monthly fee: ₹{actual_fee:.2f}",409)
+        if amount <= 0:return err("Payment amount must be greater than zero")
+        if amount > oldest_balance:return err(f"Payment cannot exceed the remaining balance for {oldest_month.strftime('%B %Y')}: ₹{oldest_balance:.2f}",409)
         rno=f"RCPT-{now_ist():%Y%m%d%H%M%S}-{__import__('secrets').token_hex(2).upper()}"
         p=FeePayment(student_id=sid,fee_month=m,amount=amount,payment_method=method,collected_by=current_user().id,receipt_number=rno,notes=str(b.get("notes") or "").strip() or None)
         db.session.add(p); db.session.flush()
@@ -1449,7 +1512,7 @@ def pay_fee():
         sobj=student_obj(s); first=sobj["classes"][0] if sobj["classes"] else {}
         receipt_data={"receipt_number":rno,"student":s.name,"student_id":s.student_id,"class":first.get("class_name",""),
                       "teacher":first.get("teacher_name",""),"fee_month":m.strftime("%B %Y"),"amount":float(p.amount),
-                      "payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin"}
+                      "payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),oldest_balance-amount))}
         return ok({"id":p.id,"receipt_id":r.id,"receipt_number":rno,"receipt":receipt_data},"Fee payment recorded",201)
     except IntegrityError:
         db.session.rollback();return err("Payment could not be recorded because of a database constraint. Run the fee-payment migration included with this update.",409)
@@ -1482,7 +1545,7 @@ def receipt(id):
     if not p:return err("Payment not found",404)
     s=Student.query.get(p.student_id);a=Admin.query.filter_by(user_id=p.collected_by).first();classes=student_obj(s)["classes"] if s else []
     first=classes[0] if classes else {}
-    return ok({"receipt_number":r.receipt_number,"student":s.name if s else "","student_id":s.student_id if s else "","class":first.get("class_name", ""),"teacher":first.get("teacher_name", ""),"fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin"})
+    return ok({"receipt_number":r.receipt_number,"student":s.name if s else "","student_id":s.student_id if s else "","class":first.get("class_name", ""),"teacher":first.get("teacher_name", ""),"fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),oldest_balance-amount))})
 
 def teacher_for_user():
     return Teacher.query.filter_by(user_id=current_user().id).first()
@@ -1749,7 +1812,18 @@ def student_dashboard():
 
 @api.get("/student/routine")
 @roles("student")
-def student_routine():return ok(student_obj(student_for_user(),private=False)["classes"])
+def student_routine():
+    s=student_for_user()
+    assigned=StudentClass.query.filter_by(student_id=s.id,status="active").all()
+    classes={c.id:c for c in Class.query.filter(Class.id.in_([x.class_id for x in assigned] or [-1]),Class.status=="active").all()}
+    subjects={x.id:x for x in Subject.query.filter(Subject.id.in_([c.subject_id for c in classes.values()] or [-1])).all()}
+    start=_week_start(today_ist())
+    out=[]
+    for c in classes.values():
+        sub=subjects.get(c.subject_id)
+        for x in _effective_class_schedule(c,start,7):
+            out.append({"class_id":c.id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "","room":c.room,"day":DAYS[x["day_of_week"]],"day_of_week":x["day_of_week"],"date":x["date"],"start_time":x["start_time"],"end_time":x["end_time"],"teacher_name":x["teacher_name"],"teacher_id":x["teacher_code"],"kind":x["kind"]})
+    return ok(sorted(out,key=lambda x:(x["date"],x["start_time"],x["subject"])))
 @api.get("/student/homework")
 @roles("student")
 def student_homework():return get_homework()

@@ -46,6 +46,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       'admin:fee-structure': () => Page.feeStructure(),
       'admin:fee-payment': () => Page.feePayment(),
       'admin:receipts': () => Page.receipts(),
+      'admin:attachments': () => Page.attachmentsPage(),
       'admin:receipt-print': () => Page.receiptPrint(),
       'admin:audit-logs': () => Page.auditLogs(),
       'admin:complaints': () => Page.adminComplaints(),
@@ -66,7 +67,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       'student:classwork': () => Page.studentList('classwork'),
       'student:teacher': () => Page.studentList('teacher'),
       'student:fees': () => Page.studentFees(),
-      'student:complaints': () => Page.studentComplaints()
+      'student:complaints': () => Page.studentComplaints(),
+      'student:notice-board': () => Page.attachmentsPage()
     };
 
     const fn = dispatch[`${role}:${page}`];

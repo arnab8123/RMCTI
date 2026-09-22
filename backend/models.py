@@ -96,6 +96,19 @@ class Enquiry(db.Model):
     updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
 
 
+class NoticeAttachment(db.Model):
+    __tablename__ = "notice_attachments"
+    id = db.Column(db.BigInteger, primary_key=True)
+    title = db.Column(db.String(255), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    mime_type = db.Column(db.String(100), nullable=False)
+    file_size = db.Column(db.BigInteger, nullable=False)
+    data = db.Column(MEDIUMBLOB, nullable=False)
+    uploaded_by = db.Column(db.BigInteger, db.ForeignKey("users.id"), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (db.Index("idx_notice_attachments_created", "created_at"),)
+
+
 class PhotoAsset(db.Model):
     __tablename__ = "photo_assets"
     id = db.Column(db.String(100), primary_key=True)

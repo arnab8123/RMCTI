@@ -315,8 +315,8 @@ const Page = (() => {
       try{
         const c=await Api.get(`/classes/${classId}`);
         const teachers=await Api.get('/teachers',{status:'active'});
-        const now=new Date(); const monday=new Date(now); monday.setDate(now.getDate()-((now.getDay()+6)%7));
-        const weekStart=monday.toISOString().slice(0,10);
+        const now=new Date(); const monday=new Date(now.getFullYear(),now.getMonth(),now.getDate()); monday.setDate(monday.getDate()-((monday.getDay()+6)%7));
+        const localISO=d=>{const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}; const weekStart=localISO(monday);
         const dates=[...Array(7)].map((_,i)=>{const d=new Date(monday);d.setDate(monday.getDate()+i);return d.toISOString().slice(0,10)});
         const allocs=c.allocations||[];
         const allocOptions=allocs.map(a=>`<option value="${a.allocation_id}">${U.esc(a.teacher_name||'Teacher')} · ${U.esc(a.day)} · ${U.esc(a.start_time)}–${U.esc(a.end_time)}</option>`).join('');
@@ -370,7 +370,7 @@ const Page = (() => {
           const id=ev.target.dataset.resDelete;if(!id)return;
           try{await Api.del(`/schedule-exceptions/${id}`);U.toast('Schedule change removed');loadChanges();}catch(x){U.toast(x.message||'Could not remove change','error')}
         });
-        m.querySelector('[name="week_start"]')?.addEventListener('change',loadChanges);
+        m.querySelector('[name="week_start"]')?.addEventListener('change',()=>{syncOriginalDate();loadChanges();});
         await loadChanges();
       }catch(e){U.toast(e.message||'Could not open reschedule','error')}
     };
@@ -567,6 +567,32 @@ const Page = (() => {
     teacherPicker?.addEventListener('click', openTeacherPicker);
     renderTeacherSummary();
 
+    const courseManager = document.createElement('div');
+    courseManager.className='card pad';
+    courseManager.style.marginTop='16px';
+    courseManager.innerHTML='<div class="right" style="justify-content:space-between;align-items:center"><div><h3 style="margin:0">Manage Courses</h3><p class="muted" style="margin:4px 0 0">Edit course name, subject, batch and room, or delete a created course.</p></div></div><div data-course-manager-list class="grid" style="margin-top:12px"></div>';
+    q('[data-class-form]')?.closest('.grid')?.insertAdjacentElement('afterend',courseManager);
+    const renderCourseManager=()=>{
+      fill(courseManager.querySelector('[data-course-manager-list]'),classes.map(c=>`<div class="card pad" style="border:1px solid var(--border)"><b>${U.esc(c.class_name)} · ${U.esc(c.batch)}</b><div class="muted">${U.esc(c.subject)} · ${U.esc(c.room||'No room')}</div><div class="right" style="justify-content:flex-end;margin-top:8px"><button type="button" class="btn warning small" data-edit-course="${c.id}">Edit Course</button><button type="button" class="btn danger small" data-delete-course="${c.id}">Delete</button></div></div>`).join('')||'<div class="empty">No courses created yet.</div>');
+    };
+    renderCourseManager();
+    courseManager.addEventListener('click',async e=>{
+      const edit=e.target.closest('[data-edit-course]')?.dataset.editCourse;
+      const del=e.target.closest('[data-delete-course]')?.dataset.deleteCourse;
+      if(del){return adminVerifiedAction('Delete course','This permanently removes the course and its allocations, student assignments, fee structures and course records.',async()=>{await Api.del(`/classes/${del}`);U.toast('Course deleted');location.reload();});}
+      if(!edit)return;
+      const c=classes.find(x=>String(x.id)===String(edit)); if(!c)return;
+      const m=U.modal('Edit Course',`<form class="form" id="editCourseForm">
+        <div><label class="label">Course Name</label><input class="input" name="class_name" value="${U.esc(c.class_name)}" required></div>
+        <div><label class="label">Batch</label><input class="input" name="batch" value="${U.esc(c.batch)}" required></div>
+        <div><label class="label">Subject Name</label><input class="input" name="subject_name" value="${U.esc(c.subject)}" required></div>
+        <div><label class="label">Room</label><input class="input" name="room" value="${U.esc(c.room||'')}"></div>
+        <div><label class="label">Max Students</label><input class="input" type="number" min="1" name="max_students" value="${U.esc(c.max_students)}" required></div>
+        <div class="full right"><button type="button" class="btn secondary" data-close>Cancel</button><button class="btn primary" type="submit">Save Course</button></div>
+      </form>`);
+      m.querySelector('#editCourseForm').onsubmit=async ev=>{ev.preventDefault();const btn=ev.currentTarget.querySelector('button[type="submit"]');btn.disabled=true;try{await Api.put(`/classes/${edit}`,formObj(ev.currentTarget));m.remove();U.toast('Course updated');location.reload();}catch(x){U.toast(x.message||'Could not update course','error');btn.disabled=false;}};
+    });
+
     fill(q('[data-class]'), classes.map((c) => `<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}</option>`).join(''));
     const classForm = q('form[data-class-form]');
     classForm?.addEventListener('submit', async (e) => {
@@ -617,9 +643,9 @@ const Page = (() => {
           if (!selectedTeacherIds.size) throw Error('Choose at least one teacher');
           if (!days.length) throw Error('Select at least one day');
           payload.teacher_ids = [...selectedTeacherIds];
-          payload.days = days;
+          payload.day_of_week_multi = days;
+          payload.day_of_week = days[0];
           delete payload.teacher_id;
-          delete payload.day_of_week_multi;
           await Api.post('/teacher-classes', payload);
           U.toast(`${selectedTeacherIds.size} teacher${selectedTeacherIds.size===1?'':'s'} allocated`);
         } else {
@@ -675,7 +701,7 @@ const Page = (() => {
         const text = [s.student_id, s.name, s.phone, s.parent?.name, s.parent?.phone].filter(Boolean).join(' ').toLowerCase();
         const matchesSearch = !term || text.includes(term);
         const status = String(s.current_month_status || '').toUpperCase();
-        const matchesFilter = mode === 'all' || (mode === 'due' && status === 'DUE') || (mode === 'paid' && status === 'PAID');
+        const matchesFilter = mode === 'all' || (mode === 'due' && (status === 'DUE' || status === 'PARTIAL')) || (mode === 'paid' && status === 'PAID');
         return matchesSearch && matchesFilter;
       });
       const previous = studentSelect?.value;
@@ -688,11 +714,34 @@ const Page = (() => {
     const load = async () => {
       if (!studentSelect?.value) { currentFeeData=null; fill(q('[data-history]'), '<div class="empty">No student selected.</div>'); if(monthInput) monthInput.value=''; if(amountInput) amountInput.value=''; return; }
       const d = await Api.get(`/fees/student/${studentSelect.value}`); currentFeeData=d;
-      fill(q('[data-history]'), `<div class="table"><table><tr><th>Month</th><th>Fee + Fine</th><th>Paid</th><th>Remaining</th><th>Status</th><th>Receipt</th></tr>${(d.history || []).map((h) => `<tr><td>${U.esc(h.month_label)}</td><td>${U.money(h.amount)}</td><td>${U.money(h.paid_amount)}</td><td>${U.money(h.due_amount)}</td><td><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'PARTIAL' || h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></td><td>${U.esc(h.receipt_number || '—')}</td></tr>`).join('')}</table></div>`);
+      fill(q('[data-history]'), `<div class="table"><table><tr><th>Month</th><th>Fee + Fine</th><th>Paid</th><th>Remaining</th><th>Status</th><th>Receipt</th></tr>${(d.history || []).map((h) => `<tr><td>${U.esc(h.month_label)}</td><td><button type="button" class="btn secondary small" data-fee-detail="${U.esc(h.month)}">${U.money(h.amount)}</button></td><td>${U.money(h.paid_amount)}</td><td>${U.money(h.due_amount)}</td><td><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'PARTIAL' || h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></td><td>${U.esc(h.receipt_number || '—')}</td></tr>`).join('')}</table></div>`);
       if(monthInput){monthInput.value=d.oldest_due_month || U.today().slice(0,7);monthInput.readOnly=true;monthInput.title=d.oldest_due_month?'Oldest due month is selected automatically':'No unpaid month is due; current month is selected.';}
-      if(amountInput) { amountInput.value=d.oldest_due_amount>0?Math.max(d.minimum_payment||0,d.oldest_due_amount):d.current_monthly_fee||''; amountInput.min=String(d.minimum_payment||0); amountInput.title=`Minimum ₹${Number(d.minimum_payment||0).toFixed(2)} (actual monthly fee). There is no maximum; excess carries forward.`; }
+      if(amountInput) { amountInput.value=d.oldest_due_amount>0?d.oldest_due_amount:''; amountInput.min='0.01'; amountInput.max=d.oldest_due_amount>0?String(d.oldest_due_amount):'0'; amountInput.title=`Maximum ₹${Number(d.oldest_due_amount||0).toFixed(2)} (remaining balance for the selected month). Partial payments are allowed.`; }
     };
 
+    q('[data-history]')?.addEventListener('click',(e)=>{
+      const btn=e.target.closest('[data-fee-detail]');
+      if(!btn || !currentFeeData) return;
+      const h=(currentFeeData.history||[]).find(x=>x.month===btn.dataset.feeDetail);
+      if(!h)return;
+      const [yy,mm]=h.month.split('-').map(Number);
+      const today=new Date();
+      const current=new Date(today.getFullYear(),today.getMonth(),1);
+      const month=new Date(yy,mm-1,1);
+      const months=Math.max(0,(current.getFullYear()-month.getFullYear())*12+(current.getMonth()-month.getMonth()));
+      const cycles=months+(today.getDate()>=15?1:0);
+      const fine=Math.max(0,Number(h.amount)-Number(h.base_fee||0));
+      U.modal(`Fee calculation · ${h.month_label}`,`<div class="card pad">
+        <p><b>Base monthly fee:</b> ${U.money(h.base_fee)}</p>
+        <p><b>Fine rule:</b> ₹50 is added for each applicable 15th-of-month fine cycle while the month remains unpaid.</p>
+        <p><b>Applicable fine cycles:</b> ${cycles}</p>
+        <p><b>Fine:</b> ${U.money(fine)}</p>
+        <hr style="border:0;border-top:1px solid var(--border)">
+        <p><b>Total for ${U.esc(h.month_label)} including fine:</b> ${U.money(h.amount)}</p>
+        <p><b>Already paid:</b> ${U.money(h.paid_amount)}</p>
+        <p><b>Remaining:</b> ${U.money(h.due_amount)}</p>
+      </div>`);
+    });
     studentSelect?.addEventListener('change', load);
     search?.addEventListener('input', U.debounce(renderStudents, 200));
     filter?.addEventListener('change', renderStudents);
@@ -707,7 +756,8 @@ const Page = (() => {
         const btn=e.currentTarget.querySelector('button[type="submit"]') || e.currentTarget.querySelector('button'); if(btn) btn.disabled=true;
         const r = await Api.post('/fees/payment', body);
         U.toast('Fee payment recorded');
-        await showReceipt(r.receipt,false);
+        const receiptModal=await showReceipt(r.receipt,false);
+        if(receiptModal) receiptModal.addEventListener('click',(ev)=>{ if(ev.target===receiptModal || ev.target.closest('[data-close]')) setTimeout(()=>location.reload(),50); },{once:true});
         await load();
       } catch (x) { U.toast(x.message, 'error'); }
       finally { const btn=e.currentTarget.querySelector('button[type="submit"]') || e.currentTarget.querySelector('button'); if(btn)btn.disabled=false; }
@@ -730,6 +780,7 @@ const Page = (() => {
     m.querySelector('[data-download-receipt]')?.addEventListener('click',async ev=>{try{ev.currentTarget.disabled=true;await U.downloadElementAsJpeg(capture,`${r.receipt_number}.jpg`);U.toast('Receipt JPEG downloaded')}catch(e){console.error(e);U.toast('Could not create receipt JPEG','error')}finally{ev.currentTarget.disabled=false;}});
     m.querySelector('[data-print-receipt]')?.addEventListener('click',()=>U.openPrintWindow(`RMCTI Receipt ${r.receipt_number}`,receiptMarkup(r)));
     if(openPrint) m.querySelector('[data-print-receipt]')?.click();
+    return m;
   }
 
   async function receipts() {
@@ -998,7 +1049,7 @@ const Page = (() => {
   async function studentList(kind) {
     const path = kind === 'routine' ? '/student/routine' : kind === 'homework' ? '/student/homework' : kind === 'classwork' ? '/student/classwork' : '/student/teacher';
     const rows = await Api.get(path);
-    if (kind === 'routine') { const by = {}; rows.forEach((x) => (by[x.day] ??= []).push(x)); fill(q('[data-calendar]'), days.map((day) => `<div class="day"><b>${day}</b>${(by[day] || []).map((x) => `<div class="item"><b>${U.esc(x.subject)}</b><div>${U.esc(x.start_time)}–${U.esc(x.end_time)}</div><div class="muted">${U.esc(x.teacher_name || '')} · ${U.esc(x.room || '')}</div></div>`).join('')}</div>`).join('')); }
+    if (kind === 'routine') { const by = {}; rows.forEach((x) => (by[x.day] ??= []).push(x)); fill(q('[data-calendar]'), days.map((day) => `<div class="day"><b>${day}</b>${(by[day] || []).map((x) => `<div class="item"><b>${U.esc(x.subject)}</b><div>${U.esc(x.start_time)}–${U.esc(x.end_time)}${x.kind && x.kind!=='regular' ? ` · <span class="badge active">${U.esc(x.kind)}</span>` : ''}</div><div class="muted">${U.esc(x.class_name || '')} · ${U.esc(x.teacher_name || '')} · ${U.esc(x.room || '')}</div></div>`).join('') || '<div class="empty">No scheduled class.</div>'}</div>`).join('')); }
     if (kind === 'homework') fill(q('[data-body]'), rows.map((x) => `<tr><td>${U.date(x.homework_date)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.teacher_name)}</td><td>${U.esc(x.title)}</td><td>${U.date(x.due_date)}</td><td>${U.esc(x.description)}</td></tr>`).join('') || tableEmpty(6));
     if (kind === 'classwork') fill(q('[data-body]'), rows.map((x) => `<tr><td>${U.date(x.work_date)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.topic)}</td><td>${U.esc(x.description)}</td><td>${U.esc(x.teacher_name)}</td></tr>`).join('') || tableEmpty(5));
     if (kind === 'teacher') fill(q('[data-teachers]'), rows.map((t) => `<article class="card pad teacher-card"><div class="teacher-card-main"><div class="teacher-card-info"><h3 style="margin:0">${U.esc(t.name)}</h3><div class="muted">${U.esc(t.subject || '')} · ${U.esc(t.qualification || '')}</div><p>Phone: ${U.esc(t.phone || '—')}</p><p>Email: ${U.esc(t.email || '—')}</p></div><img src="${U.photoUrl(t.photo)}" alt="${U.esc(t.name)} photo" class="passport-photo teacher-passport" loading="lazy" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="teacher-card-class">Class: ${U.esc(t.class_name || '')} · ${U.esc(t.batch || '')}</div></article>`).join('') || '<div class="empty">No teacher assigned.</div>');
@@ -1057,6 +1108,29 @@ const Page = (() => {
     form?.addEventListener('submit',async e=>{e.preventDefault();const btn=form.querySelector('button[type="submit"]');if(btn)btn.disabled=true;try{const data=formObj(form);data.mention_class=Boolean(mention?.checked);if(!data.mention_class)delete data.class_id;await Api.post('/student/complaints',data);form.reset();form.querySelector('[name="complaint_date"]').value=U.today();syncClass();U.toast('Complaint submitted successfully');load()}catch(x){U.toast(x.message,'error')}finally{if(btn)btn.disabled=false}});
     const dateInput=form?.querySelector('[name="complaint_date"]');if(dateInput&&!dateInput.value)dateInput.value=U.today();await load();
   }
+  async function attachmentsPage() {
+    const isAdmin=document.body.dataset.role==='admin';
+    const list=q(isAdmin?'[data-attachment-list]':'[data-notice-list]');
+    const form=q('[data-attachment-form]');
+    const load=async()=>{
+      const rows=await Api.get('/attachments');
+      if(!rows.length){fill(list,'<div class="empty">No files have been published yet.</div>');return;}
+      fill(list,rows.map(x=>`<article class="card pad" style="display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><div><b>${U.esc(x.title)}</b><div class="muted">${U.esc(x.filename)} · ${(Number(x.file_size)/1024/1024).toFixed(2)} MB · ${U.datetime(x.created_at)}</div></div><div class="right"><button type="button" class="btn secondary small" data-open-file="${x.id}">View / Open</button>${isAdmin?`<button type="button" class="btn danger small" data-delete-file="${x.id}">Delete</button>`:''}</div></article>`).join(''));
+    };
+    list?.addEventListener('click',async e=>{
+      const open=e.target.closest('[data-open-file]')?.dataset.openFile;
+      const del=e.target.closest('[data-delete-file]')?.dataset.deleteFile;
+      if(del){if(!confirm('Delete this notice-board file?'))return;try{await Api.del(`/admin/attachments/${del}`);U.toast('File deleted');load();}catch(x){U.toast(x.message,'error')}return;}
+      if(!open)return;
+      try{const token=sessionStorage.getItem('token');const r=await fetch(`${API}/attachments/${open}/download`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw Error('Could not open file');const blob=await r.blob();const url=URL.createObjectURL(blob);window.open(url,'_blank','noopener');setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(x){U.toast(x.message||'Could not open file','error')}
+    });
+    form?.addEventListener('submit',async e=>{
+      e.preventDefault();const btn=form.querySelector('button[type="submit"]');btn.disabled=true;
+      try{const fd=new FormData(form),token=sessionStorage.getItem('token');const r=await fetch(`${API}/admin/attachments`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:fd});const d=await r.json().catch(()=>({}));if(!r.ok||d.success===false)throw Error(d.message||'Upload failed');form.reset();U.toast('File attached to notice board');await load();}catch(x){U.toast(x.message||'Could not upload file','error')}finally{btn.disabled=false;}
+    });
+    await load();
+  }
+
   async function auditLogs() {
     const rows = await Api.get('/audit-logs');
     fill(q('[data-body]'), rows.map((x) => `<tr><td>${U.datetime(x.created_at)}</td><td>${U.esc(x.action)}</td><td>${U.esc(x.entity_type)}</td><td>${U.esc(x.entity_id || '—')}</td><td>${U.esc(x.description || '')}</td></tr>`).join('') || tableEmpty(5, 'No audit history yet.'));
@@ -1067,5 +1141,5 @@ const Page = (() => {
     fill(q('[data-fees]'), `<div class="g2"><div><div class="muted">Current monthly fee</div><div class="statv">${U.money(f.current_monthly_fee)}</div></div><div><div class="muted">Current status</div><div class="statv">${U.esc(d.current_fee.status)}</div></div></div><div class="table" style="margin-top:18px"><table><tr><th>Month</th><th>Amount</th><th>Status</th><th>Payment Date</th><th>Receipt</th></tr>${(f.history || []).map((h) => `<tr><td>${U.esc(h.month_label)}</td><td>${U.money(h.amount)}</td><td><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></td><td>${h.payment_date ? U.date(h.payment_date) : '—'}</td><td>${U.esc(h.receipt_number || '—')}</td></tr>`).join('')}</table></div>`);
   }
 
-  return { auth, dashboard, teachersPage, studentsPage, allClasses, registerPage, feeStructure, allocationPage, feePayment, receipts, receiptPrint, workPage, studentList, studentFees, teacherStudents, teacherClasses, auditLogs, studentDetails, adminComplaints, enquiries, studentComplaints };
+  return { auth, dashboard, teachersPage, studentsPage, allClasses, registerPage, feeStructure, allocationPage, feePayment, receipts, receiptPrint, attachmentsPage, workPage, studentList, studentFees, teacherStudents, teacherClasses, auditLogs, studentDetails, adminComplaints, enquiries, studentComplaints };
 })();

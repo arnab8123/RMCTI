@@ -11,6 +11,19 @@ CREATE TABLE users (
 ) ENGINE=InnoDB;
 
 
+CREATE TABLE notice_attachments (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ title VARCHAR(255) NOT NULL,
+ original_filename VARCHAR(255) NOT NULL,
+ mime_type VARCHAR(100) NOT NULL,
+ file_size BIGINT UNSIGNED NOT NULL,
+ data MEDIUMBLOB NOT NULL,
+ uploaded_by BIGINT UNSIGNED NOT NULL,
+ created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ INDEX idx_notice_attachments_created(created_at),
+ FOREIGN KEY(uploaded_by) REFERENCES users(id)
+) ENGINE=InnoDB;
+
 CREATE TABLE photo_assets (
  id VARCHAR(100) PRIMARY KEY,
  mime_type VARCHAR(50) NOT NULL,

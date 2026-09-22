@@ -248,3 +248,7 @@ Set a long random `SECRET_KEY` and preferably a separate long random `JWT_SECRET
 For one Render instance, the default `RATELIMIT_STORAGE_URI=memory://` works. If the service is scaled to multiple instances, configure a shared Redis storage URI so rate limits are shared across instances.
 
 Keep `PHOTO_STORAGE=cloudinary` in production and set `CLOUDINARY_URL` in Render. Do not commit real secrets to Git.
+
+
+## Notice Board file migration
+Run `database/add_notice_attachments.sql` once on the hosted MySQL database before using Admin → Attach File. Maximum attachment size is 10 MB.
