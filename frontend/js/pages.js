@@ -531,7 +531,42 @@ const Page = (() => {
 
   async function allocationPage() {
     const [teachers, classes, subjects] = await Promise.all([Api.get('/teachers', { status: 'active' }), Api.get('/classes', { status: 'active', include_unassigned: '1' }), Api.get('/subjects')]);
-    fill(q('[data-teacher]'), teachers.map((t) => `<option value="${t.id}">${U.esc(t.name)} · ${U.esc(t.teacher_id)}</option>`).join(''));
+    const teacherPicker = q('[data-choose-teachers]');
+    const teacherSummary = q('[data-selected-teachers]');
+    let selectedTeacherIds = new Set();
+
+    const renderTeacherSummary = () => {
+      const selected = teachers.filter(t => selectedTeacherIds.has(Number(t.id)));
+      if (teacherPicker) teacherPicker.textContent = selected.length ? `Choose Teachers (${selected.length})` : 'Choose Teachers';
+      if (teacherSummary) teacherSummary.textContent = selected.length ? selected.map(t => t.name).join(', ') : '0 teachers selected';
+    };
+
+    const openTeacherPicker = () => {
+      const html = `<div>
+        <p class="muted" style="margin-top:0">Select one or multiple teachers for this course. You can change the selection before saving.</p>
+        <div style="display:grid;gap:8px">
+          ${teachers.map(t => `<label class="card" style="display:flex;align-items:center;gap:10px;padding:11px;cursor:pointer">
+            <input type="checkbox" value="${t.id}" data-teacher-choice ${selectedTeacherIds.has(Number(t.id))?'checked':''}>
+            <span><b>${U.esc(t.name)}</b><small class="muted" style="display:block">${U.esc(t.teacher_id)}</small></span>
+          </label>`).join('') || '<div class="empty">No active teachers found.</div>'}
+        </div>
+        <div class="right" style="justify-content:flex-end;margin-top:14px">
+          <button type="button" class="btn secondary" data-close>Cancel</button>
+          <button type="button" class="btn primary" data-save-teachers>Use Selected Teachers</button>
+        </div>
+      </div>`;
+      const m = U.modal('Choose Teachers', html);
+      m.querySelector('[data-save-teachers]')?.addEventListener('click', () => {
+        selectedTeacherIds = new Set([...m.querySelectorAll('[data-teacher-choice]:checked')].map(x => Number(x.value)));
+        if (!selectedTeacherIds.size) { U.toast('Select at least one teacher', 'error'); return; }
+        m.remove();
+        renderTeacherSummary();
+      });
+    };
+
+    teacherPicker?.addEventListener('click', openTeacherPicker);
+    renderTeacherSummary();
+
     fill(q('[data-class]'), classes.map((c) => `<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}</option>`).join(''));
     const classForm = q('form[data-class-form]');
     classForm?.addEventListener('submit', async (e) => {
@@ -542,8 +577,6 @@ const Page = (() => {
         const typed = String(payload.subject_name || '').trim().replace(/\s+/g, ' ');
         delete payload.subject_name;
         if (!typed) throw Error('Please enter a subject name');
-
-        // Reuse an existing subject when the typed name already exists. Otherwise create it.
         const existing = subjects.find((s) => String(s.name || '').trim().toLowerCase() === typed.toLowerCase());
         let subjectId = existing?.id;
         if (!subjectId) {
@@ -553,18 +586,15 @@ const Page = (() => {
         }
         payload.subject_id = Number(subjectId);
         if (!Number.isInteger(payload.subject_id) || payload.subject_id <= 0) throw Error('Could not create/find the subject');
-
         button && (button.disabled = true);
         await Api.post('/classes', payload);
         U.toast('Class created');
         classForm.reset();
         location.reload();
-      } catch (x) {
-        U.toast(x.message || 'Could not create class', 'error');
-      } finally {
-        button && (button.disabled = false);
-      }
+      } catch (x) { U.toast(x.message || 'Could not create class', 'error'); }
+      finally { button && (button.disabled = false); }
     });
+
     const form = q('form[data-allocation-form]');
     const body = q('[data-body]');
     const load = async () => {
@@ -576,37 +606,53 @@ const Page = (() => {
       })).join('');
       fill(body, html || tableEmpty(8));
     };
+
     form?.addEventListener('submit', async (e) => {
       e.preventDefault();
       try {
         const id = form.dataset.editId;
         const payload = formObj(form);
-        const teachersSelected=[...form.querySelectorAll('[name="teacher_id"]:checked')].map(x=>Number(x.value));
-        const days=[...form.querySelectorAll('[name="day_of_week_multi"]:checked')].map(x=>Number(x.value));
-        if(id){
-          payload.day_of_week=days[0] ?? Number(payload.day_of_week ?? 0);
+        const days = [...form.querySelectorAll('[name="day_of_week_multi"]:checked')].map(x => Number(x.value));
+        if (!id) {
+          if (!selectedTeacherIds.size) throw Error('Choose at least one teacher');
+          if (!days.length) throw Error('Select at least one day');
+          payload.teacher_ids = [...selectedTeacherIds];
+          payload.days = days;
+          delete payload.teacher_id;
+          delete payload.day_of_week_multi;
+          await Api.post('/teacher-classes', payload);
+          U.toast(`${selectedTeacherIds.size} teacher${selectedTeacherIds.size===1?'':'s'} allocated`);
+        } else {
+          payload.teacher_id = Number([...selectedTeacherIds][0]);
+          payload.day_of_week = days[0] ?? Number(payload.day_of_week ?? 0);
           await Api.put(`/teacher-classes/${id}`, payload);
           delete form.dataset.editId;
           form.querySelector('button[type="submit"]').textContent='Allocate class';
           U.toast('Allocation updated');
-        } else {
-          payload.teacher_ids=teachersSelected;
-          payload.days=days;
-          delete payload.teacher_id;
-          delete payload.day_of_week_multi;
-          if(!teachersSelected.length) throw Error('Select at least one teacher');
-          if(!days.length) throw Error('Select at least one day');
-          await Api.post('/teacher-classes', payload);
-          U.toast(`${teachersSelected.length} teacher${teachersSelected.length===1?'':'s'} allocated`);
         }
-        form.reset(); load();
+        selectedTeacherIds = new Set();
+        renderTeacherSummary();
+        form.reset();
+        await load();
       } catch (x) { U.toast(x.message || 'Could not save allocation', 'error'); }
     });
+
     body?.addEventListener('click', async (e) => {
       const del = e.target.dataset.del; const edit = e.target.dataset.editAllocation; const deleteClass = e.target.dataset.deleteClass;
       if (deleteClass) return adminVerifiedAction('Delete class','This permanently removes the class, its allocations, fee structures, homework, classwork and attendance. It will no longer appear anywhere on the website.',async()=>{await Api.del(`/classes/${deleteClass}`);U.toast('Class deleted permanently');load();});
       if (del) { await Api.del(`/teacher-classes/${del}`); U.toast('Allocation deactivated'); load(); return; }
-      if (edit) { form.querySelectorAll('[name="teacher_id"]').forEach(x=>x.checked=String(x.value)===String(e.target.dataset.teacher)); q('[name="class_id"]').value = e.target.dataset.classId; q('[name="day_of_week"]').value = e.target.dataset.day; form.querySelectorAll('[name="day_of_week_multi"]').forEach(cb=>cb.checked=Number(cb.value)===Number(e.target.dataset.day)); q('[name="start_time"]').value = e.target.dataset.start; q('[name="end_time"]').value = e.target.dataset.end; form.dataset.editId = edit; form.querySelector('button[type="submit"]').textContent = 'Update allocation'; window.scrollTo({ top: 0, behavior: 'smooth' }); }
+      if (edit) {
+        selectedTeacherIds = new Set([Number(e.target.dataset.teacher)]);
+        renderTeacherSummary();
+        q('[data-class]').value = e.target.dataset.classId;
+        q('[name="day_of_week"]').value = e.target.dataset.day;
+        form.querySelectorAll('[name="day_of_week_multi"]').forEach(cb=>cb.checked=Number(cb.value)===Number(e.target.dataset.day));
+        q('[name="start_time"]').value = e.target.dataset.start;
+        q('[name="end_time"]').value = e.target.dataset.end;
+        form.dataset.editId = edit;
+        form.querySelector('button[type="submit"]').textContent = 'Update allocation';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
     });
     await load();
   }

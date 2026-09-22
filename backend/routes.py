@@ -370,12 +370,23 @@ def _student_objs_bulk(students, private=True):
         newest.setdefault(row.class_id,row)
     for sid in ids:
         fee_by_student[sid]=sum((Decimal(str(newest[cid].monthly_fee)) for cid in student_class_ids[sid] if cid in newest),Decimal("0.00"))
-    payments={p.student_id:p for p in FeePayment.query.filter(FeePayment.student_id.in_(ids),FeePayment.fee_month==month).all()}
     out=[]
     for s in students:
         p=parents.get(s.parent_id) if s.parent_id else None
-        current_due=fee_by_student.get(s.id,Decimal("0.00")); payment=payments.get(s.id)
-        current_month_status="PAID" if payment else ("DUE" if current_due>0 else "N/A")
+        current_due=fee_by_student.get(s.id,Decimal("0.00"))
+        # Fee status must be based on the actual balance, not merely on whether
+        # a payment row exists. This keeps partial payments and carry-forward
+        # credits consistent across the student selector and fee screens.
+        try:
+            balance_rows=_fee_month_balances(s.id)
+            current_row=next((x for x in balance_rows if x["month"]==month),None)
+            if current_row and current_row["due"]>Decimal("0.00"):
+                current_month_status=current_row["status"]
+            else:
+                current_month_status="N/A" if current_due<=Decimal("0.00") else "DUE"
+        except Exception:
+            db.session.rollback()
+            current_month_status="DUE" if current_due>Decimal("0.00") else "N/A"
         x={"id":s.id,"student_id":s.student_id,"name":s.name,"photo":s.photo,"gender":s.gender,"dob":s.dob.isoformat() if s.dob else None,"phone":s.phone,"school_name":s.school_name,"admission_date":s.admission_date.isoformat() if s.admission_date else None,"status":s.status,"classes":classes_by_student.get(s.id,[]),"current_month_status":current_month_status}
         if private:
             x["address"]=s.address
@@ -544,8 +555,14 @@ def admin_dashboard():
     for row in fee_rows: latest_by_class.setdefault(row.class_id,row)
     assigned={sid:set() for sid in ids}
     for sc in StudentClass.query.filter(StudentClass.student_id.in_(ids or [-1]),StudentClass.status=="active").all(): assigned[sc.student_id].add(sc.class_id)
-    paid={p.student_id for p in FeePayment.query.filter(FeePayment.student_id.in_(ids or [-1]),FeePayment.fee_month==m).all()}
-    due=sum(1 for sid in ids if sid not in paid and any(cid in latest_by_class for cid in assigned[sid]))
+    due=0
+    for sid in ids:
+        if not any(cid in latest_by_class for cid in assigned[sid]):
+            continue
+        rows=_fee_month_balances(sid)
+        current=next((x for x in rows if x["month"]==m),None)
+        if current and current["balance"]>Decimal("0.00"):
+            due+=1
     unresolved_complaints=Complaint.query.filter(Complaint.status!="resolved").count()
     new_enquiries=Enquiry.query.filter_by(status="new").count()
     return ok({
@@ -801,11 +818,6 @@ def _schedule_conflict(teacher_id, class_id, day, start, end, exclude_id=None):
     teacher_conflict=q.filter(TeacherClass.teacher_id==teacher_id).first()
     if teacher_conflict:
         return "Teacher schedule overlaps"
-
-    # Prevent a course from being double-booked at the same time.
-    class_conflict=q.filter(TeacherClass.class_id==class_id).first()
-    if class_conflict:
-        return "Course schedule overlaps"
 
     c=Class.query.get(class_id)
     if c and c.room:
@@ -1374,9 +1386,17 @@ def fees():
     for s in students:
         rows_for_student=[latest_by_class[cid] for cid in class_ids[s.id] if cid in latest_by_class]
         due=_fee_for_month_from_rows(rows_for_student,m)
-        month_paid=sum((Decimal(str(p.amount)) for p in FeePayment.query.filter_by(student_id=s.id,fee_month=m).all()),Decimal("0.00"))
-        remaining=max(Decimal("0.00"),due-month_paid)
-        status="PAID" if due>0 and remaining<=0 else ("PARTIAL" if month_paid>0 else ("DUE" if due else "N/A"))
+        balance_rows=_fee_month_balances(s.id)
+        current=next((x for x in balance_rows if x["month"]==m),None)
+        if current:
+            due=current["due"]
+            month_paid=current["paid"]
+            remaining=current["balance"]
+            status=current["status"]
+        else:
+            month_paid=Decimal("0.00")
+            remaining=max(Decimal("0.00"),due)
+            status="DUE" if due>Decimal("0.00") else "N/A"
         latest=FeePayment.query.filter_by(student_id=s.id,fee_month=m).order_by(FeePayment.payment_date.desc(),FeePayment.id.desc()).first()
         if st and st!=status:continue
         out.append({"student_id":s.id,"student_code":s.student_id,"student_name":s.name,"fee_month":m.strftime("%Y-%m"),
