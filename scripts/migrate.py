@@ -149,6 +149,37 @@ def ensure_schedule_exceptions():
         ) ENGINE=InnoDB"""))
         return
 
+def ensure_personal_fields():
+    """Add admin-only personal detail fields without disturbing existing data."""
+    inspector=inspect(db.engine)
+    for table in ("teachers","students"):
+        if table not in inspector.get_table_names():
+            continue
+        existing={c["name"] for c in inspector.get_columns(table)}
+        if "aadhaar_number" not in existing:
+            db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN aadhaar_number VARCHAR(20) NULL"))
+
+def ensure_attachment_targets():
+    inspector=inspect(db.engine)
+    if "notice_attachments" not in inspector.get_table_names():
+        return
+    existing={c["name"] for c in inspector.get_columns("notice_attachments")}
+    if "target_type" not in existing:
+        db.session.execute(text("ALTER TABLE notice_attachments ADD COLUMN target_type ENUM('all','student','class') NOT NULL DEFAULT 'all' AFTER uploaded_by"))
+    if "target_student_id" not in existing:
+        db.session.execute(text("ALTER TABLE notice_attachments ADD COLUMN target_student_id BIGINT UNSIGNED NULL AFTER target_type"))
+    if "target_class_id" not in existing:
+        db.session.execute(text("ALTER TABLE notice_attachments ADD COLUMN target_class_id BIGINT UNSIGNED NULL AFTER target_student_id"))
+    # Indexes make recipient filtering cheap.
+    try:
+        indexes={ix.get("name") for ix in inspect(db.engine).get_indexes("notice_attachments")}
+        if "idx_notice_attachments_target_student" not in indexes:
+            db.session.execute(text("CREATE INDEX idx_notice_attachments_target_student ON notice_attachments(target_student_id)"))
+        if "idx_notice_attachments_target_class" not in indexes:
+            db.session.execute(text("CREATE INDEX idx_notice_attachments_target_class ON notice_attachments(target_class_id)"))
+    except Exception:
+        db.session.rollback()
+
 def ensure_performance_indexes():
     """Add indexes used by the high-traffic list/dashboard endpoints.
     Safe to run repeatedly; existing indexes are left untouched.
@@ -211,6 +242,8 @@ with app.app_context():
     ensure_attendance_marker()
     ensure_complaint_class()
     ensure_schedule_exceptions()
+    ensure_personal_fields()
+    ensure_attachment_targets()
     ensure_performance_indexes()
     db.session.commit()
-    print("RMCTI database schema is ready. Enquiries, attendance marker, optional complaint class, and persistent photo storage are ready. Existing data is preserved.")
+    print("RMCTI database schema is ready. Schedule controls, Aadhaar fields, targeted attachments, attendance marker, and performance indexes are ready. Existing data is preserved.")

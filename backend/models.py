@@ -15,11 +15,11 @@ class TokenBlocklist(db.Model):
 class Admin(db.Model):
     __tablename__="admins"; id=db.Column(db.BigInteger,primary_key=True); user_id=db.Column(db.BigInteger,db.ForeignKey("users.id"),unique=True,nullable=False); name=db.Column(db.String(150),nullable=False); email=db.Column(db.String(255)); phone=db.Column(db.String(30))
 class Teacher(db.Model):
-    __tablename__="teachers"; id=db.Column(db.BigInteger,primary_key=True); user_id=db.Column(db.BigInteger,db.ForeignKey("users.id"),unique=True,nullable=False); teacher_id=db.Column(db.String(30),unique=True,nullable=False); name=db.Column(db.String(150),nullable=False); photo=db.Column(db.String(500)); gender=db.Column(db.String(30)); dob=db.Column(db.Date); phone=db.Column(db.String(30)); email=db.Column(db.String(255)); address=db.Column(db.Text); qualification=db.Column(db.String(255)); experience=db.Column(db.String(100)); joining_date=db.Column(db.Date); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
+    __tablename__="teachers"; id=db.Column(db.BigInteger,primary_key=True); user_id=db.Column(db.BigInteger,db.ForeignKey("users.id"),unique=True,nullable=False); teacher_id=db.Column(db.String(30),unique=True,nullable=False); name=db.Column(db.String(150),nullable=False); photo=db.Column(db.String(500)); gender=db.Column(db.String(30)); dob=db.Column(db.Date); phone=db.Column(db.String(30)); email=db.Column(db.String(255)); address=db.Column(db.Text); qualification=db.Column(db.String(255)); experience=db.Column(db.String(100)); aadhaar_number=db.Column(db.String(20)); joining_date=db.Column(db.Date); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
 class Parent(db.Model):
     __tablename__="parents"; id=db.Column(db.BigInteger,primary_key=True); name=db.Column(db.String(150),nullable=False); relationship=db.Column(db.String(80)); phone=db.Column(db.String(30)); email=db.Column(db.String(255)); address=db.Column(db.Text)
 class Student(db.Model):
-    __tablename__="students"; id=db.Column(db.BigInteger,primary_key=True); user_id=db.Column(db.BigInteger,db.ForeignKey("users.id"),unique=True,nullable=False); student_id=db.Column(db.String(30),unique=True,nullable=False); name=db.Column(db.String(150),nullable=False); photo=db.Column(db.String(500)); gender=db.Column(db.String(30)); dob=db.Column(db.Date); phone=db.Column(db.String(30)); address=db.Column(db.Text); school_name=db.Column(db.String(255)); admission_date=db.Column(db.Date); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); parent_id=db.Column(db.BigInteger,db.ForeignKey("parents.id"))
+    __tablename__="students"; id=db.Column(db.BigInteger,primary_key=True); user_id=db.Column(db.BigInteger,db.ForeignKey("users.id"),unique=True,nullable=False); student_id=db.Column(db.String(30),unique=True,nullable=False); name=db.Column(db.String(150),nullable=False); photo=db.Column(db.String(500)); gender=db.Column(db.String(30)); dob=db.Column(db.Date); phone=db.Column(db.String(30)); address=db.Column(db.Text); school_name=db.Column(db.String(255)); aadhaar_number=db.Column(db.String(20)); admission_date=db.Column(db.Date); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); parent_id=db.Column(db.BigInteger,db.ForeignKey("parents.id"))
 class Subject(db.Model):
     __tablename__="subjects"; id=db.Column(db.BigInteger,primary_key=True); name=db.Column(db.String(100),unique=True,nullable=False); is_active=db.Column(db.Boolean,default=True)
 class Class(db.Model):
@@ -105,6 +105,9 @@ class NoticeAttachment(db.Model):
     file_size = db.Column(db.BigInteger, nullable=False)
     data = db.Column(MEDIUMBLOB, nullable=False)
     uploaded_by = db.Column(db.BigInteger, db.ForeignKey("users.id"), nullable=False)
+    target_type = db.Column(db.Enum("all","student","class"), default="all", nullable=False)
+    target_student_id = db.Column(db.BigInteger, db.ForeignKey("students.id", ondelete="CASCADE"), nullable=True)
+    target_class_id = db.Column(db.BigInteger, db.ForeignKey("classes.id", ondelete="CASCADE"), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     __table_args__ = (db.Index("idx_notice_attachments_created", "created_at"),)
 

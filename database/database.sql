@@ -19,8 +19,13 @@ CREATE TABLE notice_attachments (
  file_size BIGINT UNSIGNED NOT NULL,
  data MEDIUMBLOB NOT NULL,
  uploaded_by BIGINT UNSIGNED NOT NULL,
+ target_type ENUM('all','student','class') NOT NULL DEFAULT 'all',
+ target_student_id BIGINT UNSIGNED NULL,
+ target_class_id BIGINT UNSIGNED NULL,
  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
  INDEX idx_notice_attachments_created(created_at),
+ INDEX idx_notice_attachments_target_student(target_student_id),
+ INDEX idx_notice_attachments_target_class(target_class_id),
  FOREIGN KEY(uploaded_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
@@ -49,7 +54,7 @@ CREATE TABLE admins (
 CREATE TABLE teachers (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id BIGINT UNSIGNED NOT NULL UNIQUE,
  teacher_id VARCHAR(30) NOT NULL UNIQUE, name VARCHAR(150) NOT NULL, photo VARCHAR(500),
- gender VARCHAR(30), dob DATE, phone VARCHAR(30), email VARCHAR(255), address TEXT,
+ gender VARCHAR(30), dob DATE, phone VARCHAR(30), email VARCHAR(255), address TEXT, aadhaar_number VARCHAR(20),
  qualification VARCHAR(255), experience VARCHAR(100), joining_date DATE,
  status ENUM('active','inactive') NOT NULL DEFAULT 'active',
  created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -62,7 +67,7 @@ CREATE TABLE parents (
 CREATE TABLE students (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id BIGINT UNSIGNED NOT NULL UNIQUE,
  student_id VARCHAR(30) NOT NULL UNIQUE, name VARCHAR(150) NOT NULL, photo VARCHAR(500),
- gender VARCHAR(30), dob DATE, phone VARCHAR(30), address TEXT, school_name VARCHAR(255),
+ gender VARCHAR(30), dob DATE, phone VARCHAR(30), address TEXT, school_name VARCHAR(255), aadhaar_number VARCHAR(20),
  admission_date DATE, status ENUM('active','inactive') NOT NULL DEFAULT 'active',
  parent_id BIGINT UNSIGNED, FOREIGN KEY(user_id) REFERENCES users(id),
  FOREIGN KEY(parent_id) REFERENCES parents(id) ON DELETE SET NULL
@@ -85,6 +90,27 @@ CREATE TABLE teacher_classes (
  FOREIGN KEY(teacher_id) REFERENCES teachers(id), FOREIGN KEY(class_id) REFERENCES classes(id),
  INDEX idx_teacher_schedule(teacher_id,day_of_week,start_time,end_time)
 ) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS schedule_exceptions (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ class_id BIGINT UNSIGNED NOT NULL,
+ allocation_id BIGINT UNSIGNED NULL,
+ week_start DATE NOT NULL,
+ schedule_date DATE NULL,
+ target_date DATE NULL,
+ kind ENUM('delete','reschedule','extra','weekly_time') NOT NULL,
+ start_time TIME NULL,
+ end_time TIME NULL,
+ teacher_id BIGINT UNSIGNED NULL,
+ created_by BIGINT UNSIGNED NOT NULL,
+ created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ INDEX idx_schedule_exceptions_class_week(class_id,week_start),
+ INDEX idx_schedule_exceptions_date(class_id,schedule_date),
+ FOREIGN KEY(class_id) REFERENCES classes(id) ON DELETE CASCADE,
+ FOREIGN KEY(allocation_id) REFERENCES teacher_classes(id) ON DELETE CASCADE,
+ FOREIGN KEY(teacher_id) REFERENCES teachers(id) ON DELETE SET NULL,
+ FOREIGN KEY(created_by) REFERENCES users(id)
+) ENGINE=InnoDB;
+
 CREATE TABLE student_classes (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, student_id BIGINT UNSIGNED NOT NULL, class_id BIGINT UNSIGNED NOT NULL,
  assigned_at DATETIME DEFAULT CURRENT_TIMESTAMP, status ENUM('active','inactive') NOT NULL DEFAULT 'active',

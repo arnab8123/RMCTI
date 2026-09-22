@@ -387,7 +387,7 @@ def _student_objs_bulk(students, private=True):
         except Exception:
             db.session.rollback()
             current_month_status="DUE" if current_due>Decimal("0.00") else "N/A"
-        x={"id":s.id,"student_id":s.student_id,"name":s.name,"photo":s.photo,"gender":s.gender,"dob":s.dob.isoformat() if s.dob else None,"phone":s.phone,"school_name":s.school_name,"admission_date":s.admission_date.isoformat() if s.admission_date else None,"status":s.status,"classes":classes_by_student.get(s.id,[]),"current_month_status":current_month_status}
+        x={"id":s.id,"student_id":s.student_id,"name":s.name,"photo":s.photo,"gender":s.gender,"dob":s.dob.isoformat() if s.dob else None,"phone":s.phone,"aadhaar_number":s.aadhaar_number,"school_name":s.school_name,"admission_date":s.admission_date.isoformat() if s.admission_date else None,"status":s.status,"classes":classes_by_student.get(s.id,[]),"current_month_status":current_month_status}
         if private:
             x["address"]=s.address
             x["parent"]={"name":p.name,"relationship":p.relationship,"phone":p.phone,"email":p.email,"address":p.address} if p else None
@@ -396,6 +396,13 @@ def _student_objs_bulk(students, private=True):
 
 
 
+def _clean_aadhaar(value):
+    value=str(value or "").strip().replace(" ","")
+    if not value:return None
+    if not value.isdigit() or len(value)!=12:
+        raise ValueError("Aadhaar number must contain exactly 12 digits")
+    return value
+
 def _week_start(d):
     return d - timedelta(days=d.weekday())
 
@@ -403,27 +410,49 @@ def _schedule_overrides(class_id, week_start):
     return ScheduleException.query.filter_by(class_id=class_id, week_start=week_start).all()
 
 def _effective_class_schedule(c, start_date, days=7):
-    overrides=_schedule_overrides(c.id,_week_start(start_date))
+    """Return the schedule students and teachers should actually see for a date range.
+
+    - delete: hides one normal occurrence for the selected week.
+    - weekly_time: changes one occurrence for the selected week only.
+    - reschedule: changes the underlying recurring allocation; the new day/time
+      becomes the normal schedule from that point onward.
+    - extra: adds a one-time class.
+    """
+    week=_week_start(start_date)
+    overrides=_schedule_overrides(c.id,week)
     allocations=TeacherClass.query.filter_by(class_id=c.id,status="active").all()
     teacher_ids={a.teacher_id for a in allocations}
     teacher_ids.update(e.teacher_id for e in overrides if e.teacher_id)
     teachers={t.id:t for t in Teacher.query.filter(Teacher.id.in_(teacher_ids or [-1])).all()}
     out=[]
+
     for off in range(days):
         d=start_date+timedelta(days=off)
         for tc in allocations:
-            if tc.day_of_week != d.weekday(): continue
-            specific=next((e for e in overrides if e.allocation_id==tc.id and e.schedule_date==d and e.kind in ("delete","reschedule")),None)
-            if specific and specific.kind=="delete": continue
-            ex=next((e for e in overrides if e.allocation_id==tc.id and e.kind=="weekly_time"),None)
-            start=(specific.start_time if specific and specific.start_time else (ex.start_time if ex and ex.start_time else tc.start_time))
-            end=(specific.end_time if specific and specific.end_time else (ex.end_time if ex and ex.end_time else tc.end_time))
-            tid=(specific.teacher_id if specific and specific.teacher_id else tc.teacher_id)
-            t=teachers.get(tid)
-            out.append({"date":d.isoformat(),"allocation_id":tc.id,"teacher_id":t.id if t else None,
-                        "teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,
-                        "start_time":start.strftime("%H:%M"),"end_time":end.strftime("%H:%M"),
-                        "day_of_week":d.weekday(),"room":c.room,"kind":"rescheduled" if specific else "regular"})
+            # A weekly-only override may move this occurrence to another day.
+            weekly=next((e for e in overrides if e.allocation_id==tc.id and e.kind=="weekly_time" and e.schedule_date==d),None)
+            moved_weekly=next((e for e in overrides if e.allocation_id==tc.id and e.kind=="weekly_time" and e.target_date==d),None)
+            delete=next((e for e in overrides if e.allocation_id==tc.id and e.kind=="delete" and e.schedule_date==d),None)
+            # Normal occurrence.
+            if tc.day_of_week==d.weekday() and not delete and not moved_weekly and not (weekly and weekly.target_date and weekly.target_date!=d):
+                start_time=weekly.start_time if weekly and weekly.start_time else tc.start_time
+                end_time=weekly.end_time if weekly and weekly.end_time else tc.end_time
+                tid=weekly.teacher_id if weekly and weekly.teacher_id else tc.teacher_id
+                t=teachers.get(tid)
+                out.append({"date":d.isoformat(),"allocation_id":tc.id,"teacher_id":t.id if t else None,
+                            "teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,
+                            "start_time":start_time.strftime("%H:%M"),"end_time":end_time.strftime("%H:%M"),
+                            "day_of_week":d.weekday(),"room":c.room,
+                            "kind":"changed-this-week" if weekly else "regular"})
+            # Weekly-only moved occurrence.
+            if moved_weekly:
+                t=teachers.get(moved_weekly.teacher_id or tc.teacher_id)
+                out.append({"date":d.isoformat(),"allocation_id":tc.id,"teacher_id":t.id if t else None,
+                            "teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,
+                            "start_time":moved_weekly.start_time.strftime("%H:%M"),
+                            "end_time":moved_weekly.end_time.strftime("%H:%M"),
+                            "day_of_week":d.weekday(),"room":c.room,"kind":"changed-this-week"})
+    # One-time extra classes.
     for ex in overrides:
         if ex.kind=="extra" and ex.schedule_date and start_date <= ex.schedule_date < start_date+timedelta(days=days):
             t=teachers.get(ex.teacher_id)
@@ -432,16 +461,6 @@ def _effective_class_schedule(c, start_date, days=7):
                         "start_time":ex.start_time.strftime("%H:%M") if ex.start_time else "",
                         "end_time":ex.end_time.strftime("%H:%M") if ex.end_time else "",
                         "day_of_week":ex.schedule_date.weekday(),"room":c.room,"kind":"extra"})
-    for ex in overrides:
-        if ex.kind=="reschedule" and ex.target_date and start_date <= ex.target_date < start_date+timedelta(days=days):
-            t=teachers.get(ex.teacher_id)
-            if t is None and ex.allocation_id:
-                tc=TeacherClass.query.get(ex.allocation_id); t=teachers.get(tc.teacher_id) if tc else None
-            out.append({"date":ex.target_date.isoformat(),"allocation_id":ex.allocation_id,"teacher_id":t.id if t else None,
-                        "teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,
-                        "start_time":ex.start_time.strftime("%H:%M") if ex.start_time else "",
-                        "end_time":ex.end_time.strftime("%H:%M") if ex.end_time else "",
-                        "day_of_week":ex.target_date.weekday(),"room":c.room,"kind":"rescheduled"})
     return sorted(out,key=lambda x:(x["date"],x["start_time"],x["teacher_name"] or ""))
 
 def class_obj(c):
@@ -490,7 +509,7 @@ def _teacher_objs_bulk(teachers):
         if not c:continue
         sub=subjects.get(c.subject_id)
         by_teacher[tc.teacher_id].append({"class_id":c.id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "","day":DAYS[tc.day_of_week],"start_time":tc.start_time.strftime("%H:%M"),"end_time":tc.end_time.strftime("%H:%M"),"room":c.room})
-    return [{"id":t.id,"teacher_id":t.teacher_id,"name":t.name,"photo":t.photo,"gender":t.gender,"dob":t.dob.isoformat() if t.dob else None,"phone":t.phone,"email":t.email,"address":t.address,"qualification":t.qualification,"experience":t.experience,"joining_date":t.joining_date.isoformat() if t.joining_date else None,"status":t.status,"classes":by_teacher.get(t.id,[])} for t in teachers]
+    return [{"id":t.id,"teacher_id":t.teacher_id,"name":t.name,"photo":t.photo,"gender":t.gender,"dob":t.dob.isoformat() if t.dob else None,"phone":t.phone,"email":t.email,"address":t.address,"aadhaar_number":t.aadhaar_number,"qualification":t.qualification,"experience":t.experience,"joining_date":t.joining_date.isoformat() if t.joining_date else None,"status":t.status,"classes":by_teacher.get(t.id,[])} for t in teachers]
 
 
 def student_obj(s,private=True):
@@ -522,11 +541,40 @@ def _classwork_objs_bulk(rows):
 
 def classwork_obj(w): return _classwork_objs_bulk([w])[0]
 
+def _attachment_visible_to_current_user(row):
+    role=current_user().role
+    if role=="admin" or row.target_type=="all":
+        return True
+    if role=="student":
+        s=student_for_user()
+        if not s:return False
+        if row.target_type=="student":
+            return row.target_student_id==s.id
+        if row.target_type=="class":
+            return bool(row.target_class_id and StudentClass.query.filter_by(
+                student_id=s.id,class_id=row.target_class_id,status="active").first())
+    if role=="teacher":
+        t=teacher_for_user()
+        if not t:return False
+        if row.target_type=="student":
+            # A student-targeted file is private to that student (and admins).
+            return False
+        if row.target_type=="class":
+            return bool(row.target_class_id and TeacherClass.query.filter_by(
+                teacher_id=t.id,class_id=row.target_class_id,status="active").first())
+    return False
+
+def _attachment_obj(x):
+    return {"id":x.id,"title":x.title,"filename":x.original_filename,"mime_type":x.mime_type,
+            "file_size":x.file_size,"target_type":x.target_type,
+            "target_student_id":x.target_student_id,"target_class_id":x.target_class_id,
+            "created_at":iso_ist(x.created_at)}
+
 @api.get("/attachments")
 @roles("admin","teacher","student")
 def attachments():
-    rows=NoticeAttachment.query.order_by(NoticeAttachment.created_at.desc(),NoticeAttachment.id.desc()).limit(_bounded_limit(100,200)).all()
-    return ok([{"id":x.id,"title":x.title,"filename":x.original_filename,"mime_type":x.mime_type,"file_size":x.file_size,"created_at":iso_ist(x.created_at)} for x in rows])
+    rows=NoticeAttachment.query.order_by(NoticeAttachment.created_at.desc(),NoticeAttachment.id.desc()).limit(_bounded_limit(200,500)).all()
+    return ok([_attachment_obj(x) for x in rows if _attachment_visible_to_current_user(x)])
 
 @api.post("/admin/attachments")
 @roles("admin")
@@ -552,7 +600,25 @@ def upload_attachment():
     if not data:return err("The selected file is empty")
     if len(data)>10*1024*1024:return err("File is too large. Maximum size is 10 MB")
     name=secure_filename(f.filename) or f"notice-{uuid.uuid4().hex}"
-    row=NoticeAttachment(title=title[:255],original_filename=name,mime_type=mime,file_size=len(data),data=data,uploaded_by=current_user().id)
+    target_type=str(request.form.get("target_type") or "all").strip().lower()
+    if target_type not in ("all","student","class"):
+        return err("Invalid recipient type")
+    target_student_id=int(request.form.get("target_student_id")) if request.form.get("target_student_id") else None
+    target_class_id=int(request.form.get("target_class_id")) if request.form.get("target_class_id") else None
+    if target_type=="student":
+        st=Student.query.filter_by(id=target_student_id,status="active").first() if target_student_id else None
+        if not st:return err("Select an active student")
+        target_class_id=None
+    elif target_type=="class":
+        # Only classes with at least one active teacher allocation can receive class files.
+        cl=Class.query.filter_by(id=target_class_id,status="active").first() if target_class_id else None
+        has_teacher=TeacherClass.query.filter_by(class_id=target_class_id,status="active").first() if target_class_id else None
+        if not cl or not has_teacher:return err("Select a course with an assigned teacher")
+        target_student_id=None
+    else:
+        target_student_id=target_class_id=None
+    row=NoticeAttachment(title=title[:255],original_filename=name,mime_type=mime,file_size=len(data),data=data,
+        uploaded_by=current_user().id,target_type=target_type,target_student_id=target_student_id,target_class_id=target_class_id)
     try:
         db.session.add(row);db.session.flush();audit(current_user().id,"upload","notice_attachment",row.id,name);db.session.commit()
         return ok({"id":row.id,"title":row.title,"filename":row.original_filename,"mime_type":row.mime_type,"file_size":row.file_size,"created_at":iso_ist(row.created_at)},"File attached to notice board",201)
@@ -574,6 +640,8 @@ def delete_attachment(id):
 def download_attachment(id):
     row=NoticeAttachment.query.get(id)
     if not row:return err("Attachment not found",404)
+    if not _attachment_visible_to_current_user(row):
+        return err("You do not have access to this file",403)
     return send_file(io.BytesIO(bytes(row.data)),mimetype=row.mime_type,as_attachment=False,download_name=row.original_filename,max_age=300)
 
 @api.get("/subjects")
@@ -653,7 +721,7 @@ def add_teacher():
     if User.query.filter_by(username=username).first():return err("Teacher ID already exists. Please try again.",409)
     try:
         u=User(username=username,password_hash=hp(pw),role="teacher");db.session.add(u);db.session.flush()
-        t=Teacher(user_id=u.id,teacher_id=tid,name=name,photo=b.get("photo"),gender=b.get("gender"),dob=pd(b.get("dob")),phone=b.get("phone"),email=b.get("email"),address=b.get("address"),qualification=b.get("qualification"),experience=b.get("experience"),joining_date=pd(b.get("joining_date")));db.session.add(t);db.session.flush();audit(current_user().id,"register","teacher",t.id,tid);db.session.commit()
+        t=Teacher(user_id=u.id,teacher_id=tid,name=name,photo=b.get("photo"),gender=b.get("gender"),dob=pd(b.get("dob")),phone=b.get("phone"),email=b.get("email"),address=b.get("address"),aadhaar_number=_clean_aadhaar(b.get("aadhaar_number")),qualification=b.get("qualification"),experience=b.get("experience"),joining_date=pd(b.get("joining_date")));db.session.add(t);db.session.flush();audit(current_user().id,"register","teacher",t.id,tid);db.session.commit()
         return ok({"teacher":teacher_obj(t),"credentials":{"username":username,"temporary_password":pw}},"Teacher registered successfully",201)
     except Exception:
         db.session.rollback();return err("Could not register teacher")
@@ -668,6 +736,7 @@ def edit_teacher(id):
     try:
         for k in ("name","photo","gender","phone","email","address","qualification","experience","status"):
             if k in b:setattr(t,k,b[k])
+        if "aadhaar_number" in b:t.aadhaar_number=_clean_aadhaar(b.get("aadhaar_number"))
         if t.status not in ("active","inactive"): return err("Invalid teacher status")
         if "dob" in b:t.dob=pd(b.get("dob"))
         if "joining_date" in b:t.joining_date=pd(b.get("joining_date"))
@@ -718,33 +787,99 @@ def create_schedule_exception():
         kind=str(b.get("kind","")).strip().lower()
         if kind not in ("delete","reschedule","extra","weekly_time"):return err("Invalid schedule action")
         ws=date.fromisoformat(str(b["week_start"]))
+        if ws < _week_start(today_ist()):
+            return err("Schedule changes can only be made for the current or a future week")
         allocation_id=int(b["allocation_id"]) if b.get("allocation_id") else None
         schedule_date=date.fromisoformat(b["schedule_date"]) if b.get("schedule_date") else None
         target_date=date.fromisoformat(b["target_date"]) if b.get("target_date") else None
         teacher_id=int(b["teacher_id"]) if b.get("teacher_id") else None
-        start=pt(b["start_time"],True) if b.get("start_time") else None
-        end=pt(b["end_time"],True) if b.get("end_time") else None
-        if kind in ("reschedule","extra","weekly_time") and (not start or not end or start>=end):return err("Valid start and end time are required")
-        if kind in ("delete","reschedule") and (not allocation_id or not schedule_date):return err("Original class and date are required")
-        if kind=="reschedule" and not target_date:return err("New date is required")
-        if kind=="extra" and not schedule_date:return err("Extra class date is required")
-        if kind=="weekly_time" and not allocation_id:return err("Class allocation is required")
+        start_time=pt(b["start_time"],True) if b.get("start_time") else None
+        end_time=pt(b["end_time"],True) if b.get("end_time") else None
+
+        tc=None
         if allocation_id:
             tc=TeacherClass.query.get(allocation_id)
-            if not tc or tc.class_id!=cid or tc.status!="active":return err("Allocation not found",404)
-            if kind in ("delete","reschedule") and schedule_date.weekday()!=tc.day_of_week:return err("Original date must be the normal class day")
-        if teacher_id and not Teacher.query.get(teacher_id):return err("Teacher not found",404)
-        if kind=="extra" and not teacher_id:return err("Teacher is required for an extra class")
-        if kind=="reschedule" and target_date.weekday()==schedule_date.weekday() and start==tc.start_time and end==tc.end_time:
-            return err("Choose a different date or time")
-        ex=ScheduleException(class_id=cid,allocation_id=allocation_id,week_start=ws,schedule_date=schedule_date,
-            target_date=target_date,kind=kind,start_time=start,end_time=end,
-            teacher_id=teacher_id or (TeacherClass.query.get(allocation_id).teacher_id if allocation_id else None),
-            created_by=current_user().id)
-        db.session.add(ex);audit(current_user().id,"schedule_change","schedule_exception",None,f"{kind} for class {c.class_name} week {ws}");db.session.commit()
-        return ok({"id":ex.id},"Schedule updated",201)
+            if not tc or tc.class_id!=cid or tc.status!="active":
+                return err("Class schedule not found",404)
+
+        if kind in ("reschedule","weekly_time") and (not allocation_id or not schedule_date or not target_date):
+            return err("Select the class, original date and new date")
+        if kind in ("reschedule","weekly_time","extra") and (not start_time or not end_time or start_time>=end_time):
+            return err("Choose a valid start and end time")
+        if kind=="delete" and (not allocation_id or not schedule_date):
+            return err("Select the class and the date to delete")
+        if kind in ("delete","reschedule","weekly_time") and schedule_date.weekday()!=tc.day_of_week:
+            return err("The original date must match the class's current weekly day")
+        if kind in ("reschedule","weekly_time") and _week_start(schedule_date)!=ws:
+            return err("Original date must belong to the selected week")
+        if kind in ("reschedule","weekly_time") and _week_start(target_date)!=ws:
+            return err("New date must belong to the selected week")
+        if kind=="extra" and (not schedule_date or _week_start(schedule_date)!=ws):
+            return err("Extra class date must belong to the selected week")
+        if kind=="extra" and not teacher_id:
+            return err("Select the teacher for the extra class")
+        if teacher_id:
+            t=Teacher.query.filter_by(id=teacher_id,status="active").first()
+            if not t:return err("Teacher not found or inactive",404)
+
+        # Keep the recurring schedule safe from teacher clashes.
+        chosen_teacher=teacher_id or (tc.teacher_id if tc else None)
+        chosen_day=target_date.weekday() if target_date else (schedule_date.weekday() if schedule_date else None)
+        if chosen_teacher and chosen_day is not None and start_time and end_time:
+            conflict=_schedule_conflict(chosen_teacher,cid,chosen_day,start_time,end_time,
+                                        exclude_id=allocation_id if kind in ("reschedule","weekly_time") else None)
+            if conflict:return err("This teacher already has another class at the selected time")
+
+        if kind=="reschedule":
+            # This is the permanent/recurring option: update the actual allocation.
+            # Remove temporary overrides for this same recurring slot so the new
+            # schedule is the single source of truth for the current and future weeks.
+            ScheduleException.query.filter_by(class_id=cid,allocation_id=allocation_id,week_start=ws).delete(synchronize_session=False)
+            tc.day_of_week=target_date.weekday()
+            tc.start_time=start_time
+            tc.end_time=end_time
+            audit(current_user().id,"reschedule","teacher_class",tc.id,
+                  f"{c.class_name}: recurring schedule changed to {DAYS[tc.day_of_week]} {start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}")
+            db.session.commit()
+            return ok({"id":tc.id,"kind":"reschedule","permanent":True},
+                      "Recurring schedule changed. Students and teachers will now see the new schedule.",200)
+
+        if kind=="weekly_time":
+            # This week only. The next week automatically falls back to TeacherClass.
+            # Replace an existing weekly override for this allocation/date.
+            old=ScheduleException.query.filter_by(class_id=cid,allocation_id=allocation_id,
+                                                   week_start=ws,kind="weekly_time").all()
+            for x in old:
+                db.session.delete(x)
+            ex=ScheduleException(class_id=cid,allocation_id=allocation_id,week_start=ws,
+                schedule_date=schedule_date,target_date=target_date,start_time=start_time,end_time=end_time,
+                teacher_id=tc.teacher_id,created_by=current_user().id)
+            db.session.add(ex)
+            audit(current_user().id,"schedule_change","schedule_exception",None,
+                  f"Weekly-only change for {c.class_name} on {schedule_date.isoformat()} -> {target_date.isoformat()}")
+            db.session.commit()
+            return ok({"id":ex.id,"kind":"weekly_time","permanent":False},
+                      "This week's class was changed. Next week will use the normal schedule.",201)
+
+        if kind=="delete":
+            old=ScheduleException.query.filter_by(class_id=cid,allocation_id=allocation_id,
+                                                   week_start=ws,schedule_date=schedule_date,kind="delete").first()
+            if old:return err("That class is already deleted for this week")
+            ex=ScheduleException(class_id=cid,allocation_id=allocation_id,week_start=ws,
+                schedule_date=schedule_date,kind="delete",teacher_id=tc.teacher_id,created_by=current_user().id)
+        else: # extra
+            ex=ScheduleException(class_id=cid,allocation_id=None,week_start=ws,
+                schedule_date=schedule_date,target_date=None,kind="extra",start_time=start_time,end_time=end_time,
+                teacher_id=teacher_id,created_by=current_user().id)
+        db.session.add(ex)
+        audit(current_user().id,"schedule_change","schedule_exception",None,
+              f"{kind} for {c.class_name} week {ws}")
+        db.session.commit()
+        return ok({"id":ex.id,"kind":kind},"Schedule updated for this week.",201)
+    except ValueError:
+        db.session.rollback();return err("Invalid date or time")
     except Exception:
-        db.session.rollback();return err("Invalid schedule change")
+        db.session.rollback();return err("Could not save the schedule change",500)
 
 @api.delete("/schedule-exceptions/<int:id>")
 @roles("admin")
@@ -991,7 +1126,7 @@ def add_student():
         u=User(username=username,password_hash=hp(pw),role="student");db.session.add(u);db.session.flush()
         pdat=b.get("parent") or {};p=None
         if str(pdat.get("name","")).strip():p=Parent(name=pdat["name"],relationship=pdat.get("relationship"),phone=pdat.get("phone"),email=pdat.get("email"),address=pdat.get("address"));db.session.add(p);db.session.flush()
-        s=Student(user_id=u.id,student_id=sid,name=name,photo=b.get("photo"),gender=b.get("gender"),dob=pd(b.get("dob")),phone=b.get("phone"),address=b.get("address"),school_name=b.get("school_name"),admission_date=pd(b.get("admission_date")),parent_id=p.id if p else None);db.session.add(s);db.session.flush()
+        s=Student(user_id=u.id,student_id=sid,name=name,photo=b.get("photo"),gender=b.get("gender"),dob=pd(b.get("dob")),phone=b.get("phone"),address=b.get("address"),school_name=b.get("school_name"),aadhaar_number=_clean_aadhaar(b.get("aadhaar_number")),admission_date=pd(b.get("admission_date")),parent_id=p.id if p else None);db.session.add(s);db.session.flush()
         for cid in b.get("class_ids",[]):
             c=Class.query.get(int(cid))
             if c and c.status=="active":db.session.add(StudentClass(student_id=s.id,class_id=c.id))
@@ -1010,6 +1145,7 @@ def edit_student(id):
     try:
         for k in ("name","photo","gender","phone","address","school_name","status"):
             if k in b:setattr(s,k,b[k])
+        if "aadhaar_number" in b:s.aadhaar_number=_clean_aadhaar(b.get("aadhaar_number"))
         if s.status not in ("active","inactive"): return err("Invalid student status")
         if "dob" in b:s.dob=pd(b.get("dob"))
         if "admission_date" in b:s.admission_date=pd(b.get("admission_date"))
@@ -1552,11 +1688,36 @@ def teacher_for_user():
 def student_for_user():
     return Student.query.filter_by(user_id=current_user().id).first()
 
+def _teacher_current_schedule(t, class_id, now=None):
+    now=now or datetime.now(ZoneInfo("Asia/Kolkata"))
+    c=Class.query.get(class_id)
+    if not c or c.status!="active":return None
+    current_min=now.strftime("%H:%M")
+    rows=_effective_class_schedule(c,now.date(),1)
+    return next((x for x in rows if x.get("teacher_id")==t.id and x["start_time"]<=current_min<=x["end_time"]),None)
+
 @api.get("/teacher/dashboard")
 @roles("teacher")
 def teacher_dashboard():
-    t=teacher_for_user();alloc=TeacherClass.query.filter_by(teacher_id=t.id,status="active").all();class_ids={a.class_id for a in alloc};ids={x.student_id for x in StudentClass.query.filter(StudentClass.class_id.in_(class_ids or [-1]),StudentClass.status=="active").all()};today=today_ist();classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1])).all()};class_data={x["id"]:x for x in _class_objs_bulk(classes.values())};recent=Classwork.query.filter_by(teacher_id=t.id).order_by(Classwork.work_date.desc()).limit(5).all()
-    return ok({"teacher":teacher_obj(t),"total_students":len(ids),"total_classes":len(alloc),"todays_classes":[dict(class_data[a.class_id],start_time=a.start_time.strftime("%H:%M"),end_time=a.end_time.strftime("%H:%M")) for a in alloc if a.day_of_week==today.weekday() and a.class_id in class_data],"pending_homework":Homework.query.filter_by(teacher_id=t.id).filter(Homework.due_date>=today).count(),"recent_classwork":_classwork_objs_bulk(recent)})
+    t=teacher_for_user();alloc=TeacherClass.query.filter_by(teacher_id=t.id,status="active").all()
+    class_ids={a.class_id for a in alloc}
+    # Include one-time extra classes assigned to this teacher.
+    today=datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    extras=ScheduleException.query.filter_by(week_start=_week_start(today),kind="extra",schedule_date=today,teacher_id=t.id).all()
+    class_ids.update(x.class_id for x in extras)
+    ids={x.student_id for x in StudentClass.query.filter(StudentClass.class_id.in_(class_ids or [-1]),StudentClass.status=="active").all()}
+    classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1])).all()}
+    class_data={x["id"]:x for x in _class_objs_bulk(classes.values())}
+    todays=[]
+    for cid in class_ids:
+        row=_teacher_current_schedule(t,cid)
+        if row and cid in class_data:
+            todays.append(dict(class_data[cid],start_time=row["start_time"],end_time=row["end_time"],schedule_kind=row["kind"]))
+    recent=Classwork.query.filter_by(teacher_id=t.id).order_by(Classwork.work_date.desc()).limit(5).all()
+    return ok({"teacher":teacher_obj(t),"total_students":len(ids),"total_classes":len(alloc)+len(extras),
+               "todays_classes":sorted(todays,key=lambda x:x["start_time"]),
+               "pending_homework":Homework.query.filter_by(teacher_id=t.id).filter(Homework.due_date>=today).count(),
+               "recent_classwork":_classwork_objs_bulk(recent)})
 @api.get("/teacher/students")
 @roles("teacher")
 def teacher_students():
@@ -1573,110 +1734,98 @@ def attendance_state(tc, now=None):
 def my_classes():
     t=teacher_for_user(); now=datetime.now(ZoneInfo("Asia/Kolkata"))
     allocations=TeacherClass.query.filter_by(teacher_id=t.id,status="active").all()
-    class_ids=[a.class_id for a in allocations]
+    class_ids={a.class_id for a in allocations}
+    extras=ScheduleException.query.filter_by(week_start=_week_start(now.date()),kind="extra",
+                                             schedule_date=now.date(),teacher_id=t.id).all()
+    class_ids.update(x.class_id for x in extras)
     classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1]),Class.status=="active").all()}
     items={x["id"]:x for x in _class_objs_bulk(classes.values())};out=[]
     for a in allocations:
         item=items.get(a.class_id)
         if not item:continue
         item=dict(item)
-        effective=[x for x in _effective_class_schedule(classes[a.class_id],now.date(),1) if x.get("allocation_id")==a.id and x.get("teacher_id")==t.id]
-        row=effective[0] if effective else None
-        if row:
-            active=row["start_time"] <= now.strftime("%H:%M") <= row["end_time"]
-            item["attendance_active"]=active
-            item["attendance_schedule"]={"day_of_week":now.weekday(),"start_time":row["start_time"],"end_time":row["end_time"]}
-        else:
-            item["attendance_active"]=False
-            item["attendance_schedule"]={"day_of_week":now.weekday(),"start_time":None,"end_time":None}
+        effective=_teacher_current_schedule(t,a.class_id,now)
+        item["attendance_active"]=bool(effective)
+        item["attendance_schedule"]=({"day_of_week":now.weekday(),"date":effective["date"],
+                                      "start_time":effective["start_time"],"end_time":effective["end_time"],
+                                      "kind":effective["kind"]} if effective else
+                                     {"day_of_week":now.weekday(),"date":now.date().isoformat(),"start_time":None,"end_time":None,"kind":None})
+        # Show the effective schedule for today, not only the original recurring allocation.
+        item["today_schedule"]=effective
         out.append(item)
+    # Extra class can be taught by a teacher who is not normally allotted to the course.
+    for ex in extras:
+        item=items.get(ex.class_id)
+        if not item:continue
+        item=dict(item)
+        item["attendance_active"]=bool(_teacher_current_schedule(t,ex.class_id,now))
+        item["attendance_schedule"]={"day_of_week":now.weekday(),"date":now.date().isoformat(),
+                                     "start_time":ex.start_time.strftime("%H:%M"),
+                                     "end_time":ex.end_time.strftime("%H:%M"),"kind":"extra"}
+        item["today_schedule"]=_teacher_current_schedule(t,ex.class_id,now)
+        if not any(x["id"]==item["id"] for x in out):out.append(item)
     return ok(out)
 
 @api.get("/teacher/classes/<int:class_id>/attendance")
 @roles("teacher")
 def get_attendance(class_id):
-    """Return today's roster for marking attendance. Marks are kept in the browser
-    until the teacher presses Submit Attendance."""
     t=teacher_for_user()
     now=datetime.now(ZoneInfo("Asia/Kolkata"))
-    allocations=TeacherClass.query.filter_by(teacher_id=t.id,class_id=class_id,status="active").all()
-    if not allocations:return err("Class not assigned to you",403)
     c=Class.query.get(class_id)
     if not c or c.status!="active":return err("Course not found",404)
-    active_alloc=None
-    for a in allocations:
-        if any(x.get("allocation_id")==a.id and x.get("teacher_id")==t.id and x["start_time"] <= now.strftime("%H:%M") <= x["end_time"] for x in _effective_class_schedule(c,now.date(),1)):
-            active_alloc=a;break
+    allocations=TeacherClass.query.filter_by(teacher_id=t.id,class_id=class_id,status="active").all()
+    effective=_teacher_current_schedule(t,class_id,now)
+    if not allocations and not effective:
+        return err("Class is not assigned to you",403)
+    if not effective:
+        return ok({"class_id":class_id,"active":False,"date":now.date().isoformat(),
+                   "start_time":None,"end_time":None,"students":[]})
     students=(Student.query.join(StudentClass,StudentClass.student_id==Student.id)
               .filter(StudentClass.class_id==class_id,StudentClass.status=="active",Student.status=="active")
               .order_by(Student.name.asc()).all())
     records={x.student_id:x for x in Attendance.query.filter_by(class_id=class_id,attendance_date=now.date()).all()}
-    return ok({"class_id":class_id,"active":bool(active_alloc),"date":now.date().isoformat(),
-               "start_time":active_alloc.start_time.strftime("%H:%M") if active_alloc else None,
-               "end_time":active_alloc.end_time.strftime("%H:%M") if active_alloc else None,
+    return ok({"class_id":class_id,"active":True,"date":now.date().isoformat(),
+               "start_time":effective["start_time"],"end_time":effective["end_time"],
+               "schedule_kind":effective["kind"],
                "students":[{"id":s.id,"student_id":s.student_id,"name":s.name,
                             "status":records[s.id].status if s.id in records else None} for s in students]})
 
 @api.post("/teacher/classes/<int:class_id>/attendance")
 @roles("teacher")
 def save_attendance(class_id):
-    """Submit the complete attendance sheet in one transaction."""
     t=teacher_for_user()
     now=datetime.now(ZoneInfo("Asia/Kolkata"))
     c=Class.query.get(class_id)
     if not c or c.status!="active":return err("Course not found",404)
-    allocation=None
-    for a in TeacherClass.query.filter_by(teacher_id=t.id,class_id=class_id,status="active").all():
-        if any(x.get("allocation_id")==a.id and x.get("teacher_id")==t.id and x["start_time"] <= now.strftime("%H:%M") <= x["end_time"] for x in _effective_class_schedule(c,now.date(),1)):
-            allocation=a;break
-    if not allocation:
+    effective=_teacher_current_schedule(t,class_id,now)
+    if not effective:
         return err("Attendance can only be submitted during the scheduled class hours",403)
 
     b=request.get_json() or {}
     rows=b.get("attendance")
     if not isinstance(rows,list) or not rows:
         return err("Please mark attendance for all students before submitting")
-
-    allowed={x.student_id for x in StudentClass.query.filter_by(
-        class_id=class_id,status="active").all()}
+    allowed={x.student_id for x in StudentClass.query.filter_by(class_id=class_id,status="active").all()}
     seen=set()
     try:
         for item in rows:
-            student_id=int(item.get("student_id",0))
-            status=str(item.get("status","")).lower()
-            if student_id in seen:
-                return err("Duplicate student in attendance")
-            if student_id not in allowed:
-                return err("Student is not allotted to this course",403)
-            if status not in ("present","absent"):
-                return err("Every student must be marked present or absent")
+            student_id=int(item.get("student_id",0)); status=str(item.get("status","")).lower()
+            if student_id in seen:return err("Duplicate student in attendance")
+            if student_id not in allowed:return err("Student is not allotted to this course",403)
+            if status not in ("present","absent"):return err("Every student must be marked present or absent")
             seen.add(student_id)
-
         missing=allowed-seen
-        if missing:
-            return err("Please mark attendance for every student before submitting")
-
+        if missing:return err("Please mark attendance for every student before submitting")
         for item in rows:
-            student_id=int(item["student_id"])
-            status=str(item["status"]).lower()
-            rec=Attendance.query.filter_by(
-                student_id=student_id,class_id=class_id,attendance_date=now.date()
-            ).first()
-            if rec:
-                rec.status=status
-                rec.marked_by=current_user().id
-            else:
-                db.session.add(Attendance(
-                    student_id=student_id,class_id=class_id,
-                    attendance_date=now.date(),status=status,
-                    marked_by=current_user().id
-                ))
+            student_id=int(item["student_id"]);status=str(item["status"]).lower()
+            rec=Attendance.query.filter_by(student_id=student_id,class_id=class_id,attendance_date=now.date()).first()
+            if rec:rec.status=status;rec.marked_by=current_user().id
+            else:db.session.add(Attendance(student_id=student_id,class_id=class_id,attendance_date=now.date(),
+                                           status=status,marked_by=current_user().id))
         db.session.commit()
-        return ok({"date":now.date().isoformat(),"count":len(rows)},
-                  "Attendance submitted successfully")
+        return ok({"date":now.date().isoformat(),"count":len(rows)},"Attendance submitted successfully")
     except Exception:
-        db.session.rollback()
-        return err("Could not submit attendance")
+        db.session.rollback();return err("Could not submit attendance")
 
 @api.get("/teacher/classes/<int:class_id>/attendance/history")
 @roles("teacher")
@@ -1799,17 +1948,32 @@ def del_classwork(id):
 @roles("student")
 def student_dashboard():
     s=student_for_user();x=student_obj(s,private=False);now=datetime.now(ZoneInfo("Asia/Kolkata"));today=now.date();month=today.replace(day=1)
-    hw=[homework_obj(h) for h in Homework.query.filter(Homework.class_id.in_([c["class_id"] for c in x["classes"]] or [-1]),Homework.due_date>=today).order_by(Homework.due_date).limit(5).all()]
+    class_ids=[c["class_id"] for c in x["classes"]]
+    hw=[homework_obj(h) for h in Homework.query.filter(Homework.class_id.in_(class_ids or [-1]),Homework.due_date>=today).order_by(Homework.due_date).limit(5).all()]
     paid=FeePayment.query.filter_by(student_id=s.id,fee_month=month).first();fee=applicable_fee(s.id,month)
+    classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1]),Class.status=="active").all()}
+    todays=[]
     candidates=[]
-    for c in x["classes"]:
-        next_day=(c["day_of_week"]-now.weekday())%7
-        start_dt=datetime.combine(today+timedelta(days=next_day),datetime.strptime(c["start_time"],"%H:%M").time(),tzinfo=now.tzinfo)
-        if start_dt<=now:start_dt+=timedelta(days=7)
-        candidates.append((start_dt,c))
-    next_class=min(candidates,key=lambda z:z[0])[1] if candidates else None
-    return ok({"student":x,"todays_classes":[c for c in x["classes"] if c["day_of_week"]==now.weekday()],"upcoming_homework":hw,"current_fee":{"amount":float(fee),"status":"PAID" if paid else ("DUE" if fee else "N/A")},"next_class":next_class})
-
+    for c in classes.values():
+        for row in _effective_class_schedule(c,today,8):
+            if row["date"]==today.isoformat():
+                sub=Subject.query.get(c.subject_id)
+                item={"class_id":c.id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "",
+                      "room":c.room,"start_time":row["start_time"],"end_time":row["end_time"],
+                      "teacher_name":row["teacher_name"],"kind":row["kind"]}
+                todays.append(item)
+            if row["date"]>=today.isoformat():
+                dt=datetime.combine(date.fromisoformat(row["date"]),datetime.strptime(row["start_time"],"%H:%M").time(),tzinfo=now.tzinfo)
+                if dt>now:candidates.append((dt,c,row))
+    next_item=None
+    if candidates:
+        _,c,row=min(candidates,key=lambda z:z[0]);sub=Subject.query.get(c.subject_id)
+        next_item={"class_id":c.id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "",
+                   "day":DAYS[row["day_of_week"]],"date":row["date"],"start_time":row["start_time"],"end_time":row["end_time"],
+                   "teacher_name":row["teacher_name"],"kind":row["kind"]}
+    return ok({"student":x,"todays_classes":sorted(todays,key=lambda z:z["start_time"]),
+               "upcoming_homework":hw,"current_fee":{"amount":float(fee),"status":"PAID" if paid else ("DUE" if fee else "N/A")},
+               "next_class":next_item})
 @api.get("/student/routine")
 @roles("student")
 def student_routine():

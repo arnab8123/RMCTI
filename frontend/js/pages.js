@@ -106,11 +106,11 @@ const Page = (() => {
     const search = q('[data-search]'); const status = q('[data-status]'); const body = q('[data-body]');
     const load = async () => {
       const rows = await Api.get('/teachers', { q: search?.value || '', status: status?.value || '' });
-      fill(body, rows.map((t) => `<tr><td>${U.esc(t.teacher_id)}</td><td>${U.esc(t.name)}</td><td>${U.esc(t.gender || '—')}</td><td>${U.esc(t.phone || '—')}</td><td>${U.esc(t.email || '—')}</td><td>${U.esc([...new Set((t.classes || []).map((c) => c.subject))].join(', ') || '—')}</td><td><span class="badge ${U.esc(t.status)}">${U.esc(t.status)}</span></td><td><button class="btn secondary small" data-view="${t.id}">View</button> <button class="btn warning small" data-edit="${t.id}">Edit</button> <button class="btn danger small" data-del="${t.id}">Unregister</button></td></tr>`).join('') || tableEmpty(8));
+      fill(body, rows.map((t) => `<tr><td>${U.esc(t.teacher_id)}</td><td>${U.esc(t.name)}</td><td>${U.esc(t.gender || '—')}</td><td>${U.esc(t.phone || '—')}</td><td>${U.esc(t.email || '—')}</td><td>${U.esc([...new Set((t.classes || []).map((c) => c.subject))].join(', ') || '—')}</td><td><span class="badge ${U.esc(t.status)}">${U.esc(t.status)}</span></td><td><button class="btn secondary small" data-view="${t.id}">Full Details</button> <button class="btn secondary small" data-idcard="${t.id}">ID Card</button> <button class="btn warning small" data-edit="${t.id}">Edit</button> <button class="btn danger small" data-del="${t.id}">Unregister</button></td></tr>`).join('') || tableEmpty(8));
     };
     search?.addEventListener('input', U.debounce(load)); status?.addEventListener('change', load);
     body?.addEventListener('click', async (e) => {
-      const id = e.target.dataset.view || e.target.dataset.edit || e.target.dataset.del; if (!id) return;
+      const id = e.target.dataset.view || e.target.dataset.idcard || e.target.dataset.edit || e.target.dataset.del; if (!id) return;
       if (e.target.dataset.del) return adminVerifiedAction('Confirm teacher unregistration', 'Enter an administrator ID and password to confirm. The teacher becomes inactive and historical records remain.', async () => { await Api.del(`/teachers/${id}`); U.toast('Teacher unregistered'); load(); });
       const t = await Api.get(`/teachers/${id}`);
       if (e.target.dataset.edit) {
@@ -120,6 +120,7 @@ const Page = (() => {
           <div><label class="label">Gender</label><input class="input" name="gender" value="${U.esc(t.gender || '')}"></div>
           <div><label class="label">Date of Birth</label><input class="input" type="date" name="dob" value="${U.esc(t.dob || '')}"></div>
           <div><label class="label">Phone</label><input class="input" name="phone" value="${U.esc(t.phone || '')}"></div>
+          <div><label class="label">Aadhaar Number</label><input class="input" name="aadhaar_number" inputmode="numeric" maxlength="12" value="${U.esc(t.aadhaar_number || '')}"></div>
           <div><label class="label">Email</label><input class="input" type="email" name="email" value="${U.esc(t.email || '')}"></div>
           <div><label class="label">Qualification</label><input class="input" name="qualification" value="${U.esc(t.qualification || '')}"></div>
           <div><label class="label">Experience</label><input class="input" name="experience" value="${U.esc(t.experience || '')}"></div>
@@ -143,8 +144,10 @@ const Page = (() => {
             await Api.put(`/teachers/${id}`,payload); m.remove(); U.toast('Teacher updated'); load();
           } catch (x) { U.toast(x.message || 'Could not update teacher','error'); } finally { btn.disabled=false; }
         };
-      } else {
+      } else if (e.target.dataset.idcard) {
         const m=U.modal('Teacher ID Card', idCard(t,'teacher')); bindIdCardDownload(m,t,'teacher');
+      } else {
+        U.modal('Teacher Full Details', `<div class="person-detail-head"><div><h3 style="margin:0">${U.esc(t.name)}</h3><p class="muted">${U.esc(t.teacher_id)} · ${U.esc(t.status)}</p></div><img src="${U.photoUrl(t.photo)}" alt="${U.esc(t.name)}" class="passport-photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="g2" style="margin-top:16px"><div><b>Gender</b><p>${U.esc(t.gender||'—')}</p></div><div><b>Date of Birth</b><p>${U.date(t.dob)}</p></div><div><b>Phone</b><p>${U.esc(t.phone||'—')}</p></div><div><b>Email</b><p>${U.esc(t.email||'—')}</p></div><div><b>Aadhaar Number</b><p><b>${U.esc(t.aadhaar_number||'—')}</b></p></div><div><b>Joining Date</b><p>${U.date(t.joining_date)}</p></div><div><b>Qualification</b><p>${U.esc(t.qualification||'—')}</p></div><div><b>Experience</b><p>${U.esc(t.experience||'—')}</p></div><div class="full"><b>Address</b><p>${U.esc(t.address||'—')}</p></div><div class="full"><b>Assigned Classes</b><p>${(t.classes||[]).map(c=>`${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)} · ${U.esc(c.day)} ${U.esc(c.start_time)}–${U.esc(c.end_time)}`).join('<br>')||'No active classes assigned.'}</p></div></div>`);
       }
     });
     await load();
@@ -221,7 +224,7 @@ const Page = (() => {
 
     const load = async () => {
       students = await Api.get('/students', { q: search?.value || '', status: status?.value || '' });
-      fill(body, students.map((s) => `<tr><td>${U.esc(s.student_id)}</td><td>${U.esc(s.name)}</td><td>${U.esc((s.classes || []).map((c) => c.class_name).join(', ') || '—')}</td><td>${U.esc(s.phone || '—')}</td><td>${U.esc(s.parent?.name || '—')}</td><td>${U.esc(s.parent?.phone || '—')}</td><td><span class="badge ${s.current_month_status === 'PAID' ? 'paid' : s.current_month_status === 'DUE' ? 'due' : 'inactive'}">${U.esc(s.current_month_status || 'N/A')}</span></td><td><button class="btn success small" data-allot="${s.id}">＋ Allot Class</button> <button class="btn secondary small" data-attendance="${s.id}">See Attendance</button> <button class="btn secondary small" data-view="${s.id}">View</button> <button class="btn warning small" data-edit="${s.id}">Edit</button> <button class="btn danger small" data-del="${s.id}">Unregister</button></td></tr>`).join('') || tableEmpty(8));
+      fill(body, students.map((s) => `<tr><td>${U.esc(s.student_id)}</td><td>${U.esc(s.name)}</td><td>${U.esc((s.classes || []).map((c) => c.class_name).join(', ') || '—')}</td><td>${U.esc(s.phone || '—')}</td><td>${U.esc(s.parent?.name || '—')}</td><td>${U.esc(s.parent?.phone || '—')}</td><td><span class="badge ${s.current_month_status === 'PAID' ? 'paid' : s.current_month_status === 'DUE' ? 'due' : 'inactive'}">${U.esc(s.current_month_status || 'N/A')}</span></td><td><button class="btn success small" data-allot="${s.id}">＋ Allot Class</button> <button class="btn secondary small" data-attendance="${s.id}">See Attendance</button> <button class="btn secondary small" data-view="${s.id}">Full Details</button> <button class="btn secondary small" data-idcard="${s.id}">ID Card</button> <button class="btn warning small" data-edit="${s.id}">Edit</button> <button class="btn danger small" data-del="${s.id}">Unregister</button></td></tr>`).join('') || tableEmpty(8));
     };
 
     const openAllot = async (studentId) => {
@@ -262,6 +265,7 @@ const Page = (() => {
           <div><label class="label">Gender</label><input class="input" name="gender" value="${U.esc(st.gender || '')}"></div>
           <div><label class="label">Date of Birth</label><input class="input" type="date" name="dob" value="${U.esc(st.dob || '')}"></div>
           <div><label class="label">Phone</label><input class="input" name="phone" value="${U.esc(st.phone || '')}"></div>
+          <div><label class="label">Aadhaar Number</label><input class="input" name="aadhaar_number" inputmode="numeric" maxlength="12" value="${U.esc(st.aadhaar_number || '')}"></div>
           <div><label class="label">School / College</label><input class="input" name="school_name" value="${U.esc(st.school_name || '')}"></div>
           <div><label class="label">Admission Date</label><input class="input" type="date" name="admission_date" value="${U.esc(st.admission_date || '')}"></div>
           <div><label class="label">Status</label><select class="select" name="status"><option value="active" ${st.status==='active'?'selected':''}>Active</option><option value="inactive" ${st.status==='inactive'?'selected':''}>Inactive</option></select></div>
@@ -278,9 +282,11 @@ const Page = (() => {
         </form>`);
         const form=m.querySelector('#editStudent');
         form.querySelector('[name="photo_clear"]')?.addEventListener('change',ev=>{const preview=form.querySelector('[data-photo-preview]');if(ev.target.checked){preview.src=U.photoUrl('');preview.classList.add('is-cleared');}else{preview.src=U.photoUrl(st.photo);preview.classList.remove('is-cleared');}});form.querySelector('[name="photo_file"]')?.addEventListener('change',ev=>{const file=ev.target.files?.[0],preview=form.querySelector('[data-photo-preview]');if(!file)return;if(!file.type.startsWith('image/'))return;const url=URL.createObjectURL(file);preview.onload=()=>URL.revokeObjectURL(url);preview.src=url;preview.classList.remove('is-cleared');const clear=form.querySelector('[name="photo_clear"]');if(clear)clear.checked=false;});
-        form.onsubmit=async(ev)=>{ev.preventDefault();const btn=form.querySelector('button[type="submit"]');btn.disabled=true;try{const raw=formObj(form);const file=form.querySelector('[name="photo_file"]')?.files?.[0];const payload={name:raw.name,gender:raw.gender,dob:raw.dob,phone:raw.phone,school_name:raw.school_name,admission_date:raw.admission_date,status:raw.status,address:raw.address,parent:{name:raw.parent_name,relationship:raw.parent_relationship,phone:raw.parent_phone,email:raw.parent_email,address:raw.parent_address}};if(file){const up=await Api.upload('/uploads/photo',file);payload.photo=up.photo;}else if(form.querySelector('[name="photo_clear"]')?.checked){payload.photo=null;}if(String(raw.password||'').trim())payload.password=raw.password;await Api.put(`/students/${id}`,payload);m.remove();U.toast('Student updated');load();}catch(x){U.toast(x.message||'Could not update student','error')}finally{btn.disabled=false;}};
-      } else {
+        form.onsubmit=async(ev)=>{ev.preventDefault();const btn=form.querySelector('button[type="submit"]');btn.disabled=true;try{const raw=formObj(form);const file=form.querySelector('[name="photo_file"]')?.files?.[0];const payload={name:raw.name,gender:raw.gender,dob:raw.dob,phone:raw.phone,aadhaar_number:raw.aadhaar_number,school_name:raw.school_name,admission_date:raw.admission_date,status:raw.status,address:raw.address,parent:{name:raw.parent_name,relationship:raw.parent_relationship,phone:raw.parent_phone,email:raw.parent_email,address:raw.parent_address}};if(file){const up=await Api.upload('/uploads/photo',file);payload.photo=up.photo;}else if(form.querySelector('[name="photo_clear"]')?.checked){payload.photo=null;}if(String(raw.password||'').trim())payload.password=raw.password;await Api.put(`/students/${id}`,payload);m.remove();U.toast('Student updated');load();}catch(x){U.toast(x.message||'Could not update student','error')}finally{btn.disabled=false;}};
+      } else if (e.target.dataset.idcard) {
         const m=U.modal('Student ID Card', idCard(st,'student')); bindIdCardDownload(m,st,'student');
+      } else {
+        U.modal('Student Full Details', `<div class="person-detail-head"><div><h3 style="margin:0">${U.esc(st.name)}</h3><p class="muted">${U.esc(st.student_id)} · ${U.esc(st.status)}</p></div><img src="${U.photoUrl(st.photo)}" alt="${U.esc(st.name)}" class="passport-photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="g2" style="margin-top:16px"><div><b>Gender</b><p>${U.esc(st.gender||'—')}</p></div><div><b>Date of Birth</b><p>${U.date(st.dob)}</p></div><div><b>Phone</b><p>${U.esc(st.phone||'—')}</p></div><div><b>Aadhaar Number</b><p><b>${U.esc(st.aadhaar_number||'—')}</b></p></div><div><b>School / College</b><p>${U.esc(st.school_name||'—')}</p></div><div><b>Admission Date</b><p>${U.date(st.admission_date)}</p></div><div class="full"><b>Address</b><p>${U.esc(st.address||'—')}</p></div><div class="full"><b>Guardian</b><p>${U.esc(st.parent?.name||'—')} · ${U.esc(st.parent?.relationship||'')} · ${U.esc(st.parent?.phone||'')} · ${U.esc(st.parent?.email||'')}</p><p>${U.esc(st.parent?.address||'')}</p></div><div class="full"><b>Assigned Classes</b><p>${(st.classes||[]).map(c=>`${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)} · ${U.esc(c.teacher_name||'No teacher')}`).join('<br>')||'No active classes assigned.'}</p></div></div>`);
       }
     });
     await load();
@@ -315,64 +321,161 @@ const Page = (() => {
       try{
         const c=await Api.get(`/classes/${classId}`);
         const teachers=await Api.get('/teachers',{status:'active'});
-        const now=new Date(); const monday=new Date(now.getFullYear(),now.getMonth(),now.getDate()); monday.setDate(monday.getDate()-((monday.getDay()+6)%7));
-        const localISO=d=>{const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}; const weekStart=localISO(monday);
-        const dates=[...Array(7)].map((_,i)=>{const d=new Date(monday);d.setDate(monday.getDate()+i);return d.toISOString().slice(0,10)});
+        let currentWeekStart=U.today();
+        const getMonday=iso=>{const d=new Date(`${iso}T00:00:00`);d.setDate(d.getDate()-((d.getDay()+6)%7));return d.toISOString().slice(0,10);};
+        currentWeekStart=getMonday(currentWeekStart);
+        const dateAdd=(iso,n)=>{const d=new Date(`${iso}T00:00:00`);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);};
+        const dayName=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+        const dateLabel=iso=>new Intl.DateTimeFormat('en-IN',{day:'2-digit',month:'short',year:'numeric'}).format(new Date(`${iso}T00:00:00`));
+        const dates=[...Array(7)].map((_,i)=>dateAdd(currentWeekStart,i));
         const allocs=c.allocations||[];
-        const allocOptions=allocs.map(a=>`<option value="${a.allocation_id}">${U.esc(a.teacher_name||'Teacher')} · ${U.esc(a.day)} · ${U.esc(a.start_time)}–${U.esc(a.end_time)}</option>`).join('');
-        const m=U.modal(`Reschedule · ${c.class_name}`,`
+        const allocOptions=allocs.map(a=>`<option value="${a.allocation_id}" data-day="${a.day_of_week}" data-start="${a.start_time}" data-end="${a.end_time}">${U.esc(a.teacher_name||'Teacher')} · ${U.esc(a.day)} · ${U.esc(a.start_time)}–${U.esc(a.end_time)}</option>`).join('');
+        const firstDateForAllocation=a=>dates[a?.day_of_week ?? 0]||dates[0];
+
+        const m=U.modal(`Manage Schedule · ${c.class_name}`,`
+          <div class="card pad" style="margin-bottom:14px">
+            <b>Make a schedule change</b>
+            <p class="muted" style="margin:6px 0 0">Choose what should happen to one class. Students, teachers and attendance all use the same schedule, so the change is applied consistently across the website.</p>
+          </div>
           <form class="form" data-reschedule-form>
-            <div><label class="label">Action</label><select class="select" name="kind" data-res-action>
-              <option value="reschedule">Reschedule one class</option>
-              <option value="extra">Add extra class</option>
-              <option value="delete">Delete one class for this week</option>
-              <option value="weekly_time">Change time for this week</option>
-            </select></div>
-            <div><label class="label">Week (Monday)</label><input class="input" type="date" name="week_start" value="${weekStart}" required></div>
-            <div class="full"><label class="label">Normal class / allocation</label><select class="select" name="allocation_id" data-res-allocation>${allocOptions||'<option value="">No allocation</option>'}</select></div>
-            <div><label class="label">Original class date</label><input class="input" type="date" name="schedule_date" value="${dates.find(d=>d===now.toISOString().slice(0,10))||dates[0]}"></div>
-            <div data-target-date><label class="label">New class date</label><input class="input" type="date" name="target_date" value="${dates[0]}"></div>
-            <div data-teacher><label class="label">Teacher (extra class)</label><select class="select" name="teacher_id"><option value="">Select teacher</option>${teachers.map(t=>`<option value="${t.id}">${U.esc(t.name)} · ${U.esc(t.teacher_id)}</option>`).join('')}</select></div>
-            <div><label class="label">Start time</label><input class="input" type="time" name="start_time"></div>
-            <div><label class="label">End time</label><input class="input" type="time" name="end_time"></div>
-            <div class="full"><button class="btn primary" type="submit">Apply change</button></div>
+            <div class="full"><label class="label">What do you want to do?</label>
+              <select class="select" name="kind" data-res-action>
+                <option value="reschedule">Reschedule one class → make the new schedule permanent</option>
+                <option value="delete">Cancel one class for this week</option>
+                <option value="weekly_time">Change one class for this week only</option>
+                <option value="extra">Add an extra class once</option>
+              </select>
+            </div>
+            <div class="full" data-res-help></div>
+            <div><label class="label">Week</label><input class="input" type="date" name="week_start" value="${currentWeekStart}" required><small class="muted">Select any date from the week you are changing.</small></div>
+            <div class="full" data-allocation-wrap><label class="label">Which regular class?</label><select class="select" name="allocation_id" data-res-allocation required>${allocOptions||'<option value="">No regular class assigned</option>'}</select></div>
+            <div data-original-wrap><label class="label">Original class date</label><select class="select" name="schedule_date" data-original-date required>${dates.map((d,i)=>`<option value="${d}">${dayName[i]} · ${dateLabel(d)}</option>`).join('')}</select></div>
+            <div data-target-date-wrap><label class="label" data-target-label>New class date</label><select class="select" name="target_date" data-target-date required>${dates.map((d,i)=>`<option value="${d}">${dayName[i]} · ${dateLabel(d)}</option>`).join('')}</select></div>
+            <div data-extra-teacher style="display:none"><label class="label">Teacher for extra class</label><select class="select" name="teacher_id"><option value="">Select teacher</option>${teachers.map(t=>`<option value="${t.id}">${U.esc(t.name)} · ${U.esc(t.teacher_id)}</option>`).join('')}</select></div>
+            <div><label class="label">Start time</label><input class="input" type="time" name="start_time" required></div>
+            <div><label class="label">End time</label><input class="input" type="time" name="end_time" required></div>
+            <div class="full right" style="justify-content:flex-end"><button class="btn secondary" type="button" data-close>Cancel</button><button class="btn primary" type="submit">Apply Schedule Change</button></div>
           </form>
           <hr style="border:0;border-top:1px solid var(--border);margin:18px 0">
-          <div><h3 style="margin-top:0">Changes for this week</h3><div data-res-list class="grid"></div></div>
+          <div><h3 style="margin:0 0 8px">This week's changes</h3><div data-res-list class="grid"></div></div>
         `);
+
         const form=m.querySelector('[data-reschedule-form]');
         const action=m.querySelector('[data-res-action]');
+        const allocation=m.querySelector('[data-res-allocation]');
+        const original=m.querySelector('[data-original-date]');
+        const target=m.querySelector('[data-target-date]');
+        const weekInput=m.querySelector('[name="week_start"]');
+        const help=m.querySelector('[data-res-help]');
+        const originalWrap=m.querySelector('[data-original-wrap]');
+        const targetWrap=m.querySelector('[data-target-date-wrap]');
+        const allocationWrap=m.querySelector('[data-allocation-wrap]');
+        const extraTeacher=m.querySelector('[data-extra-teacher]');
+        const startInput=m.querySelector('[name="start_time"]');
+        const endInput=m.querySelector('[name="end_time"]');
+
+        const resetDates=()=>{
+          const ws=getMonday(weekInput.value||U.today());
+          weekInput.value=ws;
+          fill(original,datesForWeek(ws));
+          fill(target,datesForWeek(ws));
+          syncAllocationDate();
+        };
+        const datesForWeek=ws=>[...Array(7)].map((_,i)=>{const d=dateAdd(ws,i);return `<option value="${d}">${dayName[i]} · ${dateLabel(d)}</option>`}).join('');
+        const syncAllocationDate=()=>{
+          const a=allocation?.selectedOptions?.[0];
+          if(!a)return;
+          const day=Number(a.dataset.day||0);
+          const ws=getMonday(weekInput.value||U.today());
+          const d=dateAdd(ws,day);
+          original.value=d;
+          target.value=d;
+          startInput.value=a.dataset.start||'';
+          endInput.value=a.dataset.end||'';
+        };
         const refreshFields=()=>{
           const kind=action.value;
-          m.querySelector('[data-target-date]').style.display=kind==='reschedule'?'block':'none';
-          m.querySelector('[data-teacher]').style.display=kind==='extra'?'block':'none';
-          m.querySelector('[name="schedule_date"]').parentElement.style.display=(kind==='delete'||kind==='reschedule'||kind==='extra')?'block':'none';
-          m.querySelector('[name="allocation_id"]').parentElement.style.display=kind==='extra'?'none':'block';
-          m.querySelector('[name="start_time"]').parentElement.style.display=kind==='delete'?'none':'block';
-          m.querySelector('[name="end_time"]').parentElement.style.display=kind==='delete'?'none':'block';
+          const permanent=kind==='reschedule';
+          const weekly=kind==='weekly_time';
+          const deleting=kind==='delete';
+          const extra=kind==='extra';
+          help.innerHTML=permanent
+            ? '<div class="badge active">Permanent: after this change, this class will use the new day/time in future weeks too.</div>'
+            : weekly
+              ? '<div class="badge active">This week only: next week automatically returns to the normal schedule.</div>'
+              : deleting
+                ? '<div class="badge due">Cancelled: students and teachers will not see this occurrence, and attendance will be disabled for it.</div>'
+                : '<div class="badge active">One-time: this extra class appears only once. The selected teacher can mark attendance during its time.</div>';
+          allocationWrap.style.display=extra?'none':'block';
+          allocation.required=!extra;
+          extraTeacher.style.display=extra?'block':'none';
+          originalWrap.style.display=extra?'none':'block';
+          original.required=!extra;
+          targetWrap.style.display=(permanent||weekly)?'block':'none';
+          target.required=permanent||weekly;
+          startInput.parentElement.style.display=deleting?'none':'block';
+          endInput.parentElement.style.display=deleting?'none':'block';
+          startInput.required=!deleting;
+          endInput.required=!deleting;
+          if(extra){
+            original.value='';
+            startInput.value='';
+            endInput.value='';
+          }else{
+            syncAllocationDate();
+            if(deleting){target.value=original.value;}
+          }
         };
-        action.addEventListener('change',refreshFields); refreshFields();
+        action.addEventListener('change',refreshFields);
+        allocation.addEventListener('change',syncAllocationDate);
+        weekInput.addEventListener('change',()=>{
+          weekInput.value=getMonday(weekInput.value||U.today());
+          fill(original,datesForWeek(weekInput.value));fill(target,datesForWeek(weekInput.value));syncAllocationDate();loadChanges();
+        });
+
         const loadChanges=async()=>{
-          const rows=await Api.get('/schedule-exceptions',{class_id:classId,week_start:m.querySelector('[name="week_start"]').value});
-          fill(m.querySelector('[data-res-list]'),rows.map(x=>`<div class="card pad"><div><b>${U.esc(x.kind.replace('_',' '))}</b> · ${U.date(x.schedule_date)}</div><div class="muted">${x.target_date?`Moved to ${U.date(x.target_date)} · `:''}${x.start_time?`${x.start_time}–${x.end_time}`:''}</div><button class="btn danger small" data-res-delete="${x.id}">Remove change</button></div>`).join('')||'<div class="empty">No changes for this week.</div>');
+          try{
+            const rows=await Api.get('/schedule-exceptions',{class_id:classId,week_start:weekInput.value});
+            fill(m.querySelector('[data-res-list]'),rows.map(x=>{
+              const name=x.kind==='delete'?'Cancelled':x.kind==='extra'?'Extra class':'Changed this week';
+              const when=x.schedule_date?dateLabel(x.schedule_date):'';
+              const move=x.target_date&&x.target_date!==x.schedule_date?` → ${dateLabel(x.target_date)}`:'';
+              const time=x.start_time?` · ${x.start_time}–${x.end_time}`:'';
+              return `<div class="card pad"><div><b>${name}</b> <span class="muted">${when}${move}${time}</span></div><button class="btn danger small" data-res-delete="${x.id}" style="margin-top:8px">Undo this change</button></div>`;
+            }).join('')||'<div class="empty">No temporary changes for this week.</div>');
+          }catch(e){fill(m.querySelector('[data-res-list]'),`<div class="empty">${U.esc(e.message||'Could not load changes')}</div>`);}
         };
+
         form.addEventListener('submit',async ev=>{
           ev.preventDefault();
+          const kind=action.value;
+          const p=formObj(form);p.class_id=classId;
+          p.week_start=getMonday(p.week_start);
+          if(kind!=='extra'&&!p.allocation_id)return U.toast('Select the regular class','error');
+          if(kind!=='extra'&&!p.schedule_date)return U.toast('Select the original class date','error');
+          if(kind!=='delete'&&(!p.start_time||!p.end_time))return U.toast('Select a start and end time','error');
+          if((kind==='reschedule'||kind==='weekly_time')&&!p.target_date)return U.toast('Select the new class date','error');
+          if(kind==='extra'&&!p.teacher_id)return U.toast('Select a teacher for the extra class','error');
+          if(kind==='reschedule'&&p.target_date===p.schedule_date&&p.start_time===allocation.selectedOptions[0].dataset.start&&p.end_time===allocation.selectedOptions[0].dataset.end)
+            return U.toast('Choose a different day or time','error');
+          const btn=form.querySelector('button[type="submit"]');btn.disabled=true;
           try{
-            const p=formObj(form); p.class_id=classId;
-            if(p.kind!=='extra' && !p.allocation_id) throw Error('Select a normal class allocation');
-            if(p.kind!=='delete' && (!p.start_time||!p.end_time)) throw Error('Select start and end time');
-            if(p.kind==='extra' && !p.teacher_id) throw Error('Select a teacher');
-            await Api.post('/schedule-exceptions',p); U.toast('Schedule updated'); await loadChanges(); await load();
+            const result=await Api.post('/schedule-exceptions',p);
+            U.toast(result.message||'Schedule updated');
+            if(kind==='reschedule'){m.remove();await load();}
+            else{await loadChanges();await load();}
           }catch(x){U.toast(x.message||'Could not update schedule','error')}
+          finally{btn.disabled=false;}
         });
         m.querySelector('[data-res-list]')?.addEventListener('click',async ev=>{
-          const id=ev.target.dataset.resDelete;if(!id)return;
-          try{await Api.del(`/schedule-exceptions/${id}`);U.toast('Schedule change removed');loadChanges();}catch(x){U.toast(x.message||'Could not remove change','error')}
+          const id=ev.target.closest('[data-res-delete]')?.dataset.resDelete;if(!id)return;
+          try{await Api.del(`/schedule-exceptions/${id}`);U.toast('Schedule change undone');await loadChanges();await load();}catch(x){U.toast(x.message||'Could not undo change','error')}
         });
-        m.querySelector('[name="week_start"]')?.addEventListener('change',()=>{syncOriginalDate();loadChanges();});
-        await loadChanges();
-      }catch(e){U.toast(e.message||'Could not open reschedule','error')}
+
+        // Start on the allocation's current weekly date/time.
+        if(allocation.options.length){allocation.selectedIndex=0;syncAllocationDate();}
+        refreshFields();await loadChanges();
+      }catch(e){U.toast(e.message||'Could not open schedule manager','error')}
     };
 
     wrap?.addEventListener('click',async e=>{
@@ -842,11 +945,13 @@ const Page = (() => {
       fill(container, rows.map((c) => {
         const active = !!c.attendance_active;
         const schedules = (c.allocations || []).map((a) => `<div class="item"><b>${U.esc(a.day)}</b> · ${U.esc(a.start_time)}–${U.esc(a.end_time)} · ${U.esc(a.room || '')}</div>`).join('');
+        const todaySchedule = c.today_schedule ? `<div class="card pad" style="margin:10px 0"><b>Today</b><div>${U.esc(c.today_schedule.start_time)}–${U.esc(c.today_schedule.end_time)} · ${U.esc(c.today_schedule.kind)}</div></div>` : `<div class="card pad" style="margin:10px 0"><b>Today</b><div class="muted">No scheduled class today for this course.</div></div>`;
         return `<article class="card pad">
           <h3>${U.esc(c.class_name)} · ${U.esc(c.batch)}</h3>
           <p class="muted">${U.esc(c.subject)} · ${U.esc(c.room || 'No room')}</p>
           <p><b>${c.student_count}</b> students</p>
-          <div>${schedules || '<div class="empty">No schedule assigned.</div>'}</div>
+          ${todaySchedule}
+          <details><summary>Normal weekly schedule</summary><div style="margin-top:8px">${schedules || '<div class="empty">No schedule assigned.</div>'}</div></details>
           <div class="right" style="justify-content:space-between;align-items:center;margin-top:14px">
             <span class="badge ${active ? 'active' : 'inactive'}">${active ? 'Class active' : 'Outside class hours'}</span>
             <div class="right">
@@ -1112,25 +1217,54 @@ const Page = (() => {
     const isAdmin=document.body.dataset.role==='admin';
     const list=q(isAdmin?'[data-attachment-list]':'[data-notice-list]');
     const form=q('[data-attachment-form]');
+    const target=form?.querySelector('[data-attachment-target]');
+    const studentWrap=form?.querySelector('[data-attachment-student]');
+    const classWrap=form?.querySelector('[data-attachment-class]');
+    const studentSelect=form?.querySelector('[data-attachment-student-select]');
+    const classSelect=form?.querySelector('[data-attachment-class-select]');
     const load=async()=>{
       const rows=await Api.get('/attachments');
       if(!rows.length){fill(list,'<div class="empty">No files have been published yet.</div>');return;}
-      fill(list,rows.map(x=>`<article class="card pad" style="display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><div><b>${U.esc(x.title)}</b><div class="muted">${U.esc(x.filename)} · ${(Number(x.file_size)/1024/1024).toFixed(2)} MB · ${U.datetime(x.created_at)}</div></div><div class="right"><button type="button" class="btn secondary small" data-open-file="${x.id}">View / Open</button>${isAdmin?`<button type="button" class="btn danger small" data-delete-file="${x.id}">Delete</button>`:''}</div></article>`).join(''));
+      fill(list,rows.map(x=>{
+        const recipient=x.target_type==='student'?'One student':x.target_type==='class'?'One class':'Everyone';
+        return `<article class="card pad" style="display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><div><b>${U.esc(x.title)}</b><div class="muted">${U.esc(x.filename)} · ${U.esc(recipient)} · ${(Number(x.file_size)/1024/1024).toFixed(2)} MB · ${U.datetime(x.created_at)}</div></div><div class="right"><button type="button" class="btn secondary small" data-open-file="${x.id}">View / Open</button>${isAdmin?`<button type="button" class="btn danger small" data-delete-file="${x.id}">Delete</button>`:''}</div></article>`;
+      }).join(''));
     };
+    const loadRecipients=async()=>{
+      if(!isAdmin)return;
+      try{
+        const [students,classes]=await Promise.all([Api.get('/students',{status:'active'}),Api.get('/classes',{status:'active'})]);
+        fill(studentSelect,'<option value="">Select student</option>'+students.map(s=>`<option value="${s.id}">${U.esc(s.name)} · ${U.esc(s.student_id)}</option>`).join(''));
+        fill(classSelect,'<option value="">Select class</option>'+classes.map(c=>`<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}</option>`).join(''));
+      }catch(e){U.toast(e.message||'Could not load recipients','error');}
+    };
+    const syncTarget=()=>{
+      const type=target?.value||'all';
+      if(studentWrap)studentWrap.style.display=type==='student'?'block':'none';
+      if(classWrap)classWrap.style.display=type==='class'?'block':'none';
+      if(studentSelect)studentSelect.required=type==='student';
+      if(classSelect)classSelect.required=type==='class';
+    };
+    target?.addEventListener('change',syncTarget);
     list?.addEventListener('click',async e=>{
       const open=e.target.closest('[data-open-file]')?.dataset.openFile;
       const del=e.target.closest('[data-delete-file]')?.dataset.deleteFile;
-      if(del){if(!confirm('Delete this notice-board file?'))return;try{await Api.del(`/admin/attachments/${del}`);U.toast('File deleted');load();}catch(x){U.toast(x.message,'error')}return;}
+      if(del){if(!confirm('Delete this file?'))return;try{await Api.del(`/admin/attachments/${del}`);U.toast('File deleted');load();}catch(x){U.toast(x.message,'error')}return;}
       if(!open)return;
       try{const token=sessionStorage.getItem('token');const r=await fetch(`${API}/attachments/${open}/download`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw Error('Could not open file');const blob=await r.blob();const url=URL.createObjectURL(blob);window.open(url,'_blank','noopener');setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(x){U.toast(x.message||'Could not open file','error')}
     });
     form?.addEventListener('submit',async e=>{
       e.preventDefault();const btn=form.querySelector('button[type="submit"]');btn.disabled=true;
-      try{const fd=new FormData(form),token=sessionStorage.getItem('token');const r=await fetch(`${API}/admin/attachments`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:fd});const d=await r.json().catch(()=>({}));if(!r.ok||d.success===false)throw Error(d.message||'Upload failed');form.reset();U.toast('File attached to notice board');await load();}catch(x){U.toast(x.message||'Could not upload file','error')}finally{btn.disabled=false;}
+      try{
+        const fd=new FormData(form),token=sessionStorage.getItem('token');
+        if(fd.get('target_type')==='all'){fd.delete('target_student_id');fd.delete('target_class_id');}
+        const r=await fetch(`${API}/admin/attachments`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:fd});
+        const d=await r.json().catch(()=>({}));if(!r.ok||d.success===false)throw Error(d.message||'Upload failed');
+        form.reset();syncTarget();U.toast('File sent successfully');await load();
+      }catch(x){U.toast(x.message||'Could not upload file','error')}finally{btn.disabled=false;}
     });
-    await load();
+    syncTarget();await loadRecipients();await load();
   }
-
   async function auditLogs() {
     const rows = await Api.get('/audit-logs');
     fill(q('[data-body]'), rows.map((x) => `<tr><td>${U.datetime(x.created_at)}</td><td>${U.esc(x.action)}</td><td>${U.esc(x.entity_type)}</td><td>${U.esc(x.entity_id || '—')}</td><td>${U.esc(x.description || '')}</td></tr>`).join('') || tableEmpty(5, 'No audit history yet.'));
