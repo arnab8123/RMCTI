@@ -27,7 +27,13 @@ def ok(data=None,message="",status=200):
     if data is not None:x["data"]=data
     return jsonify(x),status
 def err(message,status=400): return jsonify(success=False,message=message),status
-def hp(p): return bcrypt.hashpw(p.encode(),bcrypt.gensalt()).decode()
+def validate_password(p):
+    value=str(p or "")
+    if len(value)<8:
+        raise ValueError("Password must be at least 8 characters")
+    return value
+
+def hp(p): return bcrypt.hashpw(validate_password(p).encode(),bcrypt.gensalt()).decode()
 def cp(p,h): return bcrypt.checkpw(p.encode(),h.encode())
 def pd(v,req=False):
     if not v:

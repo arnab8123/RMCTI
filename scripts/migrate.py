@@ -19,6 +19,22 @@ ENQUIRY_COLUMNS={
     "updated_at":"DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
 }
 
+def ensure_token_blocklist():
+    """Create the JWT revocation table and discard expired revocations."""
+    inspector=inspect(db.engine)
+    if "token_blocklist" not in inspector.get_table_names():
+        db.session.execute(text("""CREATE TABLE token_blocklist (
+            jti VARCHAR(36) PRIMARY KEY,
+            user_id BIGINT UNSIGNED NOT NULL,
+            revoked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NULL,
+            INDEX idx_token_blocklist_user(user_id),
+            CONSTRAINT fk_token_blocklist_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB"""))
+    else:
+        db.session.execute(text("DELETE FROM token_blocklist WHERE expires_at IS NOT NULL AND expires_at < UTC_TIMESTAMP()"))
+
+
 def ensure_enquiries():
     inspector=inspect(db.engine)
     if "enquiries" not in inspector.get_table_names():
@@ -190,6 +206,7 @@ def ensure_performance_indexes():
 
 with app.app_context():
     db.create_all()
+    ensure_token_blocklist()
     ensure_enquiries()
     ensure_attendance_marker()
     ensure_complaint_class()
