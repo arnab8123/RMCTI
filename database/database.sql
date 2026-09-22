@@ -18,16 +18,6 @@ CREATE TABLE photo_assets (
  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
--- Revoked JWT IDs. New deployments use short-lived tokens plus server-side revocation on logout.
-CREATE TABLE IF NOT EXISTS token_blocklist (
- jti VARCHAR(36) PRIMARY KEY,
- user_id BIGINT UNSIGNED NOT NULL,
- revoked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
- expires_at DATETIME NULL,
- INDEX idx_token_blocklist_user(user_id),
- FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
 CREATE TABLE admins (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id BIGINT UNSIGNED NOT NULL UNIQUE,
  name VARCHAR(150) NOT NULL, email VARCHAR(255), phone VARCHAR(30),

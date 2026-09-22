@@ -1,26 +1,19 @@
-from flask import Blueprint,request,current_app
-from flask_jwt_extended import create_access_token,jwt_required,get_jwt
+from flask import Blueprint,request
+from flask_jwt_extended import create_access_token,jwt_required
 from sqlalchemy import or_,func
-from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import IntegrityError
 from datetime import date,datetime,timedelta,time
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 import os,uuid
 from werkzeug.utils import secure_filename
-from PIL import Image, ImageOps, UnidentifiedImageError
-import io
 from flask import Response
 from .database import db
-from .extensions import limiter
 from .models import *
 from .auth import roles,current_user
 from .utils import *
 
 api=Blueprint("api",__name__,url_prefix="/api")
-
-def _request_limit(rule, scope=None):
-    return limiter.limit(rule, scope=scope)
 
 def user_profile(u):
     x={"id":u.id,"username":u.username,"role":u.role}
@@ -73,13 +66,11 @@ def _save_enquiry():
 # Public endpoint used by the landing-page Contact form.
 # Keep /enquiries as a compatibility alias for older deployed frontends.
 @api.post("/public/enquiries")
-@_request_limit("5 per hour", scope="public_enquiry")
 def create_public_enquiry():
     return _save_enquiry()
 
 
 @api.post("/enquiries")
-@_request_limit("5 per hour", scope="public_enquiry")
 def create_enquiry_legacy():
     return _save_enquiry()
 
@@ -91,11 +82,12 @@ def _list_enquiries():
     if status in ("new", "read", "resolved"):
         query = query.filter_by(status=status)
 
-    if q:
-        term=f"%{q}%"
-        query=query.filter(or_(Enquiry.name.ilike(term),Enquiry.phone.ilike(term),Enquiry.message.ilike(term)))
-    rows=query.order_by(Enquiry.created_at.desc(),Enquiry.id.desc()).limit(_bounded_limit(100,500)).all()
-    return ok([_enquiry_row(e) for e in rows])
+    out = []
+    for e in query.order_by(Enquiry.created_at.desc(), Enquiry.id.desc()).all():
+        if q and q not in f"{e.name} {e.phone} {e.message}".lower():
+            continue
+        out.append(_enquiry_row(e))
+    return ok(out)
 
 
 # Admin-only endpoint. This is the canonical endpoint used by the admin UI.
@@ -146,41 +138,16 @@ def update_enquiry(id):
     return _update_enquiry(id)
 
 @api.post("/auth/login")
-@_request_limit("5 per minute")
 def login():
-    b=request.get_json(silent=True) or {}
-    username=str(b.get("username","")).strip()
-    password=str(b.get("password",""))
-    u=User.query.filter_by(username=username).first()
-    if not u or not u.is_active or not cp(password,u.password_hash):
-        return err("Invalid username or password",401)
-    # Keep authorization state in the database. The JWT contains identity only.
-    token=create_access_token(identity=str(u.id))
-    return ok({"token":token,"user":user_profile(u)},"Login successful")
-
+    b=request.get_json() or {}; u=User.query.filter_by(username=str(b.get("username","")).strip()).first()
+    if not u or not u.is_active or not cp(str(b.get("password","")),u.password_hash): return err("Invalid username or password",401)
+    return ok({"token":create_access_token(identity=str(u.id),additional_claims={"role":u.role}),"user":user_profile(u)},"Login successful")
 @api.post("/auth/logout")
 @jwt_required()
-def logout():
-    claims=get_jwt()
-    from .models import TokenBlocklist
-    jti=claims.get("jti")
-    if jti and not TokenBlocklist.query.filter_by(jti=jti).first():
-        expires_at=None
-        try:
-            expires_at=datetime.fromtimestamp(claims.get("exp"), tz=ZoneInfo("UTC")).replace(tzinfo=None) if claims.get("exp") else None
-        except Exception:
-            pass
-        db.session.add(TokenBlocklist(jti=jti,user_id=int(claims["sub"]),expires_at=expires_at))
-        db.session.commit()
-    return ok(message="Logged out successfully")
-
+def logout(): return ok(message="Logged out successfully")
 @api.get("/auth/me")
 @jwt_required()
-def me():
-    u=current_user()
-    if not u or not u.is_active:
-        return err("Unauthorized",403)
-    return ok(user_profile(u))
+def me(): return ok(user_profile(current_user()))
 
 @api.get("/notifications")
 @roles("admin","teacher","student")
@@ -215,9 +182,9 @@ def notifications():
         latest_hw=Homework.query.filter(Homework.class_id.in_(class_ids or [-1])).order_by(Homework.created_at.desc(),Homework.id.desc()).first()
         latest_complaint=None
         if s:
-            latest_complaint=(Complaint.query.filter(Complaint.student_id==s.id)
-                .filter(or_(Complaint.status!="open",Complaint.updated_at>Complaint.created_at))
-                .order_by(Complaint.updated_at.desc(),Complaint.id.desc()).first())
+            for complaint in Complaint.query.filter_by(student_id=s.id).order_by(Complaint.updated_at.desc(),Complaint.id.desc()).all():
+                if complaint.status!="open" or (complaint.updated_at and complaint.created_at and complaint.updated_at>complaint.created_at):
+                    latest_complaint=complaint;break
         out["homework"]={"latest":iso_ist(latest_hw.created_at) if latest_hw and latest_hw.created_at else None}
         out["complaints"]={"latest":iso_ist(latest_complaint.updated_at) if latest_complaint and latest_complaint.updated_at else None}
     return ok(out)
@@ -232,29 +199,7 @@ def upload_photo():
     if not ext:return err("Only JPG, PNG or WEBP images are allowed")
     f.seek(0,2); size=f.tell(); f.seek(0)
     if size>2*1024*1024:return err("Photo must be 2 MB or smaller")
-    raw=f.read()
-    try:
-        probe=Image.open(io.BytesIO(raw))
-        probe.verify()
-        image=Image.open(io.BytesIO(raw))
-        image=ImageOps.exif_transpose(image)
-        if image.width<1 or image.height<1 or image.width>10000 or image.height>10000:
-            return err("Invalid image dimensions")
-        # Normalize uploads before storage: strips arbitrary metadata and keeps
-        # giant camera originals from travelling through the application.
-        image.thumbnail((1600,1600),Image.Resampling.LANCZOS)
-        if image.mode not in ("RGB","RGBA"):
-            image=image.convert("RGBA" if "A" in image.getbands() else "RGB")
-        out=io.BytesIO()
-        if image.mode=="RGBA":
-            image.save(out,format="WEBP",quality=88,method=6)
-            ext="webp"
-        else:
-            image.convert("RGB").save(out,format="JPEG",quality=88,optimize=True)
-            ext="jpg"
-        data=out.getvalue()
-    except (UnidentifiedImageError, OSError, ValueError):
-        return err("The uploaded file is not a valid image")
+    data=f.read()
     name=f"{uuid.uuid4().hex}.{ext}"
 
     # Production storage: Cloudinary serves the image directly to the browser
@@ -289,6 +234,7 @@ def upload_photo():
             db.session.rollback()
             # Do not silently fall back to MySQL in production: doing so would
             # reintroduce the exact performance problem this endpoint avoids.
+            current_app=__import__('flask').current_app
             current_app.logger.exception("Cloudinary upload failed: %s", exc)
             if os.getenv("FLASK_ENV", "production").lower() == "production":
                 return err("Photo storage is not configured or the Cloudinary upload failed. Check CLOUDINARY_URL in Render logs.",500)
@@ -555,7 +501,7 @@ def teachers():
     query=Teacher.query
     if q: query=query.filter(or_(Teacher.teacher_id.like(f"%{q}%"),Teacher.name.like(f"%{q}%"),Teacher.phone.like(f"%{q}%"),Teacher.email.like(f"%{q}%")))
     if st in ("active","inactive"):query=query.filter_by(status=st)
-    return ok(_teacher_objs_bulk(query.order_by(Teacher.name).limit(_bounded_limit()).all()))
+    return ok(_teacher_objs_bulk(query.order_by(Teacher.name).all()))
 @api.get("/teachers/<int:id>")
 @roles("admin")
 def teacher(id):
@@ -681,7 +627,7 @@ def classes():
     q=request.args.get("q","").strip()
     query=Class.query.filter_by(status="active")
     if q:query=query.filter(or_(Class.class_name.like(f"%{q}%"),Class.batch.like(f"%{q}%")))
-    return ok(_class_objs_bulk(query.order_by(Class.class_name,Class.batch).limit(_bounded_limit()).all()))
+    return ok(_class_objs_bulk(query.order_by(Class.class_name,Class.batch).all()))
 @api.get("/classes/<int:id>")
 @roles("admin")
 def get_class(id):
@@ -778,32 +724,6 @@ def deactivate_class(id):
         db.session.rollback()
         return err("Could not delete class. Please try again.",500)
 
-def _schedule_conflict(teacher_id, class_id, day, start, end, exclude_id=None):
-    q=TeacherClass.query.filter(
-        TeacherClass.status=="active",
-        TeacherClass.day_of_week==day,
-        TeacherClass.start_time<end,
-        TeacherClass.end_time>start,
-    )
-    if exclude_id is not None:
-        q=q.filter(TeacherClass.id!=exclude_id)
-    teacher_conflict=q.filter(TeacherClass.teacher_id==teacher_id).first()
-    if teacher_conflict:
-        return "Teacher schedule overlaps"
-
-    # Prevent a course from being double-booked at the same time.
-    class_conflict=q.filter(TeacherClass.class_id==class_id).first()
-    if class_conflict:
-        return "Course schedule overlaps"
-
-    c=Class.query.get(class_id)
-    if c and c.room:
-        room_conflict=(q.join(Class,Class.id==TeacherClass.class_id)
-            .filter(Class.room==c.room).first())
-        if room_conflict:
-            return "Room schedule overlaps"
-    return None
-
 @api.post("/teacher-classes")
 @roles("admin")
 def add_allocation():
@@ -815,12 +735,8 @@ def add_allocation():
         days=[int(x) for x in days if str(x).strip()!=""]
         if not days: return err("Select at least one day")
         if start>=end:return err("End time must be after start time")
-        teacher=Teacher.query.get(tid); course=Class.query.get(cid)
-        if not teacher or teacher.status!="active" or not course or course.status!="active":
-            return err("Teacher or course is not active",409)
         for day in days:
-            conflict=_schedule_conflict(tid,cid,day,start,end)
-            if conflict:return err(conflict,409)
+            if TeacherClass.query.filter(TeacherClass.teacher_id==tid,TeacherClass.day_of_week==day,TeacherClass.status=="active",TeacherClass.start_time<end,TeacherClass.end_time>start).first():return err("Teacher schedule overlaps",409)
         for day in days: db.session.add(TeacherClass(teacher_id=tid,class_id=cid,day_of_week=day,start_time=start,end_time=end))
         db.session.commit();return ok(class_obj(Class.query.get(cid)),"Class assigned",201)
     except Exception:db.session.rollback();return err("Invalid class allocation")
@@ -833,11 +749,8 @@ def edit_allocation(id):
     try:
         tid=int(b.get("teacher_id",x.teacher_id));cid=int(b.get("class_id",x.class_id));day=int(b.get("day_of_week",x.day_of_week));start=pt(b.get("start_time",x.start_time),True);end=pt(b.get("end_time",x.end_time),True)
         if start>=end:return err("End time must be after start time")
-        teacher=Teacher.query.get(tid); course=Class.query.get(cid)
-        if not teacher or teacher.status!="active" or not course or course.status!="active":
-            return err("Teacher or course is not active",409)
-        conflict=_schedule_conflict(tid,cid,day,start,end,exclude_id=id)
-        if conflict:return err(conflict,409)
+        overlap=TeacherClass.query.filter(TeacherClass.id!=id,TeacherClass.teacher_id==tid,TeacherClass.day_of_week==day,TeacherClass.status=="active",TeacherClass.start_time<end,TeacherClass.end_time>start).first()
+        if overlap:return err("Teacher schedule overlaps",409)
         x.teacher_id=tid;x.class_id=cid;x.day_of_week=day;x.start_time=start;x.end_time=end
         db.session.commit();return ok(class_obj(Class.query.get(cid)),"Class allocation updated")
     except Exception:
@@ -873,7 +786,7 @@ def students():
         ids=[p.id for p in Parent.query.filter(or_(Parent.name.like(f"%{q}%"),Parent.phone.like(f"%{q}%"))).all()]
         query=query.filter(or_(Student.student_id.like(f"%{q}%"),Student.name.like(f"%{q}%"),Student.phone.like(f"%{q}%"),Student.parent_id.in_(ids or [-1])))
     if st in ("active","inactive"):query=query.filter_by(status=st)
-    return ok(_student_objs_bulk(query.order_by(Student.name).limit(_bounded_limit()).all()))
+    return ok(_student_objs_bulk(query.order_by(Student.name).all()))
 @api.get("/students/<int:id>")
 @roles("admin")
 def student(id):
@@ -993,7 +906,7 @@ def admin_class_attendance_history(class_id):
             if to_date: query=query.filter(Attendance.attendance_date<=date.fromisoformat(to_date))
     except ValueError:
         return err("Invalid attendance date")
-    records=query.order_by(Attendance.attendance_date.desc(),Attendance.student_id.asc()).limit(_bounded_limit(1000,2000)).all()
+    records=query.order_by(Attendance.attendance_date.desc(),Attendance.student_id.asc()).all()
     student_ids={r.student_id for r in records}
     students={s.id:s for s in Student.query.filter(Student.id.in_(student_ids)).all()} if student_ids else {}
     grouped={}
@@ -1023,15 +936,10 @@ def admin_complaints():
     status=request.args.get("status","").strip()
     query=Complaint.query
     if status in ("open","in_progress","resolved"): query=query.filter_by(status=status)
-    rows=query.order_by(Complaint.created_at.desc(),Complaint.id.desc()).limit(_bounded_limit(100,500)).all()
-    class_ids={c.class_id for c in rows if c.class_id}
-    classes={x.id:x for x in Class.query.filter(Class.id.in_(class_ids or [-1])).all()}
-    subject_ids={x.subject_id for x in classes.values()}
-    subjects={x.id:x for x in Subject.query.filter(Subject.id.in_(subject_ids or [-1])).all()}
     out=[]
-    for c in rows:
-        cls=classes.get(c.class_id) if c.class_id else None
-        sub=subjects.get(cls.subject_id) if cls else None
+    for c in query.order_by(Complaint.created_at.desc(),Complaint.id.desc()).all():
+        cls=Class.query.get(c.class_id) if c.class_id else None
+        sub=subject_obj(cls.subject_id) if cls else None
         class_label=(f"{cls.class_name} · {cls.batch}" if cls else "Not mentioned")
         out.append({
             "id":c.id,
@@ -1299,12 +1207,8 @@ def history(sid):
 @api.get("/fees")
 @roles("admin")
 def fees():
-    m=date.fromisoformat((request.args.get("month") or today_ist().strftime("%Y-%m"))+"-01");q=request.args.get("q","").strip();st=request.args.get("status","").upper()
-    student_query=Student.query.filter_by(status="active")
-    if q:
-        term=f"%{q}%"
-        student_query=student_query.filter(or_(Student.student_id.ilike(term),Student.name.ilike(term),Student.phone.ilike(term)))
-    students=student_query.order_by(Student.name).limit(_bounded_limit(500,1000)).all()
+    m=date.fromisoformat((request.args.get("month") or today_ist().strftime("%Y-%m"))+"-01");q=request.args.get("q","").lower();st=request.args.get("status","").upper();students=Student.query.filter_by(status="active").all()
+    if q: students=[s for s in students if q in f"{s.student_id} {s.name} {s.phone or ''}".lower()]
     ids=[s.id for s in students]
     sc_rows=StudentClass.query.filter(StudentClass.student_id.in_(ids or [-1]),StudentClass.status=="active").all()
     fee_rows=(FeeStructure.query.join(StudentClass,StudentClass.class_id==FeeStructure.class_id).filter(StudentClass.student_id.in_(ids or [-1]),StudentClass.status=="active",FeeStructure.status=="active",FeeStructure.effective_from<=m).filter((FeeStructure.effective_to.is_(None))|(FeeStructure.effective_to>=m)).order_by(FeeStructure.class_id.asc(),FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all())
@@ -1380,12 +1284,7 @@ def pay_fee():
 @api.get("/receipts")
 @roles("admin")
 def receipts():
-    q=request.args.get("q","").strip()
-    query=Receipt.query.join(FeePayment,FeePayment.id==Receipt.fee_payment_id).join(Student,Student.id==FeePayment.student_id)
-    if q:
-        term=f"%{q}%"
-        query=query.filter(or_(Receipt.receipt_number.ilike(term),Student.student_id.ilike(term),Student.name.ilike(term)))
-    rows=query.order_by(Receipt.generated_at.desc()).limit(_bounded_limit(100,500)).all();payment_ids={r.fee_payment_id for r in rows}
+    q=request.args.get("q","").lower();rows=Receipt.query.order_by(Receipt.generated_at.desc()).all();payment_ids={r.fee_payment_id for r in rows}
     payments={p.id:p for p in FeePayment.query.filter(FeePayment.id.in_(payment_ids or [-1])).all()}
     student_ids={p.student_id for p in payments.values()};students={s.id:s for s in Student.query.filter(Student.id.in_(student_ids or [-1])).all()}
     out=[]
@@ -1562,7 +1461,7 @@ def attendance_history(class_id):
     except ValueError:
         return err("Invalid attendance date")
 
-    records=query.order_by(Attendance.attendance_date.desc(),Attendance.student_id.asc()).limit(_bounded_limit(1000,2000)).all()
+    records=query.order_by(Attendance.attendance_date.desc(),Attendance.student_id.asc()).all()
     student_ids={r.student_id for r in records}
     students={s.id:s for s in Student.query.filter(Student.id.in_(student_ids)).all()} if student_ids else {}
 
@@ -1594,7 +1493,7 @@ def get_homework():
     u=current_user();q=Homework.query
     if u.role=="teacher":q=q.filter_by(teacher_id=teacher_for_user().id)
     if u.role=="student":q=q.filter(Homework.class_id.in_([x.class_id for x in StudentClass.query.filter_by(student_id=student_for_user().id,status="active").all()] or [-1]))
-    return ok(_homework_objs_bulk(q.order_by(Homework.homework_date.desc()).limit(_bounded_limit()).all()))
+    return ok(_homework_objs_bulk(q.order_by(Homework.homework_date.desc()).all()))
 @api.post("/homework")
 @roles("teacher")
 def add_homework():
@@ -1627,7 +1526,7 @@ def get_classwork():
     u=current_user();q=Classwork.query
     if u.role=="teacher":q=q.filter_by(teacher_id=teacher_for_user().id)
     if u.role=="student":q=q.filter(Classwork.class_id.in_([x.class_id for x in StudentClass.query.filter_by(student_id=student_for_user().id,status="active").all()] or [-1]))
-    return ok(_classwork_objs_bulk(q.order_by(Classwork.work_date.desc()).limit(_bounded_limit()).all()))
+    return ok(_classwork_objs_bulk(q.order_by(Classwork.work_date.desc()).all()))
 @api.post("/classwork")
 @roles("teacher")
 def add_classwork():
@@ -1691,4 +1590,4 @@ def student_teacher():
 
 @api.get("/audit-logs")
 @roles("admin")
-def audits():return ok([{"id":x.id,"action":x.action,"entity_type":x.entity_type,"entity_id":x.entity_id,"description":x.description,"created_at":iso_ist(x.created_at)} for x in AuditLog.query.order_by(AuditLog.created_at.desc()).limit(_bounded_limit(200,1000)).all()])
+def audits():return ok([{"id":x.id,"action":x.action,"entity_type":x.entity_type,"entity_id":x.entity_id,"description":x.description,"created_at":iso_ist(x.created_at)} for x in AuditLog.query.order_by(AuditLog.created_at.desc()).limit(200).all()])

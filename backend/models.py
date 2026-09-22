@@ -3,15 +3,6 @@ from sqlalchemy.dialects.mysql import MEDIUMBLOB
 from .database import db
 class User(db.Model):
     __tablename__="users"; id=db.Column(db.BigInteger,primary_key=True); username=db.Column(db.String(100),unique=True,nullable=False); password_hash=db.Column(db.String(255),nullable=False); role=db.Column(db.Enum("admin","teacher","student"),nullable=False); is_active=db.Column(db.Boolean,default=True,nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
-class TokenBlocklist(db.Model):
-    """Revoked JWT IDs. Keeps logout effective until the access token expires."""
-    __tablename__="token_blocklist"
-    jti=db.Column(db.String(36),primary_key=True)
-    user_id=db.Column(db.BigInteger,db.ForeignKey("users.id",ondelete="CASCADE"),nullable=False)
-    revoked_at=db.Column(db.DateTime,default=datetime.utcnow,nullable=False)
-    expires_at=db.Column(db.DateTime,nullable=True)
-    __table_args__=(db.Index("idx_token_blocklist_user","user_id"),)
-
 class Admin(db.Model):
     __tablename__="admins"; id=db.Column(db.BigInteger,primary_key=True); user_id=db.Column(db.BigInteger,db.ForeignKey("users.id"),unique=True,nullable=False); name=db.Column(db.String(150),nullable=False); email=db.Column(db.String(255)); phone=db.Column(db.String(30))
 class Teacher(db.Model):

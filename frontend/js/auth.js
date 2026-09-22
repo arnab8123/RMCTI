@@ -18,11 +18,8 @@ const Auth = {
       const logout = document.querySelector('[data-logout]');
       if (logout) {
         logout.type = 'button';
-        logout.addEventListener('click', async (event) => {
-          event.preventDefault(); event.stopPropagation();
-          try { await Api.post('/auth/logout', {}); } catch (_) {}
-          sessionStorage.clear();
-          location.href = '../login.html';
+        logout.addEventListener('click', (event) => {
+          event.preventDefault(); event.stopPropagation(); sessionStorage.clear(); location.href = '../login.html';
         }, { once: true });
       }
 
