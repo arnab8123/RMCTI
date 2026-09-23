@@ -83,48 +83,97 @@ const Page = (() => {
   async function dashboard(role) {
     const d = await Api.get(`/${role}/dashboard`);
     document.querySelectorAll('[data-stat]').forEach((el) => { el.textContent = d[el.dataset.stat] ?? 0; });
+
     if (role === 'admin') {
-      await refreshAdminDashboardNotifications();
-      const todayTarget=q('[data-today-classes]');
-      const todayCount=q('[data-today-count]');
-      if(todayTarget){
-        const rows=d.todays_classes||[];
-        if(todayCount) todayCount.textContent=`${rows.length} ${rows.length===1?'class':'classes'}`;
-        fill(todayTarget, rows.map((c)=>`<div class="dashboard-class-item"><div class="dashboard-class-time"><b>${U.esc(c.start_time||'')}</b><span>${U.esc(c.end_time||'')}</span></div><div class="dashboard-class-info"><b>${U.esc(c.subject||c.class_name||'Class')}</b><div>${U.esc(c.class_name||'')} · ${U.esc(c.batch||'')}</div><span>${U.esc(c.teacher_name||'')} ${c.room?`· ${U.esc(c.room)}`:''}</span></div><span class="badge ${c.kind==='extra'?'active':'scheduled'}">${U.esc(c.kind==='extra'?'Extra':'Scheduled')}</span></div>`).join('')||'<div class="dashboard-empty"><div>📅</div><b>No classes scheduled today</b><span>Classes with an assigned teacher will appear here.</span></div>');
-      }
-      const search=q('[data-global-search]'), searchButton=q('[data-global-search-button]');
-      const runSearch=async()=>{
-        const term=(search?.value||'').trim();
-        if(term.length<2)return U.toast('Type at least 2 characters to search','error');
-        try{
-          const [students,teachers,classes]=await Promise.all([Api.get('/students',{q:term,status:'active'}),Api.get('/teachers',{q:term,status:'active'}),Api.get('/classes',{q:term})]);
-          const results=[...(students||[]).slice(0,8).map(x=>({type:'Student',name:x.name,id:x.student_id,href:`students.html#${x.id}`})),...(teachers||[]).slice(0,8).map(x=>({type:'Teacher',name:x.name,id:x.teacher_id,href:`teachers.html#${x.id}`})),...(classes||[]).slice(0,8).map(x=>({type:'Class',name:x.class_name,id:`${x.batch||''} · ${x.subject||''}`,href:`all-classes.html#${x.id}`}))];
-          const m=U.modal(`Search results · ${term}`,`<div class="global-search-results">${results.map(r=>`<a class="global-search-result" href="${r.href}"><span class="badge active">${U.esc(r.type)}</span><div><b>${U.esc(r.name)}</b><span>${U.esc(r.id||'')}</span></div><span>›</span></a>`).join('')||'<div class="dashboard-empty"><div>⌕</div><b>No matching records</b><span>Try a name, ID, phone, course or batch.</span></div>'}</div>`);
-          m.querySelectorAll('a.global-search-result').forEach(a=>a.addEventListener('click',()=>m.remove()));
-        }catch(e){U.toast(e.message||'Search failed','error')}
+      const dateNode=q('[data-dashboard-date]');
+      if(dateNode)dateNode.textContent=U.date(U.today());
+
+      const collection=q('[data-stat="this_month_collection"]');
+      if(collection)collection.textContent=U.money(d.this_month_collection||0);
+      const pending=q('[data-stat="pending_fees"]');
+      if(pending)pending.textContent=U.money(d.pending_fees||0);
+      const partial=q('[data-stat="partial_fees"]');
+      if(partial)partial.textContent=U.money(d.partial_fees||0);
+      const fine=q('[data-stat="fine"]');
+      if(fine)fine.textContent=U.money(d.fine||0);
+
+      const statusClass=(status)=>{
+        const s=String(status||'').toLowerCase();
+        return s==='ongoing'?'ongoing':s==='completed'?'completed':s==='cancelled'?'cancelled':'scheduled';
       };
-      searchButton?.addEventListener('click',runSearch);
-      search?.addEventListener('keydown',e=>{if(e.key==='Enter')runSearch();});
+      const todayHtml=(d.todays_classes||[]).map(c=>`
+        <button type="button" class="today-class-row" data-dashboard-class="${U.esc(c.class_id)}">
+          <span class="today-time">${U.esc(U.time(c.start_time))}<small>${U.esc(U.time(c.end_time))}</small></span>
+          <span class="today-class-copy"><b>${U.esc(c.subject||'')}</b><small>${U.esc(c.class_name||'')} · ${U.esc(c.batch||'')}</small><small>${U.esc(c.teacher_name||'Unassigned')}${c.room?` · ${U.esc(c.room)}`:''}</small></span>
+          <span class="badge ${statusClass(c.status)}">${U.esc(c.status||'UPCOMING')}</span>
+        </button>`).join('');
+      fill(q('[data-today-classes]'), todayHtml || `<div class="empty-card"><b>No classes today</b><span>There are no classes scheduled for today.</span><a class="btn primary small" href="teacher-classes.html">＋ Schedule Class</a></div>`);
+
+      fill(q('[data-recent-payments]'), (d.recent_payments||[]).map(p=>`
+        <div class="dashboard-list-row">
+          <div><b>${U.esc(p.student_name)}</b><small>${U.esc(p.receipt_number)} · ${U.esc(p.month)}</small></div>
+          <strong>${U.money(p.amount)}</strong>
+        </div>`).join('') || '<div class="empty-card"><b>No recent payments</b><span>Fee payments will appear here after collection.</span></div>');
+
+      fill(q('[data-pending-fees]'), (d.pending_students||[]).map(s=>`
+        <a class="dashboard-list-row" href="fee-payment.html?student=${encodeURIComponent(s.student_id)}">
+          <div><b>${U.esc(s.name)}</b><small>${U.esc(s.student_id)} · ${U.esc(s.status)}</small></div>
+          <strong>${U.money(s.amount)}</strong>
+        </a>`).join('') || '<div class="empty-card"><b>All caught up</b><span>No current-month fee balance is pending.</span></div>');
+
+      q('[data-today-classes]')?.addEventListener('click',async(e)=>{
+        const btn=e.target.closest('[data-dashboard-class]'); if(!btn)return;
+        try{
+          const c=await Api.get(`/classes/${btn.dataset.dashboardClass}`);
+          U.modal(`${c.subject||'Course'} · ${c.class_name}`, `
+            <div class="profile-card">
+              <div class="right" style="justify-content:space-between;align-items:flex-start">
+                <div><div class="profile-kicker">${U.esc(c.subject||'Course')}</div><h2 style="margin:4px 0">${U.esc(c.class_name)}</h2><p class="muted">${U.esc(c.batch||'')}</p></div>
+                <span class="badge active">ACTIVE</span>
+              </div>
+              <div class="detail-grid">
+                <div><small>Students</small><b>${U.esc(c.student_count||0)} / ${U.esc(c.max_students||'—')}</b></div>
+                <div><small>Room</small><b>${U.esc(c.room||'—')}</b></div>
+              </div>
+            </div>
+            <div class="profile-card"><h3>Weekly Schedule</h3>${(c.allocations||[]).map(a=>`<div class="profile-list-row"><div><b>${U.esc(a.teacher_name||'Unassigned')}</b><small>${U.esc(a.subject||c.subject||'')}</small></div><span>${U.esc(a.day)} · ${U.esc(a.start_time)}–${U.esc(a.end_time)}</span></div>`).join('')||'<div class="empty-card"><b>No schedule</b><span>This course has no active schedule allocation.</span></div>'}</div>
+            <div class="right" style="justify-content:flex-end"><a class="btn secondary" href="all-classes.html">Open Courses</a><a class="btn primary" href="teacher-classes.html">Manage Schedule</a></div>`);
+        }catch(x){U.toast(x.message||'Could not load course details','error')}
+      });
+
+      await refreshAdminDashboardNotifications();
       clearInterval(window.__rmctiAdminDashboardTimer);
       window.__rmctiAdminDashboardTimer=setInterval(()=>refreshAdminDashboardNotifications().catch(()=>{}),60000);
     }
+
     if (role === 'teacher') {
-      fill(q('[data-today]'), (d.todays_classes || []).map((c) => `<div class="item"><b>${U.esc(c.subject || '')}</b><div class="muted">${U.esc(c.class_name || '')} · ${U.esc(c.start_time)}–${U.esc(c.end_time)}</div></div>`).join('') || '<div class="empty">No classes today.</div>');
+      document.querySelectorAll('[data-teacher-name]').forEach((el) => { el.textContent = d.teacher?.name || 'Teacher'; });
+      const dateNode=q('[data-dashboard-date]');
+      if(dateNode) dateNode.textContent=U.date(U.today());
+      const todayRows=(d.todays_classes || []).map((c) => {
+        const now=new Date();
+        const toMinutes=(v)=>{const [h,m]=String(v||'').split(':').map(Number);return (h*60)+(m||0);};
+        const mins=now.getHours()*60+now.getMinutes(), st=toMinutes(c.start_time), et=toMinutes(c.end_time);
+        const status=mins<st?'UPCOMING':mins<=et?'ONGOING':'COMPLETED';
+        const cls=status.toLowerCase();
+        return `<article class="today-class-row teacher-today-row"><span class="today-time">${U.esc(U.time(c.start_time))}<small>${U.esc(U.time(c.end_time))}</small></span><span class="today-class-copy"><b>${U.esc(c.subject||'')}</b><small>${U.esc(c.class_name||'')} · ${U.esc(c.batch||'')}</small><small>${U.esc(c.room||'No room')}</small></span><span class="badge ${cls}">${status}</span></article>`;
+      }).join('');
+      fill(q('[data-today-classes]'), todayRows || '<div class="empty-card"><b>No classes today</b><span>There are no scheduled classes for you today.</span></div>');
+      fill(q('[data-today]'), todayRows || '<div class="empty-card"><b>No classes today</b><span>There are no scheduled classes for you today.</span></div>');
+      const recent=(d.recent_classwork||[]).map((x)=>`<div class="dashboard-list-row"><div><b>${U.esc(x.topic||x.title||'Classwork')}</b><small>${U.esc(x.subject||'')} · ${U.esc(x.class_name||'')} · ${U.date(x.work_date)}</small></div><span class="badge completed">UPDATED</span></div>`).join('');
+      fill(q('[data-teacher-recent]'), recent || '<div class="empty-card"><b>No recent classwork</b><span>Your latest classwork entries will appear here.</span></div>');
+      const todayStat=document.querySelector('[data-stat="today_classes_count"]'); if(todayStat) todayStat.textContent=(d.todays_classes||[]).length;
     }
+
     if (role === 'student') {
       document.querySelectorAll('[data-student-name]').forEach((el) => { el.textContent = d.student?.name || ''; });
       document.querySelectorAll('[data-student-id]').forEach((el) => { el.textContent = d.student?.student_id || ''; });
-      fill(q('[data-today]'), (d.todays_classes || []).map((c) => `<div class="item"><b>${U.esc(c.subject)}</b><div>${U.esc(c.start_time)}–${U.esc(c.end_time)} · ${U.esc(c.room || '')}</div></div>`).join('') || '<div class="empty">No class today.</div>');
+      fill(q('[data-today]'), (d.todays_classes || []).map((c) => `<div class="item"><b>${U.esc(c.subject)}</b><div>${U.esc(U.time(c.start_time))}–${U.esc(U.time(c.end_time))} · ${U.esc(c.room || '')}</div></div>`).join('') || '<div class="empty">No class today.</div>');
       const fee = q('[data-fee]');
       if (fee) fee.innerHTML = `<span class="badge ${d.current_fee?.status === 'PAID' ? 'paid' : 'due'}">${U.esc(d.current_fee?.status || 'N/A')}</span><div class="statv">${U.money(d.current_fee?.amount || 0)}</div>`;
-      const next=q('[data-next-class]'); if(next){ const n=d.next_class; next.innerHTML=n?`<div class="item"><b>${U.esc(n.subject||'')}</b><div>${U.esc(n.class_name||'')} · ${U.esc(n.batch||'')}</div><div class="muted">${U.esc(n.day||'')} · ${U.esc(n.start_time||'')}–${U.esc(n.end_time||'')} · ${U.esc(n.teacher_name||'')}</div></div>`:'<div class="empty">No upcoming class.</div>'; }
+      const next=q('[data-next-class]'); if(next){ const n=d.next_class; next.innerHTML=n?`<div class="item"><b>${U.esc(n.subject||'')}</b><div>${U.esc(n.class_name||'')} · ${U.esc(n.batch||'')}</div><div class="muted">${U.esc(n.day||'')} · ${U.esc(U.time(n.start_time))}–${U.esc(U.time(n.end_time))} · ${U.esc(n.teacher_name||'')}</div></div>`:'<div class="empty">No upcoming class.</div>'; }
       fill(q('[data-homework]'), (d.upcoming_homework || []).map((h) => `<div class="item"><b>${U.esc(h.title)}</b><div class="muted">${U.esc(h.subject)} · due ${U.date(h.due_date)}</div></div>`).join('') || '<div class="empty">No upcoming homework.</div>');
     }
-  }
-
-  function bindProfileTabs(modal){
-    const tabs=[...modal.querySelectorAll('[data-profile-tab]')], panels=[...modal.querySelectorAll('[data-profile-panel]')];
-    tabs.forEach(tab=>tab.addEventListener('click',()=>{const key=tab.dataset.profileTab;tabs.forEach(x=>x.classList.toggle('active',x===tab));panels.forEach(x=>x.classList.toggle('active',x.dataset.profilePanel===key));}));
   }
 
   async function teachersPage() {
@@ -172,7 +221,7 @@ const Page = (() => {
       } else if (e.target.dataset.idcard) {
         const m=U.modal('Teacher ID Card', idCard(t,'teacher')); bindIdCardDownload(m,t,'teacher');
       } else {
-        const m=U.modal('Teacher Full Details', `<div class="person-detail-head"><div class="person-detail-identity"><h3>${U.esc(t.name)}</h3><p class="muted">${U.esc(t.teacher_id)} · ${U.esc(t.status)}</p></div><img src="${U.photoUrl(t.photo)}" alt="${U.esc(t.name)}" class="person-detail-photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="profile-tabs"><button class="profile-tab active" data-profile-tab="overview">Overview</button><button class="profile-tab" data-profile-tab="classes">Classes</button></div><section class="profile-panel active" data-profile-panel="overview"><div class="g2"><div><b>Gender</b><p>${U.esc(t.gender||'—')}</p></div><div><b>Date of Birth</b><p>${U.date(t.dob)}</p></div><div><b>Phone</b><p>${U.esc(t.phone||'—')}</p></div><div><b>Email</b><p>${U.esc(t.email||'—')}</p></div><div><b>Aadhaar Number</b><p><b>${U.esc(t.aadhaar_number||'—')}</b></p></div><div><b>Joining Date</b><p>${U.date(t.joining_date)}</p></div><div><b>Qualification</b><p>${U.esc(t.qualification||'—')}</p></div><div><b>Experience</b><p>${U.esc(t.experience||'—')}</p></div><div class="full"><b>Address</b><p>${U.esc(t.address||'—')}</p></div></div></section><section class="profile-panel" data-profile-panel="classes"><div class="profile-mini-list">${(t.classes||[]).map(c=>`<div class="profile-mini-item"><b>${U.esc(c.class_name)} · ${U.esc(c.batch)}</b><div class="muted">${U.esc(c.subject)} · ${U.esc(c.day)} · ${U.esc(c.start_time)}–${U.esc(c.end_time)}</div></div>`).join('')||'<div class="empty">No active classes assigned.</div>'}</div></section>`); bindProfileTabs(m);
+        window.RMCTIProfiles?.teacher(t);
       }
     });
     await load();
@@ -311,7 +360,7 @@ const Page = (() => {
       } else if (e.target.dataset.idcard) {
         const m=U.modal('Student ID Card', idCard(st,'student')); bindIdCardDownload(m,st,'student');
       } else {
-        const m=U.modal('Student Full Details', `<div class="person-detail-head"><div class="person-detail-identity"><h3>${U.esc(st.name)}</h3><p class="muted">${U.esc(st.student_id)} · ${U.esc(st.status)}</p></div><img src="${U.photoUrl(st.photo)}" alt="${U.esc(st.name)}" class="person-detail-photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="profile-tabs"><button class="profile-tab active" data-profile-tab="overview">Overview</button><button class="profile-tab" data-profile-tab="guardian">Guardian</button><button class="profile-tab" data-profile-tab="classes">Classes</button><button class="profile-tab" data-profile-tab="attendance">Attendance</button></div><section class="profile-panel active" data-profile-panel="overview"><div class="g2"><div><b>Gender</b><p>${U.esc(st.gender||'—')}</p></div><div><b>Date of Birth</b><p>${U.date(st.dob)}</p></div><div><b>Phone</b><p>${U.esc(st.phone||'—')}</p></div><div><b>Aadhaar Number</b><p><b>${U.esc(st.aadhaar_number||'—')}</b></p></div><div><b>School / College</b><p>${U.esc(st.school_name||'—')}</p></div><div><b>Admission Date</b><p>${U.date(st.admission_date)}</p></div><div class="full"><b>Address</b><p>${U.esc(st.address||'—')}</p></div></div></section><section class="profile-panel" data-profile-panel="guardian"><div class="card pad"><b>${U.esc(st.parent?.name||'—')}</b><p class="muted">${U.esc(st.parent?.relationship||'')} · ${U.esc(st.parent?.phone||'')} · ${U.esc(st.parent?.email||'')}</p><p>${U.esc(st.parent?.address||'—')}</p></div></section><section class="profile-panel" data-profile-panel="classes"><div class="profile-mini-list">${(st.classes||[]).map(c=>`<div class="profile-mini-item"><b>${U.esc(c.class_name)} · ${U.esc(c.batch)}</b><div class="muted">${U.esc(c.subject)} · ${U.esc(c.teacher_name||'No teacher')}</div></div>`).join('')||'<div class="empty">No active classes assigned.</div>'}</div></section><section class="profile-panel" data-profile-panel="attendance"><div class="empty"><button type="button" class="btn primary" data-open-profile-attendance>View Attendance</button></div></section>`); bindProfileTabs(m); m.querySelector('[data-open-profile-attendance]')?.addEventListener('click',()=>adminStudentAttendance(st));
+        window.RMCTIProfiles?.student(st);
       }
     });
     await load();
@@ -519,13 +568,22 @@ const Page = (() => {
             end_time: kind==='delete' ? null : endInput.value,
             teacher_id: kind==='extra' ? Number(m.querySelector('[data-extra-teacher-select]').value) : (selected?.teacher_id || null)
           };
-          const btn=form.querySelector('button[type="submit"]');btn.disabled=true;
-          try{
-            const result=await Api.post('/schedule-exceptions',payload);
-            U.toast(result.message||'Schedule updated');
-            await loadSchedule();
-          }catch(x){U.toast(x.message||'Could not update schedule','error')}
-          finally{btn.disabled=false;}
+          const btn=form.querySelector('button[type="submit"]');
+          const commitChange=async()=>{
+            btn.disabled=true;
+            try{
+              const result=await Api.post('/schedule-exceptions',payload);
+              U.toast(result.message||'Schedule updated');
+              await loadSchedule();
+            }catch(x){U.toast(x.message||'Could not update schedule','error')}
+            finally{btn.disabled=false;}
+          };
+          if(kind==='delete'){
+            const selectedLabel=selected?`${dateLabel(selected.date)} · ${U.esc(selected.start_time)}–${U.esc(selected.end_time)}`:'this scheduled occurrence';
+            U.confirm('Cancel Class?',`${c.class_name} · ${selectedLabel}. This class will be marked as cancelled for this date only.`,commitChange);
+          }else{
+            await commitChange();
+          }
         });
 
         m.querySelector('[data-res-list]')?.addEventListener('click',async ev=>{
@@ -552,6 +610,13 @@ const Page = (() => {
       }catch(e){U.toast(e.message||'Could not load course','error')}
     });
     await load();
+    const requestedView=new URLSearchParams(location.search).get('view');
+    if(requestedView){
+      try{
+        const c=await Api.get(`/classes/${requestedView}`);
+        U.modal(`${U.esc(c.subject||'Course')} · ${U.esc(c.class_name)}`,`<div class="profile-card"><div class="profile-kicker">${U.esc(c.subject||'Course')}</div><h2 style="margin:4px 0">${U.esc(c.class_name)}</h2><p class="muted">${U.esc(c.batch||'')}${c.room?` · ${U.esc(c.room)}`:''}</p><div class="detail-grid"><div><small>Students</small><b>${U.esc(c.student_count||0)} / ${U.esc(c.max_students||'—')}</b></div><div><small>Teachers</small><b>${U.esc(new Set((c.allocations||[]).map(a=>a.teacher_id)).size)}</b></div></div></div><div class="profile-card"><h3>Weekly Schedule</h3>${(c.allocations||[]).map(a=>`<div class="profile-list-row"><div><b>${U.esc(a.teacher_name||'Unassigned')}</b><small>${U.esc(a.day)}</small></div><span>${U.esc(a.start_time)}–${U.esc(a.end_time)}</span></div>`).join('')||'<div class="empty-card"><b>No schedule</b><span>No active teacher allocation exists for this course.</span></div>'}</div>`);
+      }catch(e){U.toast(e.message||'Could not open course','error')}
+    }
   }
 
   async function registerPage(kind) {
@@ -769,6 +834,109 @@ const Page = (() => {
       fill(courseManager.querySelector('[data-course-manager-list]'),classes.map(c=>`<div class="card pad" style="border:1px solid var(--border)"><b>${U.esc(c.class_name)} · ${U.esc(c.batch)}</b><div class="muted">${U.esc(c.subject)} · ${U.esc(c.room||'No room')}</div><div class="right" style="justify-content:flex-end;margin-top:8px"><button type="button" class="btn warning small" data-edit-course="${c.id}">Edit Course</button><button type="button" class="btn danger small" data-delete-course="${c.id}">Delete</button></div></div>`).join('')||'<div class="empty">No courses created yet.</div>');
     };
     renderCourseManager();
+
+    /* New presentation-only weekly calendar. It reads the existing effective
+       schedule endpoints and never changes allocation/reschedule semantics. */
+    const calendarPanel=q('[data-schedule-calendar]');
+    const listPanel=document.querySelector('.schedule-list-panel');
+    let calendarWeek=(() => {
+      const [y,m,d]=U.today().split('-').map(Number);
+      const x=new Date(y,m-1,d); x.setDate(x.getDate()-x.getDay()+1);
+      return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+    })();
+    let calendarRows=[];
+    let calendarChanges=[];
+    const dateShift=(iso,delta)=>{
+      const [y,m,d]=iso.split('-').map(Number), x=new Date(y,m-1,d);
+      x.setDate(x.getDate()+delta);
+      return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+    };
+    const prettyWeek=(ws)=>`${U.date(ws)} – ${U.date(dateShift(ws,6))}`;
+    const classMap=new Map(classes.map(c=>[Number(c.id),c]));
+    const teacherMap=new Map(teachers.map(t=>[Number(t.id),t]));
+
+    const renderCalendar=()=>{
+      const body=q('[data-schedule-calendar-body]'); if(!body)return;
+      const course=String(q('[data-calendar-course]')?.value||'');
+      const teacher=String(q('[data-calendar-teacher]')?.value||'');
+      const filtered=calendarRows.filter(r=>
+        (!course || String(r.class_id)===course) &&
+        (!teacher || String(r.teacher_id)===teacher)
+      );
+      const byDay=Array.from({length:7},()=>[]);
+      filtered.forEach(r=>{const [y,m,d]=r.date.split('-').map(Number);const start=new Date(y,m-1,d);const day=(start.getDay()+6)%7;byDay[day].push(r);});
+      const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+      const today=U.today();
+      body.innerHTML=`<div class="schedule-week-grid">${dayNames.map((label,i)=>`
+        <div class="schedule-day-column ${dateShift(calendarWeek,i)===today?'today':''}">
+          <div class="schedule-day-head"><b>${label}</b><small>${U.date(dateShift(calendarWeek,i)).slice(0,5)}</small></div>
+          <div class="schedule-day-items">${byDay[i].length?byDay[i].map(r=>{
+            const isToday=r.date===today;
+            let status='scheduled';
+            if(isToday){
+              const now=new Date();
+              const [sh,sm]=r.start_time.split(':').map(Number),[eh,em]=r.end_time.split(':').map(Number);
+              const st=new Date(),et=new Date();st.setHours(sh,sm,0,0);et.setHours(eh,em,0,0);
+              if(now>et)status='completed'; else if(now>=st&&now<=et)status='ongoing';
+            }
+            return `<button type="button" class="calendar-class-item" data-calendar-class="${U.esc(r.class_id)}">
+              <span class="calendar-class-time">${U.esc(U.time(r.start_time))}<small>${U.esc(U.time(r.end_time))}</small></span>
+              <span class="calendar-class-copy"><b>${U.esc(r.subject||'')}</b><small>${U.esc(r.class_name||'')} · ${U.esc(r.teacher_name||'Unassigned')}</small></span>
+              <span class="badge ${status}">${status.toUpperCase()}</span>
+            </button>`;
+          }).join(''):'<div class="calendar-empty">No classes</div>'}</div>
+        </div>`).join('')}</div>`;
+    };
+    const renderChanges=()=>{
+      const body=q('[data-schedule-calendar-body]'); if(!body)return;
+      const labels={delete:'Cancelled',weekly_time:'Changed this week',extra:'Extra class',reschedule:'Rescheduled'};
+      body.innerHTML=calendarChanges.length?`<div class="schedule-changes-list">${calendarChanges.map(x=>{
+        const c=classMap.get(Number(x.class_id)); const t=teacherMap.get(Number(x.teacher_id));
+        return `<div class="schedule-change-row"><div class="schedule-change-icon">${x.kind==='delete'?'✕':x.kind==='extra'?'＋':'↔'}</div><div><b>${U.esc(c?.class_name||'Course')}</b><small>${U.esc(c?.subject||'')} · ${U.esc(c?.batch||'')}</small><small>${U.esc(labels[x.kind]||x.kind)}${x.schedule_date?` · ${U.date(x.schedule_date)}`:''}${x.target_date?` → ${U.date(x.target_date)}`:''}${x.start_time?` · ${U.esc(U.time(x.start_time))}–${U.esc(U.time(x.end_time||''))}`:''}${t?` · ${U.esc(t.name)}`:''}</small></div></div>`;
+      }).join('')}</div>`:'<div class="empty-card"><b>No schedule changes</b><span>There are no exceptions for this week.</span></div>';
+    };
+    const loadCalendar=async()=>{
+      if(!calendarPanel)return;
+      q('[data-week-label]') && (q('[data-week-label]').textContent=prettyWeek(calendarWeek));
+      try{
+        const packs=await Promise.all(classes.map(async c=>{
+          const [schedule,changes]=await Promise.all([
+            Api.get(`/classes/${c.id}/schedule-week`,{week_start:calendarWeek}),
+            Api.get('/schedule-exceptions',{class_id:c.id,week_start:calendarWeek})
+          ]);
+          return {c,schedule:schedule||[],changes:changes||[]};
+        }));
+        calendarRows=packs.flatMap(({c,schedule})=>schedule.map(r=>({...r,class_id:c.id,class_name:c.class_name,batch:c.batch,subject:c.subject,room:c.room})));
+        calendarChanges=packs.flatMap(({c,changes})=>changes.map(x=>({...x,class_id:c.id})));
+        renderCalendar();
+      }catch(error){
+        fill(q('[data-schedule-calendar-body]'),`<div class="empty-card"><b>Calendar unavailable</b><span>${U.esc(error.message||'Could not load the weekly schedule.')}</span></div>`);
+      }
+    };
+    const setCalendarView=(view)=>{
+      calendarPanel?.querySelectorAll('[data-schedule-view]').forEach(b=>b.classList.toggle('active',b.dataset.scheduleView===view));
+      if(listPanel)listPanel.style.display=view==='list'?'block':'none';
+      const body=q('[data-schedule-calendar-body]');
+      if(body)body.style.display=view==='list'?'none':'block';
+      if(view==='changes')renderChanges();
+      else if(view==='calendar')renderCalendar();
+    };
+    calendarPanel?.querySelector('[data-calendar-course]')?.replaceChildren(new Option('All courses',''),...classes.map(c=>new Option(`${c.class_name} · ${c.batch}`,c.id)));
+    calendarPanel?.querySelector('[data-calendar-teacher]')?.replaceChildren(new Option('All teachers',''),...teachers.map(t=>new Option(`${t.name} · ${t.teacher_id}`,t.id)));
+    calendarPanel?.querySelector('[data-week-prev]')?.addEventListener('click',()=>{calendarWeek=dateShift(calendarWeek,-7);loadCalendar()});
+    calendarPanel?.querySelector('[data-week-next]')?.addEventListener('click',()=>{calendarWeek=dateShift(calendarWeek,7);loadCalendar()});
+    calendarPanel?.querySelector('[data-week-today]')?.addEventListener('click',()=>{calendarWeek=(()=>{const [y,m,d]=U.today().split('-').map(Number),x=new Date(y,m-1,d);x.setDate(x.getDate()-x.getDay()+1);return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`})();loadCalendar()});
+    calendarPanel?.querySelector('[data-calendar-course]')?.addEventListener('change',renderCalendar);
+    calendarPanel?.querySelector('[data-calendar-teacher]')?.addEventListener('change',renderCalendar);
+    calendarPanel?.querySelectorAll('[data-schedule-view]').forEach(btn=>btn.addEventListener('click',()=>setCalendarView(btn.dataset.scheduleView)));
+    calendarPanel?.querySelector('[data-schedule-calendar-body]')?.addEventListener('click',async e=>{
+      const btn=e.target.closest('[data-calendar-class]'); if(!btn)return;
+      const c=classMap.get(Number(btn.dataset.calendarClass)); if(!c)return;
+      U.modal(`${U.esc(c.subject||'Course')} · ${U.esc(c.class_name)}`,`<div class="profile-card"><div class="profile-kicker">${U.esc(c.subject||'Course')}</div><h2 style="margin:4px 0">${U.esc(c.class_name)}</h2><p class="muted">${U.esc(c.batch)}${c.room?` · ${U.esc(c.room)}`:''}</p><div class="detail-grid"><div><small>Students</small><b>${U.esc(c.student_count||0)} / ${U.esc(c.max_students||'—')}</b></div><div><small>Teachers</small><b>${U.esc(new Set((c.allocations||[]).map(a=>a.teacher_id)).size)}</b></div></div></div><div class="profile-card"><h3>Weekly allocation</h3>${(c.allocations||[]).map(a=>`<div class="profile-list-row"><div><b>${U.esc(a.teacher_name||'Unassigned')}</b><small>${U.esc(a.day)}</small></div><span>${U.esc(a.start_time)}–${U.esc(a.end_time)}</span></div>`).join('')||'<div class="empty-card"><b>No allocation</b><span>No active teacher allocation exists for this course.</span></div>'}</div><div class="right" style="justify-content:flex-end"><a href="teacher-classes.html" class="btn primary">Manage Schedule</a></div>`);
+    });
+    setCalendarView('calendar');
+    loadCalendar();
+
     courseManager.addEventListener('click',async e=>{
       const edit=e.target.closest('[data-edit-course]')?.dataset.editCourse;
       const del=e.target.closest('[data-delete-course]')?.dataset.deleteCourse;
@@ -901,8 +1069,24 @@ const Page = (() => {
     const amountInput = q('[name="amount"]');
     const params = new URLSearchParams(location.search);
     if (filter && params.get('filter') === 'due') filter.value = 'due';
+    const requestedStudent = params.get('student');
 
     let currentFeeData=null;
+    const feeSummary = async () => {
+      try {
+        const d = await Api.get('/admin/dashboard');
+        const map = {collected:d.this_month_collection, pending:d.pending_fees, partial:d.partial_fees, fine:d.fine};
+        const nodes = {
+          collected:q('[data-fee-summary-collected]'), pending:q('[data-fee-summary-pending]'),
+          partial:q('[data-fee-summary-partial]'), fine:q('[data-fee-summary-fine]')
+        };
+        nodes.collected && (nodes.collected.textContent=U.money(map.collected||0));
+        nodes.pending && (nodes.pending.textContent=U.money(map.pending||0));
+        nodes.partial && (nodes.partial.textContent=U.money(map.partial||0));
+        nodes.fine && (nodes.fine.textContent=U.money(map.fine||0));
+      } catch (_) {}
+    };
+    feeSummary();
     const renderStudents = () => {
       const term = String(search?.value || '').trim().toLowerCase();
       const mode = filter?.value || 'all';
@@ -923,7 +1107,7 @@ const Page = (() => {
     const load = async () => {
       if (!studentSelect?.value) { currentFeeData=null; fill(q('[data-history]'), '<div class="empty">No student selected.</div>'); if(monthInput) monthInput.value=''; if(amountInput) amountInput.value=''; return; }
       const d = await Api.get(`/fees/student/${studentSelect.value}`); currentFeeData=d;
-      fill(q('[data-history]'), `<div class="table"><table><tr><th>Month</th><th>Fee + Fine</th><th>Paid</th><th>Remaining</th><th>Status</th><th>Receipt</th></tr>${(d.history || []).map((h) => `<tr><td>${U.esc(h.month_label)}</td><td><button type="button" class="btn secondary small" data-fee-detail="${U.esc(h.month)}">${U.money(h.amount)}</button></td><td>${U.money(h.paid_amount)}</td><td>${U.money(h.due_amount)}</td><td><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'PARTIAL' || h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></td><td>${U.esc(h.receipt_number || '—')}</td></tr>`).join('')}</table></div>`);
+      fill(q('[data-history]'), `<div class="fee-timeline">${(d.history || []).map((h) => `<div class="fee-timeline-item ${String(h.status||'').toLowerCase()}"><div class="fee-timeline-marker">${h.status === 'PAID' ? '✓' : h.status === 'PARTIAL' ? '◐' : '!'}</div><div class="fee-timeline-main"><div class="fee-timeline-head"><b>${U.esc(h.month_label)}</b><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'PARTIAL' ? 'partial' : h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></div><div class="fee-timeline-amounts"><span>Due <b>${U.money(h.amount)}</b></span><span>Paid <b>${U.money(h.paid_amount)}</b></span><span>Remaining <b>${U.money(h.due_amount)}</b></span></div>${h.payment_date?`<small>Last payment: ${U.esc(U.datetime(h.payment_date))}${h.receipt_number?` · Receipt ${U.esc(h.receipt_number)}`:''}</small>`:''}<button type="button" class="btn secondary small fee-detail-btn" data-fee-detail="${U.esc(h.month)}">View fee calculation</button></div></div>`).join('') || '<div class="empty-card"><b>No fee history</b><span>No fee records are available for this student.</span></div>'}</div>`);
       if(monthInput){monthInput.value=d.oldest_due_month || U.today().slice(0,7);monthInput.readOnly=true;monthInput.title=d.oldest_due_month?'Oldest due month is selected automatically':'No unpaid month is due; current month is selected.';}
       if(amountInput) { amountInput.value=d.oldest_due_amount>0?d.oldest_due_amount:''; amountInput.min='0.01'; amountInput.max=d.oldest_due_amount>0?String(d.oldest_due_amount):'0'; amountInput.title=`Maximum ₹${Number(d.oldest_due_amount||0).toFixed(2)} (remaining balance for the selected month). Partial payments are allowed.`; }
     };
@@ -972,6 +1156,10 @@ const Page = (() => {
       finally { const btn=e.currentTarget.querySelector('button[type="submit"]') || e.currentTarget.querySelector('button'); if(btn)btn.disabled=false; }
     });
 
+    if (requestedStudent) {
+      const match = allStudents.find(s => String(s.student_id).toLowerCase() === String(requestedStudent).toLowerCase() || String(s.id) === String(requestedStudent));
+      if (match && search) search.value = match.name;
+    }
     renderStudents();
   }
 
@@ -979,7 +1167,7 @@ const Page = (() => {
     return `<div class="receipt-doc" data-receipt-capture style="border:1px solid #d6dde6;border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.08)">
       <div style="padding:22px 26px;background:#0f3d5e;color:#fff;display:flex;justify-content:space-between;gap:20px;align-items:center"><div style="display:flex;gap:14px;align-items:center"><img crossorigin="anonymous" src="${U.photoUrl('/asset/image.jpeg')}" style="width:54px;height:54px;border-radius:10px;background:#fff;padding:4px;object-fit:contain"><div><div style="font-size:22px;font-weight:800;letter-spacing:.02em">RMCTI</div><div style="font-size:12px;opacity:.86">Ratna's Modern Computer Training Institute</div></div></div><div style="text-align:right"><div style="font-size:11px;opacity:.78;text-transform:uppercase;letter-spacing:.1em">Official Fee Receipt</div><div style="font-size:18px;font-weight:800;margin-top:4px">${U.esc(r.receipt_number)}</div></div></div>
       <div style="padding:24px 26px"><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 28px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Student</div><div style="font-weight:800;font-size:17px;margin-top:5px">${U.esc(r.student)}</div><div class="muted" style="margin-top:3px">${U.esc(r.student_id)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Course</div><div style="font-weight:700;margin-top:5px">${U.esc(r.class||'—')}</div>${r.teacher?`<div class="muted" style="margin-top:3px">Teacher: ${U.esc(r.teacher)}</div>`:''}</div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Fee Month</div><div style="font-weight:700;margin-top:5px">${U.esc(r.fee_month)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Date</div><div style="font-weight:700;margin-top:5px">${U.datetime(r.payment_date)}</div></div></div>
-      <div style="margin:24px 0;border-top:1px solid #e2e8f0"></div><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Method</div><div style="font-weight:700;margin-top:5px;text-transform:capitalize">${U.esc(String(r.payment_method||'').replace('_',' '))}</div></div><div style="text-align:right"><div class="muted" style="font-size:11px;text-transform:uppercase">Amount Paid</div><div style="font-size:30px;font-weight:900;margin-top:2px;color:#0f3d5e">${U.money(r.amount)}</div></div></div>
+      <div style="margin:24px 0;border-top:1px solid #e2e8f0"></div><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Method</div><div style="font-weight:700;margin-top:5px;text-transform:capitalize">${U.esc(String(r.payment_method||'').replace('_',' '))}</div></div><div style="display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:18px;text-align:right"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Amount Paid</div><div style="font-size:26px;font-weight:900;margin-top:2px;color:#0f3d5e">${U.money(r.amount)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Remaining</div><div style="font-size:22px;font-weight:900;margin-top:4px;color:#b45309">${U.money(r.remaining||0)}</div></div></div></div>
       <div style="margin-top:28px;padding-top:14px;border-top:1px dashed #cbd5e1;display:flex;justify-content:space-between;gap:20px;font-size:11px;color:#64748b"><span>Collected by: ${U.esc(r.collected_by||'Admin')}</span><span>System generated receipt</span></div></div></div>`;
   }
 
@@ -992,12 +1180,94 @@ const Page = (() => {
     return m;
   }
 
+  async function reportsPage() {
+    const monthInput = q('[data-report-month]');
+    const summary = q('[data-report-summary]');
+    const attendanceBody = q('[data-report-attendance]');
+    const teacherBody = q('[data-report-teachers]');
+    const monthLabel = q('[data-report-month-label]');
+
+    const render = async () => {
+      const month = monthInput?.value || U.today().slice(0, 7);
+      try {
+        [summary, attendanceBody, teacherBody].forEach((el) => { if (el) el.innerHTML = '<div class="loading">Loading…</div>'; });
+        const d = await Api.get('/admin/reports/summary', { month });
+        const f = d.fees || {};
+        if (monthLabel) {
+          const dt = new Date(`${month}-01T00:00:00`);
+          monthLabel.textContent = dt.toLocaleDateString('en-IN', {month:'long', year:'numeric'});
+        }
+        fill(summary, `
+          <div class="report-kpi"><span>Collected</span><strong>${U.money(f.collected)}</strong></div>
+          <div class="report-kpi"><span>Pending</span><strong>${U.money(f.pending)}</strong></div>
+          <div class="report-kpi"><span>Partial</span><strong>${U.money(f.partial_balance)}</strong></div>
+          <div class="report-kpi"><span>Fine</span><strong>${U.money(f.fine)}</strong></div>
+          <div class="report-kpi"><span>Students paid</span><strong>${f.paid_students || 0}</strong></div>
+          <div class="report-kpi"><span>Students pending</span><strong>${f.pending_students || 0}</strong></div>
+        `);
+        fill(attendanceBody, (d.attendance || []).map(x => `<tr><td>${U.esc(x.subject)}</td><td>${U.esc(x.class_name)} · ${U.esc(x.batch)}</td><td>${x.present}</td><td>${x.absent}</td><td><span class="badge ${x.attendance_percent>=80?'paid':'pending'}">${x.attendance_percent}%</span></td></tr>`).join('') || tableEmpty(5, 'No attendance records for this month.'));
+        fill(teacherBody, (d.teacher_workload || []).map(x => `<tr><td>${U.esc(x.teacher_id)}</td><td>${U.esc(x.name)}</td><td>${x.classes}</td></tr>`).join('') || tableEmpty(3, 'No active teachers found.'));
+        return d;
+      } catch (e) {
+        U.toast(e.message || 'Could not load report', 'error');
+        fill(summary, '<div class="empty-card"><b>Report unavailable</b><span>Try another month or refresh the page.</span></div>');
+        return null;
+      }
+    };
+
+    const toCsv = (headers, rows) => {
+      const escCsv = (v) => `"${String(v ?? '').replaceAll('"','""')}"`;
+      return [headers, ...rows].map(row => row.map(escCsv).join(',')).join('\n');
+    };
+    const download = (name, text, mime='text/csv;charset=utf-8') => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([text], {type:mime}));
+      a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 500);
+    };
+
+    let latest = await render();
+    monthInput?.addEventListener('change', () => { render().then(x => { latest=x; }); });
+    q('[data-report-export-csv]')?.addEventListener('click', () => {
+      if (!latest) return U.toast('Load the report first', 'warning');
+      const m=latest.month;
+      const rows=[
+        ['Section','Metric','Value'],
+        ['Fees','Collected',latest.fees.collected],['Fees','Pending',latest.fees.pending],['Fees','Partial',latest.fees.partial_balance],['Fees','Fine',latest.fees.fine],
+        ...latest.attendance.map(x=>['Attendance',x.subject,`${x.attendance_percent}%`]),
+        ...latest.teacher_workload.map(x=>['Teacher workload',x.name,x.classes])
+      ];
+      download(`rmcti-report-${m}.csv`, toCsv(rows.shift(), rows));
+      U.toast('CSV report exported');
+    });
+    q('[data-report-print]')?.addEventListener('click', () => window.print());
+  }
+
+  async function analyticsPage() {
+    const collections = q('[data-analytics-collection]');
+    const growth = q('[data-analytics-growth]');
+    const attendance = q('[data-analytics-attendance]');
+    try {
+      const d = await Api.get('/admin/analytics');
+      const maxC = Math.max(...(d.collection || [0]), 1);
+      const maxG = Math.max(...(d.student_growth || [0]), 1);
+      fill(collections, (d.months || []).map((m, i) => `<div class="analytics-bar-row"><span>${U.esc(m)}</span><div class="analytics-bar-track"><i style="width:${Math.round((d.collection[i]||0)/maxC*100)}%"></i></div><b>${U.money(d.collection[i]||0)}</b></div>`).join('') || '<div class="empty-card"><b>No collection data</b><span>Payments will appear here as they are recorded.</span></div>');
+      fill(growth, (d.months || []).map((m, i) => `<div class="analytics-bar-row"><span>${U.esc(m)}</span><div class="analytics-bar-track"><i style="width:${Math.round((d.student_growth[i]||0)/maxG*100)}%"></i></div><b>${d.student_growth[i]||0}</b></div>`).join('') || '<div class="empty-card"><b>No student growth data</b><span>Admission dates are used for this trend.</span></div>');
+      fill(attendance, (d.attendance || []).slice(0,12).map(x => `<div class="analytics-bar-row"><span>${U.esc(x.name)}</span><div class="analytics-bar-track"><i style="width:${Math.max(0,Math.min(100,x.attendance_percent||0))}%"></i></div><b>${x.attendance_percent||0}%</b></div>`).join('') || '<div class="empty-card"><b>No attendance data</b><span>Attendance records will appear here.</span></div>');
+    } catch (e) { U.toast(e.message || 'Could not load analytics', 'error'); }
+  }
+
   async function receipts() {
     const search = q('[data-search]');
     const load = async () => { const rows = await Api.get('/receipts', { q: search?.value || '' }); fill(q('[data-body]'), rows.map((r) => `<tr><td>${U.esc(r.receipt_number)}</td><td>${U.esc(r.student_name)}</td><td>${U.esc(r.month)}</td><td>${U.money(r.amount)}</td><td>${U.esc(r.method)}</td><td>${U.datetime(r.generated_at)}</td><td><button class="btn secondary small" data-view-receipt="${r.id}">Print / View</button></td></tr>`).join('') || tableEmpty(7)); };
     search?.addEventListener('input', U.debounce(load));
     q('[data-body]')?.addEventListener('click',async e=>{const id=e.target.dataset.viewReceipt;if(!id)return;try{const r=await Api.get(`/receipts/${id}`);await showReceipt(r,false)}catch(x){U.toast(x.message||'Could not load receipt','error')}});
     await load();
+    const requestedView=new URLSearchParams(location.search).get('view');
+    if(requestedView){
+      try{const r=await Api.get(`/receipts/${requestedView}`);await showReceipt(r,false);}
+      catch(e){U.toast(e.message||'Could not open receipt','error');}
+    }
   }
 
   async function receiptPrint() {
@@ -1355,7 +1625,7 @@ const Page = (() => {
     list?.addEventListener('click',async e=>{
       const open=e.target.closest('[data-open-file]')?.dataset.openFile;
       const del=e.target.closest('[data-delete-file]')?.dataset.deleteFile;
-      if(del){if(!confirm('Delete this file?'))return;try{await Api.del(`/admin/attachments/${del}`);U.toast('File deleted');load();}catch(x){U.toast(x.message,'error')}return;}
+      if(del){U.confirm('Delete attachment?', 'This file will be permanently deleted from the institute notice board.', async()=>{try{await Api.del(`/admin/attachments/${del}`);U.toast('File deleted');load();}catch(x){U.toast(x.message,'error')}});return;}
       if(!open)return;
       try{const token=sessionStorage.getItem('token');const r=await fetch(`${API}/attachments/${open}/download`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw Error('Could not open file');const blob=await r.blob();const url=URL.createObjectURL(blob);window.open(url,'_blank','noopener');setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(x){U.toast(x.message||'Could not open file','error')}
     });
@@ -1371,22 +1641,6 @@ const Page = (() => {
     });
     syncTarget();await loadRecipients();await load();
   }
-  async function reportsPage() {
-    const stats=q('[data-report-stats]'), classesTarget=q('[data-report-classes]'), auditTarget=q('[data-report-audit]');
-    const load=async()=>{
-      try {
-        const [d,students,teachers,classes,audit]=await Promise.all([Api.get('/admin/dashboard'),Api.get('/students',{status:'active'}),Api.get('/teachers',{status:'active'}),Api.get('/classes',{status:'active'}),Api.get('/audit-logs')]);
-        const assigned=classes.filter(c=>(c.allocations||[]).some(a=>a.teacher_id||a.teacher_name));
-        const totalCapacity=assigned.reduce((n,c)=>n+Number(c.max_students||0),0), totalStudents=assigned.reduce((n,c)=>n+Number(c.student_count||0),0);
-        const utilization=totalCapacity?Math.round(totalStudents/totalCapacity*100):0;
-        fill(stats,[[students.length,'Active Students','students.html'],[teachers.length,'Active Teachers','teachers.html'],[assigned.length,'Assigned Classes','all-classes.html'],[`${utilization}%`,'Class Capacity Used','all-classes.html']].map(x=>`<a class="card report-stat" href="${x[2]}"><span class="muted">${U.esc(x[1])}</span><b>${U.esc(x[0])}</b><small>${x[1]==='Class Capacity Used'?`${totalStudents} / ${totalCapacity} seats`: 'Open management'}</small></a>`).join(''));
-        fill(classesTarget,assigned.map(c=>{const cap=Number(c.max_students||0),count=Number(c.student_count||0),pct=cap?Math.min(100,Math.round(count/cap*100)):0;return `<div class="report-class-row"><div class="report-class-head"><div><b>${U.esc(c.class_name)}</b><span>${U.esc(c.batch||'')} · ${U.esc(c.subject||'')}</span></div><strong>${count}/${cap||'—'}</strong></div><div class="report-progress"><i style="width:${pct}%"></i></div></div>`}).join('')||'<div class="empty">No assigned classes found.</div>');
-        fill(auditTarget,(audit||[]).slice(0,8).map(x=>`<div class="report-activity"><div><b>${U.esc(x.action||'Activity')}</b><span>${U.esc(x.description||'')}</span></div><time>${U.datetime(x.created_at)}</time></div>`).join('')||'<div class="empty">No recent activity.</div>');
-      } catch(e){ U.toast(e.message||'Could not load reports','error'); }
-    };
-    q('[data-refresh-report]')?.addEventListener('click',load); await load();
-  }
-
   async function auditLogs() {
     const rows = await Api.get('/audit-logs');
     fill(q('[data-body]'), rows.map((x) => `<tr><td>${U.datetime(x.created_at)}</td><td>${U.esc(x.action)}</td><td>${U.esc(x.entity_type)}</td><td>${U.esc(x.entity_id || '—')}</td><td>${U.esc(x.description || '')}</td></tr>`).join('') || tableEmpty(5, 'No audit history yet.'));
@@ -1397,5 +1651,5 @@ const Page = (() => {
     fill(q('[data-fees]'), `<div class="g2"><div><div class="muted">Current monthly fee</div><div class="statv">${U.money(f.current_monthly_fee)}</div></div><div><div class="muted">Current status</div><div class="statv">${U.esc(d.current_fee.status)}</div></div></div><div class="table" style="margin-top:18px"><table><tr><th>Month</th><th>Amount</th><th>Status</th><th>Payment Date</th><th>Receipt</th></tr>${(f.history || []).map((h) => `<tr><td>${U.esc(h.month_label)}</td><td>${U.money(h.amount)}</td><td><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></td><td>${h.payment_date ? U.date(h.payment_date) : '—'}</td><td>${U.esc(h.receipt_number || '—')}</td></tr>`).join('')}</table></div>`);
   }
 
-  return { auth, dashboard, teachersPage, studentsPage, allClasses, registerPage, feeStructure, allocationPage, feePayment, receipts, receiptPrint, attachmentsPage, workPage, studentList, studentFees, teacherStudents, teacherClasses, auditLogs, studentDetails, adminComplaints, enquiries, studentComplaints };
+  return { auth, dashboard, teachersPage, studentsPage, allClasses, registerPage, feeStructure, allocationPage, feePayment, receipts, receiptPrint, attachmentsPage, workPage, studentList, studentFees, teacherStudents, teacherClasses, auditLogs, studentDetails, adminComplaints, enquiries, studentComplaints, reportsPage, analyticsPage };
 })();

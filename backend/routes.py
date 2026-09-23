@@ -666,49 +666,376 @@ def public_stats():
 @api.get("/admin/dashboard")
 @roles("admin")
 def admin_dashboard():
-    m=today_ist().replace(day=1)
-    active_students=Student.query.filter_by(status="active").all()
-    ids=[s.id for s in active_students]
-    fee_rows=(FeeStructure.query.join(StudentClass,StudentClass.class_id==FeeStructure.class_id)
-        .filter(StudentClass.student_id.in_(ids or [-1]),StudentClass.status=="active",FeeStructure.status=="active",FeeStructure.effective_from<=m)
-        .filter((FeeStructure.effective_to.is_(None))|(FeeStructure.effective_to>=m))
-        .order_by(FeeStructure.class_id.asc(),FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all())
-    latest_by_class={}
-    for row in fee_rows: latest_by_class.setdefault(row.class_id,row)
-    assigned={sid:set() for sid in ids}
-    for sc in StudentClass.query.filter(StudentClass.student_id.in_(ids or [-1]),StudentClass.status=="active").all(): assigned[sc.student_id].add(sc.class_id)
-    due=0
-    for sid in ids:
-        if not any(cid in latest_by_class for cid in assigned[sid]):
+    """Admin dashboard summary. Keeps the existing core counters and adds UI-ready
+    operational metrics so the frontend does not need to reproduce business logic."""
+    today = today_ist()
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    month = today.replace(day=1)
+
+    total_students = Student.query.filter_by(status="active").count()
+    total_teachers = Teacher.query.filter_by(status="active").count()
+    total_classes = (db.session.query(Class.id)
+        .join(TeacherClass, TeacherClass.class_id == Class.id)
+        .join(Teacher, Teacher.id == TeacherClass.teacher_id)
+        .filter(Class.status == "active", TeacherClass.status == "active", Teacher.status == "active")
+        .distinct().count())
+
+    # Fee totals are based on the same balance engine used by the fee collection
+    # screens, so partial payments and the 15th-of-month fine stay consistent.
+    active_students = Student.query.filter_by(status="active").order_by(Student.name.asc()).all()
+    due_count = 0
+    pending_amount = Decimal("0.00")
+    partial_amount = Decimal("0.00")
+    fine_amount = Decimal("0.00")
+    pending_students = []
+    for student in active_students:
+        balances = _fee_month_balances(student.id)
+        current = next((x for x in balances if x["month"] == month), None)
+        if not current or current["due"] <= Decimal("0.00"):
             continue
-        rows=_fee_month_balances(sid)
-        current=next((x for x in rows if x["month"]==m),None)
-        if current and current["balance"]>Decimal("0.00"):
-            due+=1
-    unresolved_complaints=Complaint.query.filter(Complaint.status!="resolved").count()
-    new_enquiries=Enquiry.query.filter_by(status="new").count()
-    today=today_ist()
-    assigned_classes=(Class.query.join(TeacherClass,TeacherClass.class_id==Class.id).join(Teacher,Teacher.id==TeacherClass.teacher_id).filter(Class.status=="active",TeacherClass.status=="active",Teacher.status=="active").distinct().all())
-    subject_ids={c.subject_id for c in assigned_classes}
-    subjects={x.id:x.name for x in Subject.query.filter(Subject.id.in_(subject_ids or [-1])).all()}
-    teacher_ids={tc.teacher_id for tc in TeacherClass.query.filter(TeacherClass.class_id.in_([c.id for c in assigned_classes] or [-1]),TeacherClass.status=="active").all()}
-    teachers={t.id:t for t in Teacher.query.filter(Teacher.id.in_(teacher_ids or [-1]),Teacher.status=="active").all()}
-    todays_classes=[]
-    for c in assigned_classes:
-        for row in _effective_class_schedule(c,today,1):
-            teacher=teachers.get(row.get("teacher_id"))
-            if teacher:
-                todays_classes.append({"class_id":c.id,"class_name":c.class_name,"batch":c.batch,"subject":subjects.get(c.subject_id,""),"teacher_name":teacher.name,"start_time":row.get("start_time"),"end_time":row.get("end_time"),"room":row.get("room") or c.room,"kind":row.get("kind","regular")})
-    todays_classes.sort(key=lambda x:(x.get("start_time") or "",x.get("class_name") or ""))
+        if current["balance"] > Decimal("0.00"):
+            due_count += 1
+            pending_amount += current["balance"]
+            fine_amount += max(Decimal("0.00"), current["due"] - current["base"])
+            if current["status"] == "PARTIAL":
+                partial_amount += current["balance"]
+                pending_students.append({
+                    "student_id": student.student_id,
+                    "name": student.name,
+                    "amount": float(current["balance"]),
+                    "status": current["status"],
+                })
+            else:
+                pending_students.append({
+                    "student_id": student.student_id,
+                    "name": student.name,
+                    "amount": float(current["balance"]),
+                    "status": current["status"],
+                })
+
+    collection = (db.session.query(func.coalesce(func.sum(FeePayment.amount), 0))
+        .filter(FeePayment.fee_month == month).scalar()) or Decimal("0.00")
+
+    # Build the actual schedule for today from the existing effective-schedule
+    # engine, preserving reschedules/extras/weekly-only changes.
+    active_classes = Class.query.filter_by(status="active").order_by(Class.class_name.asc()).all()
+    class_by_id = {c.id: c for c in active_classes}
+    subject_by_id = {s.id: s for s in Subject.query.filter(Subject.id.in_([c.subject_id for c in active_classes] or [-1])).all()}
+    today_rows = []
+    seen_today = set()
+    for c in active_classes:
+        for row in _effective_class_schedule(c, today, 1):
+            start = row.get("start_time") or ""
+            end = row.get("end_time") or ""
+            status = "UPCOMING"
+            if start and end:
+                try:
+                    st = datetime.strptime(start, "%H:%M").time()
+                    et = datetime.strptime(end, "%H:%M").time()
+                    if now.time() > et:
+                        status = "COMPLETED"
+                    elif st <= now.time() <= et:
+                        status = "ONGOING"
+                except ValueError:
+                    pass
+            key = (c.id, row.get("allocation_id"), start, end, row.get("kind"))
+            if key in seen_today:
+                continue
+            seen_today.add(key)
+            sub = subject_by_id.get(c.subject_id)
+            today_rows.append({
+                "class_id": c.id,
+                "class_name": c.class_name,
+                "batch": c.batch,
+                "subject": sub.name if sub else "",
+                "room": c.room,
+                "teacher_id": row.get("teacher_id"),
+                "teacher_name": row.get("teacher_name") or "Unassigned",
+                "start_time": start,
+                "end_time": end,
+                "kind": row.get("kind"),
+                "status": status,
+            })
+
+    # Deleted occurrences are intentionally added back as CANCELLED cards so the
+    # dashboard can explain what changed today instead of simply hiding it.
+    deleted_today = (ScheduleException.query
+        .filter_by(kind="delete", schedule_date=today)
+        .order_by(ScheduleException.id.asc()).all())
+    deleted_teacher_ids = {x.teacher_id for x in deleted_today if x.teacher_id}
+    deleted_allocation_ids = {x.allocation_id for x in deleted_today if x.allocation_id}
+    allocation_lookup = {tc.id: tc for tc in TeacherClass.query.filter(
+        TeacherClass.id.in_(deleted_allocation_ids or {-1})
+    ).all()}
+    deleted_teacher_ids.update(tc.teacher_id for tc in allocation_lookup.values() if tc.teacher_id)
+    teacher_lookup = {t.id: t for t in Teacher.query.filter(
+        Teacher.id.in_(deleted_teacher_ids or {-1})
+    ).all()}
+    for ex in deleted_today:
+        c = class_by_id.get(ex.class_id)
+        if not c:
+            continue
+        tc = allocation_lookup.get(ex.allocation_id) if ex.allocation_id else None
+        teacher = teacher_lookup.get(ex.teacher_id) if ex.teacher_id else (teacher_lookup.get(tc.teacher_id) if tc else None)
+        sub = subject_by_id.get(c.subject_id)
+        today_rows.append({
+            "class_id": c.id,
+            "class_name": c.class_name,
+            "batch": c.batch,
+            "subject": sub.name if sub else "",
+            "room": c.room,
+            "teacher_id": teacher.id if teacher else (tc.teacher_id if tc else None),
+            "teacher_name": teacher.name if teacher else "Unassigned",
+            "start_time": tc.start_time.strftime("%H:%M") if tc else "",
+            "end_time": tc.end_time.strftime("%H:%M") if tc else "",
+            "kind": "cancelled",
+            "status": "CANCELLED",
+        })
+
+    status_order = {"ONGOING": 0, "UPCOMING": 1, "COMPLETED": 2, "CANCELLED": 3}
+    today_rows.sort(key=lambda x: (x.get("start_time") or "99:99", status_order.get(x.get("status"), 9), x.get("subject") or ""))
+
+    recent_payment_rows = (FeePayment.query
+        .join(Student, Student.id == FeePayment.student_id)
+        .order_by(FeePayment.payment_date.desc(), FeePayment.id.desc()).limit(6).all())
+    recent_student_ids = {p.student_id for p in recent_payment_rows}
+    recent_students = {s.id: s for s in Student.query.filter(Student.id.in_(recent_student_ids or [-1])).all()}
+    recent_payments = [{
+        "receipt_number": p.receipt_number,
+        "student_name": recent_students.get(p.student_id).name if recent_students.get(p.student_id) else "",
+        "student_id": recent_students.get(p.student_id).student_id if recent_students.get(p.student_id) else "",
+        "month": p.fee_month.strftime("%B %Y"),
+        "amount": float(p.amount),
+        "method": p.payment_method,
+        "payment_date": iso_ist(p.payment_date),
+    } for p in recent_payment_rows]
+
+    unresolved_complaints = Complaint.query.filter(Complaint.status != "resolved").count()
+    new_enquiries = Enquiry.query.filter_by(status="new").count()
+
     return ok({
-        "total_students":Student.query.filter_by(status="active").count(),
-        "total_teachers":Teacher.query.filter_by(status="active").count(),
-        "total_classes":db.session.query(Class.id).join(TeacherClass,TeacherClass.class_id==Class.id).join(Teacher,Teacher.id==TeacherClass.teacher_id).filter(Class.status=="active",TeacherClass.status=="active",Teacher.status=="active").distinct().count(),
-        "fees_due":due,
-        "complaints":unresolved_complaints,
-        "enquiries":new_enquiries,
-        "todays_classes":todays_classes
+        "total_students": total_students,
+        "total_teachers": total_teachers,
+        "total_classes": total_classes,
+        # Legacy field retained for existing pages.
+        "fees_due": due_count,
+        "complaints": unresolved_complaints,
+        "enquiries": new_enquiries,
+        "active_teachers": total_teachers,
+        "active_classes": total_classes,
+        "this_month_collection": float(collection),
+        "pending_fees": float(pending_amount),
+        "partial_fees": float(partial_amount),
+        "fine": float(fine_amount),
+        "today_classes_count": len(today_rows),
+        "cancelled_classes": sum(1 for x in today_rows if x["status"] == "CANCELLED"),
+        "running_classes": sum(1 for x in today_rows if x["status"] == "ONGOING"),
+        "todays_classes": today_rows,
+        "recent_payments": recent_payments,
+        "pending_students": pending_students[:8],
     })
+
+
+@api.get("/admin/search")
+@roles("admin")
+def admin_global_search():
+    """Fast, bounded global search for the admin header."""
+    q = str(request.args.get("q") or "").strip()
+    if not q:
+        return ok([])
+    q = q[:100]
+    term = f"%{q}%"
+    results = []
+
+    students = (Student.query.filter(
+        Student.student_id.ilike(term) | Student.name.ilike(term) | Student.phone.ilike(term)
+    ).order_by(Student.name.asc()).limit(8).all())
+    for s in students:
+        results.append({
+            "type": "student", "id": s.id, "title": s.name,
+            "subtitle": f"{s.student_id} · {s.phone or 'No phone'}", "meta": "Student"
+        })
+
+    teachers = (Teacher.query.filter(
+        Teacher.teacher_id.ilike(term) | Teacher.name.ilike(term)
+    ).order_by(Teacher.name.asc()).limit(8).all())
+    for t in teachers:
+        results.append({
+            "type": "teacher", "id": t.id, "title": t.name,
+            "subtitle": t.teacher_id, "meta": "Teacher"
+        })
+
+    course_query = (db.session.query(Class, Subject)
+        .join(Subject, Subject.id == Class.subject_id)
+        .filter(
+            Class.class_name.ilike(term) |
+            Class.batch.ilike(term) |
+            Subject.name.ilike(term)
+        )
+        .filter(Class.status == "active")
+        .order_by(Class.class_name.asc()).limit(8).all())
+    for c, s in course_query:
+        results.append({
+            "type": "class", "id": c.id, "title": c.class_name,
+            "subtitle": f"{s.name if s else 'Course'} · {c.batch}", "meta": "Course"
+        })
+
+    receipt_query = (db.session.query(Receipt, FeePayment, Student)
+        .join(FeePayment, FeePayment.id == Receipt.fee_payment_id)
+        .join(Student, Student.id == FeePayment.student_id)
+        .filter(
+            Receipt.receipt_number.ilike(term) |
+            Student.student_id.ilike(term) |
+            Student.name.ilike(term)
+        )
+        .order_by(Receipt.generated_at.desc()).limit(8).all())
+    for r, p, s in receipt_query:
+        results.append({
+            "type": "receipt", "id": r.id, "title": r.receipt_number,
+            "subtitle": f"{s.name} · ₹{float(p.amount):.0f}", "meta": "Receipt"
+        })
+
+    return ok(results[:24])
+
+
+@api.get("/admin/reports/summary")
+@roles("admin")
+def admin_report_summary():
+    raw_month = str(request.args.get("month") or today_ist().strftime("%Y-%m"))
+    try:
+        month = date.fromisoformat(raw_month + "-01")
+    except ValueError:
+        return err("Invalid month. Use YYYY-MM")
+    next_month = (month + timedelta(days=32)).replace(day=1)
+
+    collection = (db.session.query(func.coalesce(func.sum(FeePayment.amount), 0))
+        .filter(FeePayment.fee_month == month).scalar()) or Decimal("0.00")
+
+    active_students = Student.query.filter_by(status="active").all()
+    pending_amount = Decimal("0.00")
+    pending_count = 0
+    fine_amount = Decimal("0.00")
+    paid_count = 0
+    partial_count = 0
+    for student in active_students:
+        current = next((x for x in _fee_month_balances(student.id) if x["month"] == month), None)
+        if not current or current["due"] <= Decimal("0.00"):
+            continue
+        if current["status"] == "PAID":
+            paid_count += 1
+            continue
+        if current["balance"] > Decimal("0.00"):
+            pending_count += 1
+            pending_amount += current["balance"]
+            fine_amount += max(Decimal("0.00"), current["due"] - current["base"])
+            if current["status"] == "PARTIAL":
+                partial_count += 1
+
+    attendance_rows = (Attendance.query
+        .filter(Attendance.attendance_date >= month, Attendance.attendance_date < next_month)
+        .all())
+    class_ids = {x.class_id for x in attendance_rows}
+    class_rows = {c.id: c for c in Class.query.filter(Class.id.in_(class_ids or [-1])).all()}
+    subject_ids = {c.subject_id for c in class_rows.values()}
+    subject_rows = {s.id: s for s in Subject.query.filter(Subject.id.in_(subject_ids or [-1])).all()}
+    attendance_by_class = {}
+    for row in attendance_rows:
+        bucket = attendance_by_class.setdefault(row.class_id, {"present": 0, "absent": 0})
+        bucket[row.status] = bucket.get(row.status, 0) + 1
+    attendance = []
+    for cid, bucket in attendance_by_class.items():
+        c = class_rows.get(cid)
+        sub = subject_rows.get(c.subject_id) if c else None
+        total = bucket["present"] + bucket["absent"]
+        attendance.append({
+            "class_id": cid,
+            "class_name": c.class_name if c else "",
+            "batch": c.batch if c else "",
+            "subject": sub.name if sub else "",
+            "present": bucket["present"],
+            "absent": bucket["absent"],
+            "attendance_percent": round((bucket["present"] / total) * 100) if total else 0,
+        })
+    attendance.sort(key=lambda x: (-x["attendance_percent"], x["class_name"].lower()))
+
+    teacher_rows = Teacher.query.filter_by(status="active").all()
+    teacher_class_counts = {}
+    for tc in TeacherClass.query.filter_by(status="active").all():
+        teacher_class_counts[tc.teacher_id] = teacher_class_counts.get(tc.teacher_id, 0) + 1
+    teacher_workload = [{
+        "teacher_id": t.teacher_id,
+        "name": t.name,
+        "classes": teacher_class_counts.get(t.id, 0),
+    } for t in teacher_rows]
+    teacher_workload.sort(key=lambda x: (-x["classes"], x["name"].lower()))
+
+    return ok({
+        "month": month.strftime("%Y-%m"),
+        "fees": {
+            "collected": float(collection),
+            "pending": float(pending_amount),
+            "partial_balance": float(sum(
+                [x["balance"] for s in active_students for x in _fee_month_balances(s.id)
+                 if x["month"] == month and x["status"] == "PARTIAL"],
+                Decimal("0.00")
+            )),
+            "fine": float(fine_amount),
+            "paid_students": paid_count,
+            "pending_students": pending_count,
+            "partial_students": partial_count,
+        },
+        "attendance": attendance,
+        "teacher_workload": teacher_workload,
+        "students": Student.query.filter_by(status="active").count(),
+        "teachers": Teacher.query.filter_by(status="active").count(),
+        "classes": Class.query.filter_by(status="active").count(),
+    })
+
+
+@api.get("/admin/analytics")
+@roles("admin")
+def admin_analytics():
+    today = today_ist().replace(day=1)
+    months = []
+    cursor = today
+    for _ in range(6):
+        months.append(cursor)
+        cursor = (cursor - timedelta(days=1)).replace(day=1)
+    months = sorted(months)
+
+    month_labels = [m.strftime("%b") for m in months]
+    collection_rows = (db.session.query(FeePayment.fee_month, func.coalesce(func.sum(FeePayment.amount), 0))
+        .filter(FeePayment.fee_month.in_(months)).group_by(FeePayment.fee_month).all())
+    collection_map = {m: Decimal(str(v or 0)) for m, v in collection_rows}
+    collections = [float(collection_map.get(m, Decimal("0.00"))) for m in months]
+
+    student_growth = [Student.query.filter(Student.status == "active", Student.admission_date <= (m + timedelta(days=32)).replace(day=1) - timedelta(days=1)).count() for m in months]
+
+    month_start = months[0]
+    attendance_rows = Attendance.query.filter(Attendance.attendance_date >= month_start).all()
+    class_ids = {x.class_id for x in attendance_rows}
+    classes = {c.id: c for c in Class.query.filter(Class.id.in_(class_ids or [-1])).all()}
+    subjects = {s.id: s for s in Subject.query.filter(Subject.id.in_({c.subject_id for c in classes.values()} or {-1})).all()}
+    buckets = {}
+    for row in attendance_rows:
+        b = buckets.setdefault(row.class_id, [0, 0])
+        if row.status == "present": b[0] += 1
+        elif row.status == "absent": b[1] += 1
+    attendance = []
+    for cid, (present, absent) in buckets.items():
+        total = present + absent
+        c = classes.get(cid)
+        s = subjects.get(c.subject_id) if c else None
+        attendance.append({"name": (s.name if s else (c.class_name if c else "Course")), "attendance_percent": round(present / total * 100) if total else 0})
+    attendance.sort(key=lambda x: (-x["attendance_percent"], x["name"].lower()))
+
+    return ok({
+        "months": month_labels,
+        "collection": collections,
+        "student_growth": student_growth,
+        "attendance": attendance,
+    })
+
 
 @api.get("/teachers")
 @roles("admin")
@@ -1735,7 +2062,10 @@ def receipt(id):
     if not p:return err("Payment not found",404)
     s=Student.query.get(p.student_id);a=Admin.query.filter_by(user_id=p.collected_by).first();classes=student_obj(s)["classes"] if s else []
     first=classes[0] if classes else {}
-    return ok({"receipt_number":r.receipt_number,"student":s.name if s else "","student_id":s.student_id if s else "","class":first.get("class_name", ""),"teacher":first.get("teacher_name", ""),"fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),oldest_balance-amount))})
+    balances=_fee_month_balances(p.student_id)
+    month_balance=next((x for x in balances if x["month"]==p.fee_month.replace(day=1)), None)
+    remaining=month_balance["balance"] if month_balance else Decimal("0.00")
+    return ok({"receipt_number":r.receipt_number,"student":s.name if s else "","student_id":s.student_id if s else "","class":first.get("class_name", ""),"teacher":first.get("teacher_name", ""),"fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),remaining))})
 
 def teacher_for_user():
     return Teacher.query.filter_by(user_id=current_user().id).first()

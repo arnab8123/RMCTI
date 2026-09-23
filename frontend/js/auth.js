@@ -26,19 +26,7 @@ const Auth = {
         }, { once: true });
       }
 
-      const menu = document.querySelector('[data-menu]');
-      const side = document.querySelector('.side');
-      if (menu && side && !menu.dataset.menuBound) {
-        menu.type = 'button'; menu.dataset.menuBound='1';
-        const closeMenu=()=>side.classList.remove('open');
-        menu.addEventListener('click',(event)=>{event.preventDefault();event.stopPropagation();side.classList.toggle('open');});
-        document.addEventListener('click',(event)=>{if(!side.classList.contains('open'))return;if(!side.contains(event.target)&&!menu.contains(event.target))closeMenu();});
-        document.addEventListener('touchstart',(event)=>{if(!side.classList.contains('open'))return;if(!side.contains(event.target)&&!menu.contains(event.target))closeMenu();},{passive:true});
-        document.addEventListener('keydown',(event)=>{if(event.key==='Escape')closeMenu();});
-        window.addEventListener('resize',()=>{if(window.innerWidth>800)closeMenu();});
-        side.querySelectorAll('a, button').forEach((item)=>item.addEventListener('click',closeMenu));
-      }
-
+      // Shared sidebar behavior is initialized by app.js after page authentication.
       return user;
     } catch (error) { console.error(error); return null; }
   }

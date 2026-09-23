@@ -1020,9 +1020,11 @@ document.querySelectorAll('[data-certificate]').forEach(btn => {
   overlay.style.cssText='position:fixed;inset:0;background:rgba(3,10,20,.88);z-index:10050;display:none;align-items:center;justify-content:center;padding:18px';
   overlay.innerHTML=`<div style="position:relative;width:min(1100px,100%);max-height:95vh;background:#fff;border-radius:20px;padding:18px;overflow:auto">
     <button type="button" data-gallery-close aria-label="Close" style="position:absolute;right:12px;top:12px;width:42px;height:42px;border:0;border-radius:50%;background:#082b52;color:#fff;font-size:25px;cursor:pointer;z-index:2">&times;</button>
-    <h3 id="galleryTitle" style="margin:0 55px 14px 0;color:#082b52;font-size:22px">Institute Gallery</h3>
-    <div style="background:#eef2f7;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:320px">
-      <img id="galleryMainImage" style="display:block;width:100%;max-height:62vh;object-fit:contain" alt="Gallery preview">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 55px 14px 0"><h3 id="galleryTitle" style="margin:0;color:#082b52;font-size:22px">Institute Gallery</h3><span id="galleryCounter" style="font-weight:800;color:#64748b;font-size:12px">1 / 6</span></div>
+    <div id="galleryStage" style="position:relative;background:#eef2f7;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:320px">
+      <button type="button" id="galleryPrev" aria-label="Previous image" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);width:42px;height:42px;border:0;border-radius:50%;background:rgba(8,43,82,.92);color:#fff;font-size:23px;cursor:pointer;z-index:1">‹</button>
+      <img id="galleryMainImage" style="display:block;width:100%;max-height:62vh;object-fit:contain;touch-action:pan-y" alt="Gallery preview">
+      <button type="button" id="galleryNext" aria-label="Next image" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);width:42px;height:42px;border:0;border-radius:50%;background:rgba(8,43,82,.92);color:#fff;font-size:23px;cursor:pointer;z-index:1">›</button>
     </div>
     <div id="galleryThumbs" style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-top:12px"></div>
   </div>`;
@@ -1030,24 +1032,42 @@ document.querySelectorAll('[data-certificate]').forEach(btn => {
 
   const main=overlay.querySelector('#galleryMainImage');
   const title=overlay.querySelector('#galleryTitle');
+  const counter=overlay.querySelector('#galleryCounter');
   const thumbs=overlay.querySelector('#galleryThumbs');
+  const prev=overlay.querySelector('#galleryPrev');
+  const next=overlay.querySelector('#galleryNext');
+  let activeGallery=0, activeImage=0;
 
   function showGallery(galleryIndex,imageIndex=0){
     const gallery=gallerySets[galleryIndex];
     if(!gallery) return;
-    const item=gallery.images[imageIndex] || gallery.images[0];
+    activeGallery=galleryIndex;
+    activeImage=(imageIndex+gallery.images.length)%gallery.images.length;
+    const item=gallery.images[activeImage] || gallery.images[0];
     main.src=item.src;
     main.alt=item.title;
     title.textContent=gallery.title;
+    if(counter) counter.textContent=`${activeImage+1} / ${gallery.images.length}`;
     thumbs.innerHTML=gallery.images.map((x,n)=>`
       <button type="button" data-thumb="${n}" aria-label="${x.title}"
-        style="border:2px solid ${n===imageIndex?'#c9972e':'transparent'};border-radius:10px;overflow:hidden;padding:0;background:#eef2f7;cursor:pointer">
-        <img src="${x.src}" alt="${x.title}" style="display:block;width:100%;height:76px;object-fit:cover">
+        style="border:2px solid ${n===activeImage?'#c9972e':'transparent'};border-radius:10px;overflow:hidden;padding:0;background:#eef2f7;cursor:pointer">
+        <img loading="lazy" src="${x.src}" alt="${x.title}" style="display:block;width:100%;height:76px;object-fit:cover">
       </button>`).join('');
     thumbs.querySelectorAll('[data-thumb]').forEach(b=>{
       b.onclick=()=>showGallery(galleryIndex,Number(b.dataset.thumb));
     });
   }
+  const moveGallery=(delta)=>showGallery(activeGallery,activeImage+delta);
+  prev.onclick=()=>moveGallery(-1);
+  next.onclick=()=>moveGallery(1);
+  let touchStartX=null;
+  main.addEventListener('touchstart',e=>{touchStartX=e.changedTouches[0]?.clientX ?? null;},{passive:true});
+  main.addEventListener('touchend',e=>{
+    if(touchStartX==null)return;
+    const dx=(e.changedTouches[0]?.clientX ?? touchStartX)-touchStartX;
+    touchStartX=null;
+    if(Math.abs(dx)>45)moveGallery(dx<0?1:-1);
+  },{passive:true});
 
   document.querySelectorAll('[data-gallery-index]').forEach(card=>{
     card.addEventListener('click',()=>{
@@ -1067,6 +1087,8 @@ document.querySelectorAll('[data-certificate]').forEach(btn => {
     }
   });
   document.addEventListener('keydown',e=>{
+    if(overlay.style.display==='flex' && e.key==='ArrowLeft'){moveGallery(-1);}
+    if(overlay.style.display==='flex' && e.key==='ArrowRight'){moveGallery(1);}
     if(e.key==='Escape'&&overlay.style.display==='flex'){
       overlay.style.display='none';
       document.body.style.overflow='';
