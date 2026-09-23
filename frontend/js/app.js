@@ -74,6 +74,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const fn = dispatch[`${role}:${page}`];
     if (typeof fn === 'function') await fn();
     else console.warn(`No frontend handler for ${role}:${page}`);
+    if (role === 'admin' && !document.querySelector('.mobile-bottom-nav')) {
+      const path=location.pathname.split('/').pop();
+      const nav=document.createElement('nav');
+      nav.className='mobile-bottom-nav';
+      nav.innerHTML=`<a href="dashboard.html" class="${path==='dashboard.html'?'active':''}"><span>⌂</span>Home</a><a href="students.html" class="${path==='students.html'?'active':''}"><span>♧</span>Students</a><a href="teachers.html" class="${path==='teachers.html'?'active':''}"><span>♙</span>Teachers</a><a href="teacher-classes.html" class="${path==='teacher-classes.html'?'active':''}"><span>▦</span>Classes</a><a href="fee-payment.html" class="${path==='fee-payment.html'?'active':''}"><span>₹</span>Fees</a>`;
+      document.body.appendChild(nav);
+    }
     prepareMobileTables();
     if (!window.__rmctiMobileTableObserver) {
       window.__rmctiMobileTableObserver = new MutationObserver(() => prepareMobileTables());

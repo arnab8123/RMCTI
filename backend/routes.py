@@ -687,13 +687,27 @@ def admin_dashboard():
             due+=1
     unresolved_complaints=Complaint.query.filter(Complaint.status!="resolved").count()
     new_enquiries=Enquiry.query.filter_by(status="new").count()
+    today=today_ist()
+    assigned_classes=(Class.query.join(TeacherClass,TeacherClass.class_id==Class.id).join(Teacher,Teacher.id==TeacherClass.teacher_id).filter(Class.status=="active",TeacherClass.status=="active",Teacher.status=="active").distinct().all())
+    subject_ids={c.subject_id for c in assigned_classes}
+    subjects={x.id:x.name for x in Subject.query.filter(Subject.id.in_(subject_ids or [-1])).all()}
+    teacher_ids={tc.teacher_id for tc in TeacherClass.query.filter(TeacherClass.class_id.in_([c.id for c in assigned_classes] or [-1]),TeacherClass.status=="active").all()}
+    teachers={t.id:t for t in Teacher.query.filter(Teacher.id.in_(teacher_ids or [-1]),Teacher.status=="active").all()}
+    todays_classes=[]
+    for c in assigned_classes:
+        for row in _effective_class_schedule(c,today,1):
+            teacher=teachers.get(row.get("teacher_id"))
+            if teacher:
+                todays_classes.append({"class_id":c.id,"class_name":c.class_name,"batch":c.batch,"subject":subjects.get(c.subject_id,""),"teacher_name":teacher.name,"start_time":row.get("start_time"),"end_time":row.get("end_time"),"room":row.get("room") or c.room,"kind":row.get("kind","regular")})
+    todays_classes.sort(key=lambda x:(x.get("start_time") or "",x.get("class_name") or ""))
     return ok({
         "total_students":Student.query.filter_by(status="active").count(),
         "total_teachers":Teacher.query.filter_by(status="active").count(),
         "total_classes":db.session.query(Class.id).join(TeacherClass,TeacherClass.class_id==Class.id).join(Teacher,Teacher.id==TeacherClass.teacher_id).filter(Class.status=="active",TeacherClass.status=="active",Teacher.status=="active").distinct().count(),
         "fees_due":due,
         "complaints":unresolved_complaints,
-        "enquiries":new_enquiries
+        "enquiries":new_enquiries,
+        "todays_classes":todays_classes
     })
 
 @api.get("/teachers")

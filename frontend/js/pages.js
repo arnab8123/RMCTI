@@ -85,6 +85,26 @@ const Page = (() => {
     document.querySelectorAll('[data-stat]').forEach((el) => { el.textContent = d[el.dataset.stat] ?? 0; });
     if (role === 'admin') {
       await refreshAdminDashboardNotifications();
+      const todayTarget=q('[data-today-classes]');
+      const todayCount=q('[data-today-count]');
+      if(todayTarget){
+        const rows=d.todays_classes||[];
+        if(todayCount) todayCount.textContent=`${rows.length} ${rows.length===1?'class':'classes'}`;
+        fill(todayTarget, rows.map((c)=>`<div class="dashboard-class-item"><div class="dashboard-class-time"><b>${U.esc(c.start_time||'')}</b><span>${U.esc(c.end_time||'')}</span></div><div class="dashboard-class-info"><b>${U.esc(c.subject||c.class_name||'Class')}</b><div>${U.esc(c.class_name||'')} · ${U.esc(c.batch||'')}</div><span>${U.esc(c.teacher_name||'')} ${c.room?`· ${U.esc(c.room)}`:''}</span></div><span class="badge ${c.kind==='extra'?'active':'scheduled'}">${U.esc(c.kind==='extra'?'Extra':'Scheduled')}</span></div>`).join('')||'<div class="dashboard-empty"><div>📅</div><b>No classes scheduled today</b><span>Classes with an assigned teacher will appear here.</span></div>');
+      }
+      const search=q('[data-global-search]'), searchButton=q('[data-global-search-button]');
+      const runSearch=async()=>{
+        const term=(search?.value||'').trim();
+        if(term.length<2)return U.toast('Type at least 2 characters to search','error');
+        try{
+          const [students,teachers,classes]=await Promise.all([Api.get('/students',{q:term,status:'active'}),Api.get('/teachers',{q:term,status:'active'}),Api.get('/classes',{q:term})]);
+          const results=[...(students||[]).slice(0,8).map(x=>({type:'Student',name:x.name,id:x.student_id,href:`students.html#${x.id}`})),...(teachers||[]).slice(0,8).map(x=>({type:'Teacher',name:x.name,id:x.teacher_id,href:`teachers.html#${x.id}`})),...(classes||[]).slice(0,8).map(x=>({type:'Class',name:x.class_name,id:`${x.batch||''} · ${x.subject||''}`,href:`all-classes.html#${x.id}`}))];
+          const m=U.modal(`Search results · ${term}`,`<div class="global-search-results">${results.map(r=>`<a class="global-search-result" href="${r.href}"><span class="badge active">${U.esc(r.type)}</span><div><b>${U.esc(r.name)}</b><span>${U.esc(r.id||'')}</span></div><span>›</span></a>`).join('')||'<div class="dashboard-empty"><div>⌕</div><b>No matching records</b><span>Try a name, ID, phone, course or batch.</span></div>'}</div>`);
+          m.querySelectorAll('a.global-search-result').forEach(a=>a.addEventListener('click',()=>m.remove()));
+        }catch(e){U.toast(e.message||'Search failed','error')}
+      };
+      searchButton?.addEventListener('click',runSearch);
+      search?.addEventListener('keydown',e=>{if(e.key==='Enter')runSearch();});
       clearInterval(window.__rmctiAdminDashboardTimer);
       window.__rmctiAdminDashboardTimer=setInterval(()=>refreshAdminDashboardNotifications().catch(()=>{}),60000);
     }
