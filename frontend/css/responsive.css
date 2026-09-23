@@ -1,1 +1,30 @@
 /* Responsive rules are centralized in global.css. */
+
+/* Full Details profile photos: fit cleanly on desktop and smaller screens. */
+@media (max-width: 900px) {
+  .person-detail-head .passport-photo {
+    width: 82px;
+    height: 106px;
+    max-width: 82px;
+    min-width: 82px;
+    flex-basis: 82px;
+  }
+}
+@media (max-width: 600px) {
+  .person-detail-head .passport-photo {
+    width: 70px;
+    height: 90px;
+    max-width: 70px;
+    min-width: 70px;
+    flex-basis: 70px;
+  }
+}
+
+@media (max-width: 600px) {
+  .allocation-day-time-row {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .allocation-day-time-row > div:first-child {
+    grid-column: 1 / -1;
+  }
+}

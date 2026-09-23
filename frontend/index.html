@@ -394,7 +394,13 @@
   .mx-12, .mx-10, .mx-8 { margin-left:0 !important; margin-right:0 !important; }
 }
 </style>
-<style>#galleryLightbox button[data-thumb]:hover{border-color:#c9972e!important} @media(max-width:640px){#galleryThumbs{grid-template-columns:repeat(3,minmax(0,1fr))!important}#galleryThumbs img{height:62px!important}}</style></head>
+<style>#galleryLightbox button[data-thumb]:hover{border-color:#c9972e!important} @media(max-width:640px){#galleryThumbs{grid-template-columns:repeat(3,minmax(0,1fr))!important}#galleryThumbs img{height:62px!important}}</style><style>
+@media (max-width:640px){
+  header.fixed{padding-left:12px!important;padding-right:12px!important;height:62px!important;}
+  .landing-brand-copy{display:block!important;line-height:1.05;}
+  .landing-brand-copy p{margin-top:2px;}
+}
+</style></head>
 <body class="antialiased">
 
     <div id="loader-wrapper">
@@ -413,9 +419,9 @@
         <header class="fixed top-4 left-1/2 w-11/12 max-w-7xl h-20 rounded-full flex justify-between items-center px-6 md:px-10 z-50">
             <div class="flex items-center gap-3">
                 <img src="asset/image.jpeg" alt="Logo" class="w-12 h-12 rounded-full bg-white p-1">
-                <div class="hidden md:block">
-                    <h1 class="text-white font-bold text-lg leading-tight tracking-wider">RMCTI</h1>
-                    <p class="text-xs text-gray-300">Digital Education</p>
+                <div class="landing-brand-copy min-w-0">
+                    <h1 class="text-white font-bold text-sm md:text-lg leading-tight tracking-wider whitespace-nowrap">RMCTI</h1>
+                    <p class="text-[9px] md:text-xs text-gray-300 whitespace-nowrap">Digital Education</p>
                 </div>
             </div>
 

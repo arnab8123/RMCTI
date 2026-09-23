@@ -300,7 +300,7 @@ const Page = (() => {
         <div class="class-admin-head"><div><h3>${U.esc(c.class_name)}</h3><div class="muted">${U.esc(c.batch)} · ${U.esc(c.subject)}</div></div><span class="badge active">Active</span></div>
         <div class="class-admin-meta"><span><b>${U.esc(c.student_count)}</b> / ${U.esc(c.max_students)} Students</span><span>${U.esc(c.room||'Room not set')}</span></div>
         <div class="class-admin-schedule">${(c.allocations||[]).map(a=>`<div><b>${U.esc(a.teacher_name||'Unassigned')}</b><span>${U.esc(a.day)} · ${U.esc(a.start_time)}–${U.esc(a.end_time)}${a.room?` · ${U.esc(a.room)}`:''}</span></div>`).join('')||'<span class="muted">No teacher allocation yet.</span>'}</div>
-        <div class="right" style="justify-content:flex-end;margin-top:14px"><button class="btn secondary small" data-class-attendance="${c.id}">See Attendance</button><button class="btn secondary small" data-class-students="${c.id}">View Students</button><button class="btn warning small" data-reschedule-class="${c.id}">Reschedule</button><button class="btn danger small" data-class-deactivate="${c.id}">Delete Class</button></div>
+        <div class="right" style="justify-content:flex-end;margin-top:14px"><button class="btn secondary small" data-class-attendance="${c.id}">See Attendance</button><button class="btn secondary small" data-class-students="${c.id}">View Students</button><button class="btn warning small" data-reschedule-class="${c.id}">Manage Schedule</button><button class="btn danger small" data-class-deactivate="${c.id}">Delete Class</button></div>
       </article>`).join('')||'<div class="empty">No active courses found.</div>');
     };
 
@@ -321,160 +321,200 @@ const Page = (() => {
       try{
         const c=await Api.get(`/classes/${classId}`);
         const teachers=await Api.get('/teachers',{status:'active'});
-        let currentWeekStart=U.today();
+        const today=U.today();
         const getMonday=iso=>{const d=new Date(`${iso}T00:00:00`);d.setDate(d.getDate()-((d.getDay()+6)%7));return d.toISOString().slice(0,10);};
-        currentWeekStart=getMonday(currentWeekStart);
         const dateAdd=(iso,n)=>{const d=new Date(`${iso}T00:00:00`);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);};
         const dayName=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
         const dateLabel=iso=>new Intl.DateTimeFormat('en-IN',{day:'2-digit',month:'short',year:'numeric'}).format(new Date(`${iso}T00:00:00`));
-        const dates=[...Array(7)].map((_,i)=>dateAdd(currentWeekStart,i));
-        const allocs=c.allocations||[];
-        const allocOptions=allocs.map(a=>`<option value="${a.allocation_id}" data-day="${a.day_of_week}" data-start="${a.start_time}" data-end="${a.end_time}">${U.esc(a.teacher_name||'Teacher')} · ${U.esc(a.day)} · ${U.esc(a.start_time)}–${U.esc(a.end_time)}</option>`).join('');
-        const firstDateForAllocation=a=>dates[a?.day_of_week ?? 0]||dates[0];
 
-        const m=U.modal(`Manage Schedule · ${c.class_name}`,`
+        let weekStart=getMonday(today);
+        const m=U.modal(`Schedule Class · ${c.class_name}`,`
           <div class="card pad" style="margin-bottom:14px">
-            <b>Make a schedule change</b>
-            <p class="muted" style="margin:6px 0 0">Choose what should happen to one class. Students, teachers and attendance all use the same schedule, so the change is applied consistently across the website.</p>
+            <b>Manage this week's schedule</b>
+            <p class="muted" style="margin:6px 0 0">Choose a real scheduled date first. You can cancel that occurrence, change it for this week, or add a one-time extra class.</p>
           </div>
           <form class="form" data-reschedule-form>
-            <div class="full"><label class="label">What do you want to do?</label>
+            <div class="full"><label class="label">Action</label>
               <select class="select" name="kind" data-res-action>
-                <option value="reschedule">Reschedule one class → make the new schedule permanent</option>
-                <option value="delete">Cancel one class for this week</option>
-                <option value="weekly_time">Change one class for this week only</option>
-                <option value="extra">Add an extra class once</option>
+                <option value="delete">Cancel a scheduled class</option>
+                <option value="weekly_time">Change a scheduled class for this week</option>
+                <option value="extra">Add an extra class</option>
               </select>
             </div>
             <div class="full" data-res-help></div>
-            <div><label class="label">Week</label><input class="input" type="date" name="week_start" value="${currentWeekStart}" required><small class="muted">Select any date from the week you are changing.</small></div>
-            <div class="full" data-allocation-wrap><label class="label">Which regular class?</label><select class="select" name="allocation_id" data-res-allocation required>${allocOptions||'<option value="">No regular class assigned</option>'}</select></div>
-            <div data-original-wrap><label class="label">Original class date</label><select class="select" name="schedule_date" data-original-date required>${dates.map((d,i)=>`<option value="${d}">${dayName[i]} · ${dateLabel(d)}</option>`).join('')}</select></div>
-            <div data-target-date-wrap><label class="label" data-target-label>New class date</label><select class="select" name="target_date" data-target-date required>${dates.map((d,i)=>`<option value="${d}">${dayName[i]} · ${dateLabel(d)}</option>`).join('')}</select></div>
-            <div data-extra-teacher style="display:none"><label class="label">Teacher for extra class</label><select class="select" name="teacher_id"><option value="">Select teacher</option>${teachers.map(t=>`<option value="${t.id}">${U.esc(t.name)} · ${U.esc(t.teacher_id)}</option>`).join('')}</select></div>
-            <div><label class="label">Start time</label><input class="input" type="time" name="start_time" required></div>
-            <div><label class="label">End time</label><input class="input" type="time" name="end_time" required></div>
-            <div class="full right" style="justify-content:flex-end"><button class="btn secondary" type="button" data-close>Cancel</button><button class="btn primary" type="submit">Apply Schedule Change</button></div>
+            <div>
+              <label class="label">Week</label>
+              <input class="input" type="date" name="week_start" value="${weekStart}" required>
+              <small class="muted">The week is Monday–Sunday.</small>
+            </div>
+            <div data-class-date-wrap>
+              <label class="label">Scheduled class</label>
+              <select class="select" name="schedule_date" data-existing-class required></select>
+              <small class="muted">Only classes actually scheduled on the selected week are shown.</small>
+            </div>
+            <div data-target-date-wrap style="display:none">
+              <label class="label">New date for this week</label>
+              <select class="select" name="target_date" data-target-date required></select>
+            </div>
+            <div data-extra-date-wrap style="display:none">
+              <label class="label">Extra class date</label>
+              <input class="input" type="date" name="extra_date" data-extra-date>
+            </div>
+            <div data-extra-teacher style="display:none">
+              <label class="label">Teacher</label>
+              <select class="select" name="teacher_id" data-extra-teacher-select><option value="">Select teacher</option>${teachers.map(x=>`<option value="${x.id}">${U.esc(x.name)} · ${U.esc(x.teacher_id)}</option>`).join('')}</select>
+            </div>
+            <div data-time-fields class="full g2">
+              <div><label class="label">Start time</label><input class="input" type="time" name="start_time"></div>
+              <div><label class="label">End time</label><input class="input" type="time" name="end_time"></div>
+            </div>
+            <div class="full right" style="justify-content:flex-end">
+              <button class="btn secondary" type="button" data-close>Close</button>
+              <button class="btn primary" type="submit">Save Change</button>
+            </div>
           </form>
           <hr style="border:0;border-top:1px solid var(--border);margin:18px 0">
-          <div><h3 style="margin:0 0 8px">This week's changes</h3><div data-res-list class="grid"></div></div>
+          <div><h3 style="margin:0 0 8px">Changes for this week</h3><div data-res-list class="grid"></div></div>
         `);
 
         const form=m.querySelector('[data-reschedule-form]');
         const action=m.querySelector('[data-res-action]');
-        const allocation=m.querySelector('[data-res-allocation]');
-        const original=m.querySelector('[data-original-date]');
-        const target=m.querySelector('[data-target-date]');
         const weekInput=m.querySelector('[name="week_start"]');
-        const help=m.querySelector('[data-res-help]');
-        const originalWrap=m.querySelector('[data-original-wrap]');
+        const existing=m.querySelector('[data-existing-class]');
+        const target=m.querySelector('[data-target-date]');
+        const extraDate=m.querySelector('[data-extra-date]');
+        const extraDateWrap=m.querySelector('[data-extra-date-wrap]');
+        const classDateWrap=m.querySelector('[data-class-date-wrap]');
         const targetWrap=m.querySelector('[data-target-date-wrap]');
-        const allocationWrap=m.querySelector('[data-allocation-wrap]');
         const extraTeacher=m.querySelector('[data-extra-teacher]');
+        const timeFields=m.querySelector('[data-time-fields]');
         const startInput=m.querySelector('[name="start_time"]');
         const endInput=m.querySelector('[name="end_time"]');
+        const help=m.querySelector('[data-res-help]');
 
-        const resetDates=()=>{
-          const ws=getMonday(weekInput.value||U.today());
-          weekInput.value=ws;
-          fill(original,datesForWeek(ws));
-          fill(target,datesForWeek(ws));
-          syncAllocationDate();
+        let scheduleRows=[];
+
+        const datesForWeek=ws=>[...Array(7)].map((_,i)=>dateAdd(ws,i));
+        const renderTargetDates=()=>{
+          const dates=datesForWeek(weekStart);
+          target.innerHTML=dates.map(d=>`<option value="${d}">${dayName[new Date(`${d}T00:00:00`).getDay()===0?6:new Date(`${d}T00:00:00`).getDay()-1]} · ${dateLabel(d)}</option>`).join('');
         };
-        const datesForWeek=ws=>[...Array(7)].map((_,i)=>{const d=dateAdd(ws,i);return `<option value="${d}">${dayName[i]} · ${dateLabel(d)}</option>`}).join('');
-        const syncAllocationDate=()=>{
-          const a=allocation?.selectedOptions?.[0];
-          if(!a)return;
-          const day=Number(a.dataset.day||0);
-          const ws=getMonday(weekInput.value||U.today());
-          const d=dateAdd(ws,day);
-          original.value=d;
-          target.value=d;
-          startInput.value=a.dataset.start||'';
-          endInput.value=a.dataset.end||'';
-        };
-        const refreshFields=()=>{
-          const kind=action.value;
-          const permanent=kind==='reschedule';
-          const weekly=kind==='weekly_time';
-          const deleting=kind==='delete';
-          const extra=kind==='extra';
-          help.innerHTML=permanent
-            ? '<div class="badge active">Permanent: after this change, this class will use the new day/time in future weeks too.</div>'
-            : weekly
-              ? '<div class="badge active">This week only: next week automatically returns to the normal schedule.</div>'
-              : deleting
-                ? '<div class="badge due">Cancelled: students and teachers will not see this occurrence, and attendance will be disabled for it.</div>'
-                : '<div class="badge active">One-time: this extra class appears only once. The selected teacher can mark attendance during its time.</div>';
-          allocationWrap.style.display=extra?'none':'block';
-          allocation.required=!extra;
-          extraTeacher.style.display=extra?'block':'none';
-          originalWrap.style.display=extra?'none':'block';
-          original.required=!extra;
-          targetWrap.style.display=(permanent||weekly)?'block':'none';
-          target.required=permanent||weekly;
-          startInput.parentElement.style.display=deleting?'none':'block';
-          endInput.parentElement.style.display=deleting?'none':'block';
-          startInput.required=!deleting;
-          endInput.required=!deleting;
-          if(extra){
-            original.value='';
-            startInput.value='';
-            endInput.value='';
+        const renderExisting=()=>{
+          existing.innerHTML=scheduleRows.map((x,i)=>`<option value="${x.allocation_id || 'extra'}::${x.date}" data-row-index="${i}">${dateLabel(x.date)} · ${dayName[x.day_of_week]} · ${U.esc(x.start_time)}–${U.esc(x.end_time)} · ${U.esc(x.teacher_name||'No teacher')}</option>`).join('') || '<option value="">No scheduled class on this week</option>';
+          if(scheduleRows.length){
+            existing.value=`${scheduleRows[0].allocation_id || 'extra'}::${scheduleRows[0].date}`;
+            syncSelectedClass();
           }else{
-            syncAllocationDate();
-            if(deleting){target.value=original.value;}
+            startInput.value='';endInput.value='';
           }
         };
+        const syncSelectedClass=()=>{
+          const row=scheduleRows.find(x=>`${x.allocation_id || 'extra'}::${x.date}`===existing.value);
+          if(!row)return;
+          startInput.value=row.start_time||'';
+          endInput.value=row.end_time||'';
+          const d=new Date(`${row.date}T00:00:00`);
+          const next=dateAdd(row.date,1);
+          target.value=next>=weekStart && next<=dateAdd(weekStart,6) ? next : row.date;
+        };
+        const loadSchedule=async()=>{
+          weekStart=getMonday(weekInput.value||today);
+          weekInput.value=weekStart;
+          try{
+            scheduleRows=await Api.get(`/classes/${classId}/schedule-week`,{week_start:weekStart});
+            renderExisting();
+            renderTargetDates();
+            if(scheduleRows.length)syncSelectedClass();
+            await loadChanges();
+          }catch(e){
+            scheduleRows=[];
+            renderExisting();
+            U.toast(e.message||'Could not load weekly schedule','error');
+          }
+        };
+
+        const refreshFields=()=>{
+          const kind=action.value;
+          const deleting=kind==='delete';
+          const changing=kind==='weekly_time';
+          const extra=kind==='extra';
+          help.innerHTML=deleting
+            ? '<div class="badge due">The selected occurrence will be cancelled only on its actual date.</div>'
+            : changing
+              ? '<div class="badge active">Only the selected occurrence changes. The normal weekly schedule stays unchanged.</div>'
+              : '<div class="badge active">One-time class: choose the exact date and teacher. It will not change the recurring schedule.</div>';
+          classDateWrap.style.display=extra?'none':'block';
+          existing.required=!extra;
+          targetWrap.style.display=changing?'block':'none';
+          target.required=changing;
+          extraDateWrap.style.display=extra?'block':'none';
+          extraDate.required=extra;
+          extraTeacher.style.display=extra?'block':'none';
+          m.querySelector('[data-extra-teacher-select]').required=extra;
+          timeFields.style.display=deleting?'none':'grid';
+          startInput.required=!deleting;
+          endInput.required=!deleting;
+          if(!extra)syncSelectedClass();
+        };
+
         action.addEventListener('change',refreshFields);
-        allocation.addEventListener('change',syncAllocationDate);
-        weekInput.addEventListener('change',()=>{
-          weekInput.value=getMonday(weekInput.value||U.today());
-          fill(original,datesForWeek(weekInput.value));fill(target,datesForWeek(weekInput.value));syncAllocationDate();loadChanges();
+        existing.addEventListener('change',syncSelectedClass);
+        weekInput.addEventListener('change',loadSchedule);
+        extraDate.addEventListener('change',()=>{
+          if(extraDate.value) weekInput.value=getMonday(extraDate.value);
         });
 
         const loadChanges=async()=>{
           try{
-            const rows=await Api.get('/schedule-exceptions',{class_id:classId,week_start:weekInput.value});
+            const rows=await Api.get('/schedule-exceptions',{class_id:classId,week_start:weekStart});
             fill(m.querySelector('[data-res-list]'),rows.map(x=>{
               const name=x.kind==='delete'?'Cancelled':x.kind==='extra'?'Extra class':'Changed this week';
               const when=x.schedule_date?dateLabel(x.schedule_date):'';
               const move=x.target_date&&x.target_date!==x.schedule_date?` → ${dateLabel(x.target_date)}`:'';
               const time=x.start_time?` · ${x.start_time}–${x.end_time}`:'';
-              return `<div class="card pad"><div><b>${name}</b> <span class="muted">${when}${move}${time}</span></div><button class="btn danger small" data-res-delete="${x.id}" style="margin-top:8px">Undo this change</button></div>`;
-            }).join('')||'<div class="empty">No temporary changes for this week.</div>');
-          }catch(e){fill(m.querySelector('[data-res-list]'),`<div class="empty">${U.esc(e.message||'Could not load changes')}</div>`);}
+              return `<div class="card pad"><div><b>${name}</b><div class="muted">${when}${move}${time}</div></div><button class="btn danger small" data-res-delete="${x.id}" style="margin-top:8px">Undo</button></div>`;
+            }).join('')||'<div class="empty">No changes for this week.</div>');
+          }catch(e){fill(m.querySelector('[data-res-list]'),'<div class="empty">Could not load changes.</div>');}
         };
 
         form.addEventListener('submit',async ev=>{
           ev.preventDefault();
           const kind=action.value;
-          const p=formObj(form);p.class_id=classId;
-          p.week_start=getMonday(p.week_start);
-          if(kind!=='extra'&&!p.allocation_id)return U.toast('Select the regular class','error');
-          if(kind!=='extra'&&!p.schedule_date)return U.toast('Select the original class date','error');
-          if(kind!=='delete'&&(!p.start_time||!p.end_time))return U.toast('Select a start and end time','error');
-          if((kind==='reschedule'||kind==='weekly_time')&&!p.target_date)return U.toast('Select the new class date','error');
-          if(kind==='extra'&&!p.teacher_id)return U.toast('Select a teacher for the extra class','error');
-          if(kind==='reschedule'&&p.target_date===p.schedule_date&&p.start_time===allocation.selectedOptions[0].dataset.start&&p.end_time===allocation.selectedOptions[0].dataset.end)
-            return U.toast('Choose a different day or time','error');
+          const selected=scheduleRows.find(x=>`${x.allocation_id || 'extra'}::${x.date}`===existing.value);
+          if(kind!=='extra'&&!selected)return U.toast('No scheduled class selected','error');
+          if(kind==='extra'&&!extraDate.value)return U.toast('Choose the extra class date','error');
+          if(kind!=='delete'&&(!startInput.value||!endInput.value||startInput.value>=endInput.value))return U.toast('Choose a valid start and end time','error');
+          if(kind==='weekly_time'&&target.value===selected.date&&startInput.value===selected.start_time&&endInput.value===selected.end_time)
+            return U.toast('Choose a different date or time','error');
+
+          const payload={
+            class_id:classId,
+            kind,
+            week_start:weekStart,
+            allocation_id: selected?.allocation_id || null,
+            schedule_date: kind==='extra' ? extraDate.value : selected.date,
+            target_date: kind==='weekly_time' ? target.value : null,
+            start_time: kind==='delete' ? null : startInput.value,
+            end_time: kind==='delete' ? null : endInput.value,
+            teacher_id: kind==='extra' ? Number(m.querySelector('[data-extra-teacher-select]').value) : (selected?.teacher_id || null)
+          };
           const btn=form.querySelector('button[type="submit"]');btn.disabled=true;
           try{
-            const result=await Api.post('/schedule-exceptions',p);
+            const result=await Api.post('/schedule-exceptions',payload);
             U.toast(result.message||'Schedule updated');
-            if(kind==='reschedule'){m.remove();await load();}
-            else{await loadChanges();await load();}
+            await loadSchedule();
           }catch(x){U.toast(x.message||'Could not update schedule','error')}
           finally{btn.disabled=false;}
         });
+
         m.querySelector('[data-res-list]')?.addEventListener('click',async ev=>{
-          const id=ev.target.closest('[data-res-delete]')?.dataset.resDelete;if(!id)return;
-          try{await Api.del(`/schedule-exceptions/${id}`);U.toast('Schedule change undone');await loadChanges();await load();}catch(x){U.toast(x.message||'Could not undo change','error')}
+          const id=ev.target.closest('[data-res-delete]')?.dataset.resDelete;
+          if(!id)return;
+          try{await Api.del(`/schedule-exceptions/${id}`);U.toast('Schedule change undone');await loadSchedule();}catch(x){U.toast(x.message||'Could not undo change','error')}
         });
 
-        // Start on the allocation's current weekly date/time.
-        if(allocation.options.length){allocation.selectedIndex=0;syncAllocationDate();}
-        refreshFields();await loadChanges();
+        refreshFields();
+        await loadSchedule();
       }catch(e){U.toast(e.message||'Could not open schedule manager','error')}
     };
 
@@ -670,6 +710,35 @@ const Page = (() => {
     teacherPicker?.addEventListener('click', openTeacherPicker);
     renderTeacherSummary();
 
+    const allocationForm = q('form[data-allocation-form]');
+    const dayTimeList = allocationForm?.querySelector('[data-day-time-list]');
+    const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+    const renderDayTimes = (preset = {}) => {
+      if (!dayTimeList) return;
+      const checked = [...allocationForm.querySelectorAll('[name="day_of_week_multi"]:checked')].map(x => Number(x.value));
+      if (!checked.length) {
+        dayTimeList.innerHTML = '<div class="empty" style="padding:10px">Select at least one day above.</div>';
+        return;
+      }
+      dayTimeList.innerHTML = checked.map(day => `
+        <div class="card pad allocation-day-time-row" style="display:grid;grid-template-columns:minmax(110px,1fr) minmax(120px,1fr) minmax(120px,1fr);gap:8px;align-items:end">
+          <div><b>${dayNames[day]}</b><div class="muted" style="font-size:11px">Weekly</div></div>
+          <div><label class="label">Start</label><input class="input" type="time" data-day-start="${day}" value="${U.esc(preset[day]?.start || '')}" required></div>
+          <div><label class="label">End</label><input class="input" type="time" data-day-end="${day}" value="${U.esc(preset[day]?.end || '')}" required></div>
+        </div>`).join('');
+    };
+
+    allocationForm?.querySelectorAll('[name="day_of_week_multi"]').forEach(cb => cb.addEventListener('change', () => {
+      const previous = {};
+      dayTimeList?.querySelectorAll('[data-day-start]').forEach(input => {
+        const day = Number(input.dataset.day);
+        previous[day] = {start: input.value, end: dayTimeList.querySelector(`[data-day-end="${day}"]`)?.value || ''};
+      });
+      renderDayTimes(previous);
+    }));
+    renderDayTimes();
+
     const courseManager = document.createElement('div');
     courseManager.className='card pad';
     courseManager.style.marginTop='16px';
@@ -740,20 +809,36 @@ const Page = (() => {
       e.preventDefault();
       try {
         const id = form.dataset.editId;
-        const payload = formObj(form);
         const days = [...form.querySelectorAll('[name="day_of_week_multi"]:checked')].map(x => Number(x.value));
+        if (!selectedTeacherIds.size) throw Error('Choose at least one teacher');
+        if (!days.length) throw Error('Select at least one day');
+
+        const daySchedules = days.map(day => ({
+          day,
+          start_time: form.querySelector(`[data-day-start="${day}"]`)?.value || '',
+          end_time: form.querySelector(`[data-day-end="${day}"]`)?.value || ''
+        }));
+        if (daySchedules.some(x => !x.start_time || !x.end_time || x.start_time >= x.end_time)) {
+          throw Error('Enter a valid start and end time for every selected day');
+        }
+
         if (!id) {
-          if (!selectedTeacherIds.size) throw Error('Choose at least one teacher');
-          if (!days.length) throw Error('Select at least one day');
+          const payload = formObj(form);
           payload.teacher_ids = [...selectedTeacherIds];
-          payload.day_of_week_multi = days;
-          payload.day_of_week = days[0];
-          delete payload.teacher_id;
+          payload.day_schedules = daySchedules;
+          delete payload.teacher_id; delete payload.start_time; delete payload.end_time;
+          delete payload.day_of_week_multi; delete payload.day_of_week;
           await Api.post('/teacher-classes', payload);
           U.toast(`${selectedTeacherIds.size} teacher${selectedTeacherIds.size===1?'':'s'} allocated`);
         } else {
-          payload.teacher_id = Number([...selectedTeacherIds][0]);
-          payload.day_of_week = days[0] ?? Number(payload.day_of_week ?? 0);
+          // Editing remains one recurring allocation at a time.
+          const payload = {
+            teacher_id: Number([...selectedTeacherIds][0]),
+            class_id: Number(form.querySelector('[name="class_id"]').value),
+            day_of_week: daySchedules[0].day,
+            start_time: daySchedules[0].start_time,
+            end_time: daySchedules[0].end_time
+          };
           await Api.put(`/teacher-classes/${id}`, payload);
           delete form.dataset.editId;
           form.querySelector('button[type="submit"]').textContent='Allocate class';
@@ -762,6 +847,7 @@ const Page = (() => {
         selectedTeacherIds = new Set();
         renderTeacherSummary();
         form.reset();
+        renderDayTimes();
         await load();
       } catch (x) { U.toast(x.message || 'Could not save allocation', 'error'); }
     });
@@ -776,8 +862,7 @@ const Page = (() => {
         q('[data-class]').value = e.target.dataset.classId;
         q('[name="day_of_week"]').value = e.target.dataset.day;
         form.querySelectorAll('[name="day_of_week_multi"]').forEach(cb=>cb.checked=Number(cb.value)===Number(e.target.dataset.day));
-        q('[name="start_time"]').value = e.target.dataset.start;
-        q('[name="end_time"]').value = e.target.dataset.end;
+        renderDayTimes({[Number(e.target.dataset.day)]: {start:e.target.dataset.start, end:e.target.dataset.end}});
         form.dataset.editId = edit;
         form.querySelector('button[type="submit"]').textContent = 'Update allocation';
         window.scrollTo({ top: 0, behavior: 'smooth' });

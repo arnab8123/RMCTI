@@ -434,7 +434,7 @@ def _effective_class_schedule(c, start_date, days=7):
             moved_weekly=next((e for e in overrides if e.allocation_id==tc.id and e.kind=="weekly_time" and e.target_date==d),None)
             delete=next((e for e in overrides if e.allocation_id==tc.id and e.kind=="delete" and e.schedule_date==d),None)
             # Normal occurrence.
-            if tc.day_of_week==d.weekday() and not delete and not moved_weekly and not (weekly and weekly.target_date and weekly.target_date!=d):
+            if tc.day_of_week==d.weekday() and not delete and not weekly and not moved_weekly:
                 start_time=weekly.start_time if weekly and weekly.start_time else tc.start_time
                 end_time=weekly.end_time if weekly and weekly.end_time else tc.end_time
                 tid=weekly.teacher_id if weekly and weekly.teacher_id else tc.teacher_id
@@ -690,7 +690,7 @@ def admin_dashboard():
     return ok({
         "total_students":Student.query.filter_by(status="active").count(),
         "total_teachers":Teacher.query.filter_by(status="active").count(),
-        "total_classes":Class.query.filter_by(status="active").count(),
+        "total_classes":db.session.query(Class.id).join(TeacherClass,TeacherClass.class_id==Class.id).join(Teacher,Teacher.id==TeacherClass.teacher_id).filter(Class.status=="active",TeacherClass.status=="active",Teacher.status=="active").distinct().count(),
         "fees_due":due,
         "complaints":unresolved_complaints,
         "enquiries":new_enquiries
@@ -785,7 +785,7 @@ def create_schedule_exception():
         cid=int(b["class_id"]); c=Class.query.get(cid)
         if not c or c.status!="active":return err("Course not found",404)
         kind=str(b.get("kind","")).strip().lower()
-        if kind not in ("delete","reschedule","extra","weekly_time"):return err("Invalid schedule action")
+        if kind not in ("delete","extra","weekly_time"):return err("Invalid schedule action")
         ws=date.fromisoformat(str(b["week_start"]))
         if ws < _week_start(today_ist()):
             return err("Schedule changes can only be made for the current or a future week")
@@ -808,10 +808,17 @@ def create_schedule_exception():
             return err("Choose a valid start and end time")
         if kind=="delete" and (not allocation_id or not schedule_date):
             return err("Select the class and the date to delete")
-        if kind in ("delete","reschedule","weekly_time") and schedule_date.weekday()!=tc.day_of_week:
-            return err("The original date must match the class's current weekly day")
-        if kind in ("reschedule","weekly_time") and _week_start(schedule_date)!=ws:
-            return err("Original date must belong to the selected week")
+        if kind in ("delete","weekly_time"):
+            if _week_start(schedule_date)!=ws:
+                return err("Selected class date must belong to the selected week")
+            # Validate against the actual effective schedule, not just the recurring
+            # weekday. This also works when an earlier one-week change moved the class.
+            actual=_effective_class_schedule(c,ws,7)
+            if not any(x.get("allocation_id")==tc.id and x.get("date")==schedule_date.isoformat() for x in actual):
+                return err("The selected date is not an active scheduled occurrence for this class")
+        if kind=="reschedule":
+            if _week_start(schedule_date)!=ws:
+                return err("Original date must belong to the selected week")
         if kind in ("reschedule","weekly_time") and _week_start(target_date)!=ws:
             return err("New date must belong to the selected week")
         if kind=="extra" and (not schedule_date or _week_start(schedule_date)!=ws):
@@ -1038,25 +1045,56 @@ def add_allocation():
             teacher_ids=list(dict.fromkeys(teacher_ids))
         else:
             teacher_ids=[int(b["teacher_id"])] if b.get("teacher_id") else []
-        cid=int(b["class_id"]);start=pt(b["start_time"],True);end=pt(b["end_time"],True)
-        days=b.get("day_of_week_multi") or b.get("day_of_week")
-        if not isinstance(days,list): days=[days]
-        days=[int(x) for x in days if str(x).strip()!=""]
+
+        cid=int(b["class_id"])
+        # New UI supports a different time for every selected day.
+        # Keep the old single-time payload as a backwards-compatible fallback.
+        raw_day_schedules=b.get("day_schedules")
+        day_schedules=[]
+        if isinstance(raw_day_schedules,list) and raw_day_schedules:
+            for row in raw_day_schedules:
+                try:
+                    day=int(row.get("day"))
+                    start=pt(row.get("start_time"),True)
+                    end=pt(row.get("end_time"),True)
+                except (TypeError,ValueError):
+                    return err("Every selected day needs a valid start and end time")
+                if day<0 or day>6 or start>=end:
+                    return err("Every selected day needs a valid start and end time")
+                day_schedules.append((day,start,end))
+        else:
+            start=pt(b["start_time"],True);end=pt(b["end_time"],True)
+            days=b.get("day_of_week_multi") or b.get("day_of_week")
+            if not isinstance(days,list): days=[days]
+            days=[int(x) for x in days if str(x).strip()!=""]
+            if start>=end:return err("End time must be after start time")
+            day_schedules=[(day,start,end) for day in days]
+
+        # De-duplicate days so one day cannot accidentally be allocated twice.
+        unique={}
+        for day,start,end in day_schedules: unique[day]=(start,end)
+        day_schedules=[(day,*unique[day]) for day in sorted(unique)]
         if not teacher_ids:return err("Select at least one teacher")
-        if not days:return err("Select at least one day")
-        if start>=end:return err("End time must be after start time")
+        if not day_schedules:return err("Select at least one day")
+
         selected=Teacher.query.filter(Teacher.id.in_(teacher_ids),Teacher.status=="active").all()
         if len(selected)!=len(teacher_ids):return err("One or more selected teachers are not active",409)
         course=Class.query.get(cid)
         if not course or course.status!="active":return err("Course is not active",409)
+
         for tid in teacher_ids:
-            for day in days:
+            for day,start,end in day_schedules:
                 conflict=_schedule_conflict(tid,cid,day,start,end)
                 if conflict:return err(conflict,409)
         for tid in teacher_ids:
-            for day in days: db.session.add(TeacherClass(teacher_id=tid,class_id=cid,day_of_week=day,start_time=start,end_time=end))
-        db.session.commit();return ok(class_obj(Class.query.get(cid)),"Class assigned",201)
-    except Exception:db.session.rollback();return err("Invalid class allocation")
+            for day,start,end in day_schedules:
+                db.session.add(TeacherClass(teacher_id=tid,class_id=cid,day_of_week=day,start_time=start,end_time=end))
+        db.session.commit()
+        return ok(class_obj(Class.query.get(cid)),"Class assigned",201)
+    except Exception:
+        db.session.rollback()
+        return err("Invalid class allocation")
+
 @api.put("/teacher-classes/<int:id>")
 @roles("admin")
 def edit_allocation(id):
@@ -1064,7 +1102,8 @@ def edit_allocation(id):
     if not x:return err("Allocation not found",404)
     b=request.get_json() or {}
     try:
-        tid=int(b.get("teacher_id",x.teacher_id));cid=int(b.get("class_id",x.class_id));day=int(b.get("day_of_week",x.day_of_week));start=pt(b.get("start_time",x.start_time),True);end=pt(b.get("end_time",x.end_time),True)
+        tid=int(b.get("teacher_id",x.teacher_id));cid=int(b.get("class_id",x.class_id));day=int(b.get("day_of_week",x.day_of_week))
+        start=pt(b.get("start_time",x.start_time),True);end=pt(b.get("end_time",x.end_time),True)
         if start>=end:return err("End time must be after start time")
         teacher=Teacher.query.get(tid); course=Class.query.get(cid)
         if not teacher or teacher.status!="active" or not course or course.status!="active":
@@ -1075,6 +1114,7 @@ def edit_allocation(id):
         db.session.commit();return ok(class_obj(Class.query.get(cid)),"Class allocation updated")
     except Exception:
         db.session.rollback();return err("Invalid class allocation")
+
 @api.delete("/teacher-classes/<int:id>")
 @roles("admin")
 def remove_allocation(id):
