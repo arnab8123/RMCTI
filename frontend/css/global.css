@@ -1131,3 +1131,55 @@ button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s 
   .id-field span{white-space:normal;word-break:break-word}
   .id-card-modal>.right{width:100%;flex-wrap:wrap}
 }
+
+/* Schedule manager polish */
+.schedule-manager-form { gap: 12px; }
+.schedule-manager-form > div { min-width: 0; }
+.schedule-manager-help { margin-top: -2px; }
+.schedule-manager-help .badge { width: 100%; box-sizing: border-box; padding: 9px 11px; font-size: 12px; }
+.schedule-manager-form .label { margin-bottom: 7px; }
+.schedule-manager-form .input,
+.schedule-manager-form .select { min-height: 42px; box-sizing: border-box; }
+.schedule-manager-form > .right { padding-top: 2px; }
+.schedule-manager-form > .right .btn { min-width: 104px; }
+.schedule-manager-history { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--border); }
+.schedule-manager-section-title { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
+.schedule-manager-section-title h3 { margin:0; font-size:16px; }
+.schedule-change-list { grid-template-columns: repeat(2,minmax(0,1fr)); gap:10px; }
+.schedule-change-list > .card { padding:13px 14px; border-radius:12px; }
+.schedule-change-list > .card > div { min-width:0; }
+
+/* Admin teacher/student full-details popup: compact photo on the right. */
+.person-detail-head {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:18px;
+  padding:4px 2px 14px;
+  border-bottom:1px solid var(--border);
+}
+.person-detail-identity { flex:1 1 auto; min-width:0; }
+.person-detail-identity h3 { margin:0; font-size:20px; line-height:1.2; }
+.person-detail-identity p { margin:5px 0 0; }
+.person-detail-photo {
+  width:68px;
+  height:86px;
+  min-width:68px;
+  max-width:68px;
+  flex:0 0 68px;
+  object-fit:cover;
+  object-position:center;
+  border-radius:8px;
+  border:1px solid var(--border);
+  background:var(--muted-surface);
+  display:block;
+}
+
+@media (min-width:901px) {
+  .modal:has(.schedule-manager-form) { width:min(920px, calc(100vw - 80px)); }
+  .modal:has(.schedule-manager-form) .modalbody { padding:22px; }
+  .modal:has(.schedule-manager-form) .form { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .modal:has(.schedule-manager-form) .schedule-manager-help,
+  .modal:has(.schedule-manager-form) .full { grid-column:1/-1; }
+  .modal:has(.schedule-manager-form) .schedule-manager-history { grid-column:1/-1; }
+}

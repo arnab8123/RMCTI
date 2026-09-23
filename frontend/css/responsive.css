@@ -28,3 +28,9 @@
     grid-column: 1 / -1;
   }
 }
+
+@media (max-width: 700px) {
+  .schedule-change-list { grid-template-columns: 1fr; }
+  .person-detail-head { gap:12px; }
+  .person-detail-photo { width:64px; height:82px; min-width:64px; max-width:64px; flex-basis:64px; }
+}

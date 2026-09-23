@@ -147,7 +147,7 @@ const Page = (() => {
       } else if (e.target.dataset.idcard) {
         const m=U.modal('Teacher ID Card', idCard(t,'teacher')); bindIdCardDownload(m,t,'teacher');
       } else {
-        U.modal('Teacher Full Details', `<div class="person-detail-head"><div><h3 style="margin:0">${U.esc(t.name)}</h3><p class="muted">${U.esc(t.teacher_id)} · ${U.esc(t.status)}</p></div><img src="${U.photoUrl(t.photo)}" alt="${U.esc(t.name)}" class="passport-photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="g2" style="margin-top:16px"><div><b>Gender</b><p>${U.esc(t.gender||'—')}</p></div><div><b>Date of Birth</b><p>${U.date(t.dob)}</p></div><div><b>Phone</b><p>${U.esc(t.phone||'—')}</p></div><div><b>Email</b><p>${U.esc(t.email||'—')}</p></div><div><b>Aadhaar Number</b><p><b>${U.esc(t.aadhaar_number||'—')}</b></p></div><div><b>Joining Date</b><p>${U.date(t.joining_date)}</p></div><div><b>Qualification</b><p>${U.esc(t.qualification||'—')}</p></div><div><b>Experience</b><p>${U.esc(t.experience||'—')}</p></div><div class="full"><b>Address</b><p>${U.esc(t.address||'—')}</p></div><div class="full"><b>Assigned Classes</b><p>${(t.classes||[]).map(c=>`${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)} · ${U.esc(c.day)} ${U.esc(c.start_time)}–${U.esc(c.end_time)}`).join('<br>')||'No active classes assigned.'}</p></div></div>`);
+        U.modal('Teacher Full Details', `<div class="person-detail-head"><div class="person-detail-identity"><h3>${U.esc(t.name)}</h3><p class="muted">${U.esc(t.teacher_id)} · ${U.esc(t.status)}</p></div><img src="${U.photoUrl(t.photo)}" alt="${U.esc(t.name)}" class="person-detail-photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="g2" style="margin-top:16px"><div><b>Gender</b><p>${U.esc(t.gender||'—')}</p></div><div><b>Date of Birth</b><p>${U.date(t.dob)}</p></div><div><b>Phone</b><p>${U.esc(t.phone||'—')}</p></div><div><b>Email</b><p>${U.esc(t.email||'—')}</p></div><div><b>Aadhaar Number</b><p><b>${U.esc(t.aadhaar_number||'—')}</b></p></div><div><b>Joining Date</b><p>${U.date(t.joining_date)}</p></div><div><b>Qualification</b><p>${U.esc(t.qualification||'—')}</p></div><div><b>Experience</b><p>${U.esc(t.experience||'—')}</p></div><div class="full"><b>Address</b><p>${U.esc(t.address||'—')}</p></div><div class="full"><b>Assigned Classes</b><p>${(t.classes||[]).map(c=>`${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)} · ${U.esc(c.day)} ${U.esc(c.start_time)}–${U.esc(c.end_time)}`).join('<br>')||'No active classes assigned.'}</p></div></div>`);
       }
     });
     await load();
@@ -286,7 +286,7 @@ const Page = (() => {
       } else if (e.target.dataset.idcard) {
         const m=U.modal('Student ID Card', idCard(st,'student')); bindIdCardDownload(m,st,'student');
       } else {
-        U.modal('Student Full Details', `<div class="person-detail-head"><div><h3 style="margin:0">${U.esc(st.name)}</h3><p class="muted">${U.esc(st.student_id)} · ${U.esc(st.status)}</p></div><img src="${U.photoUrl(st.photo)}" alt="${U.esc(st.name)}" class="passport-photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="g2" style="margin-top:16px"><div><b>Gender</b><p>${U.esc(st.gender||'—')}</p></div><div><b>Date of Birth</b><p>${U.date(st.dob)}</p></div><div><b>Phone</b><p>${U.esc(st.phone||'—')}</p></div><div><b>Aadhaar Number</b><p><b>${U.esc(st.aadhaar_number||'—')}</b></p></div><div><b>School / College</b><p>${U.esc(st.school_name||'—')}</p></div><div><b>Admission Date</b><p>${U.date(st.admission_date)}</p></div><div class="full"><b>Address</b><p>${U.esc(st.address||'—')}</p></div><div class="full"><b>Guardian</b><p>${U.esc(st.parent?.name||'—')} · ${U.esc(st.parent?.relationship||'')} · ${U.esc(st.parent?.phone||'')} · ${U.esc(st.parent?.email||'')}</p><p>${U.esc(st.parent?.address||'')}</p></div><div class="full"><b>Assigned Classes</b><p>${(st.classes||[]).map(c=>`${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)} · ${U.esc(c.teacher_name||'No teacher')}`).join('<br>')||'No active classes assigned.'}</p></div></div>`);
+        U.modal('Student Full Details', `<div class="person-detail-head"><div class="person-detail-identity"><h3>${U.esc(st.name)}</h3><p class="muted">${U.esc(st.student_id)} · ${U.esc(st.status)}</p></div><img src="${U.photoUrl(st.photo)}" alt="${U.esc(st.name)}" class="person-detail-photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="g2" style="margin-top:16px"><div><b>Gender</b><p>${U.esc(st.gender||'—')}</p></div><div><b>Date of Birth</b><p>${U.date(st.dob)}</p></div><div><b>Phone</b><p>${U.esc(st.phone||'—')}</p></div><div><b>Aadhaar Number</b><p><b>${U.esc(st.aadhaar_number||'—')}</b></p></div><div><b>School / College</b><p>${U.esc(st.school_name||'—')}</p></div><div><b>Admission Date</b><p>${U.date(st.admission_date)}</p></div><div class="full"><b>Address</b><p>${U.esc(st.address||'—')}</p></div><div class="full"><b>Guardian</b><p>${U.esc(st.parent?.name||'—')} · ${U.esc(st.parent?.relationship||'')} · ${U.esc(st.parent?.phone||'')} · ${U.esc(st.parent?.email||'')}</p><p>${U.esc(st.parent?.address||'')}</p></div><div class="full"><b>Assigned Classes</b><p>${(st.classes||[]).map(c=>`${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)} · ${U.esc(c.teacher_name||'No teacher')}`).join('<br>')||'No active classes assigned.'}</p></div></div>`);
       }
     });
     await load();
@@ -329,11 +329,7 @@ const Page = (() => {
 
         let weekStart=getMonday(today);
         const m=U.modal(`Schedule Class · ${c.class_name}`,`
-          <div class="card pad" style="margin-bottom:14px">
-            <b>Manage this week's schedule</b>
-            <p class="muted" style="margin:6px 0 0">Choose a real scheduled date first. You can cancel that occurrence, change it for this week, or add a one-time extra class.</p>
-          </div>
-          <form class="form" data-reschedule-form>
+          <form class="form schedule-manager-form" data-reschedule-form>
             <div class="full"><label class="label">Action</label>
               <select class="select" name="kind" data-res-action>
                 <option value="delete">Cancel a scheduled class</option>
@@ -341,7 +337,7 @@ const Page = (() => {
                 <option value="extra">Add an extra class</option>
               </select>
             </div>
-            <div class="full" data-res-help></div>
+            <div class="full schedule-manager-help" data-res-help></div>
             <div>
               <label class="label">Week</label>
               <input class="input" type="date" name="week_start" value="${weekStart}" required>
@@ -374,7 +370,7 @@ const Page = (() => {
             </div>
           </form>
           <hr style="border:0;border-top:1px solid var(--border);margin:18px 0">
-          <div><h3 style="margin:0 0 8px">Changes for this week</h3><div data-res-list class="grid"></div></div>
+          <div class="schedule-manager-history"><div class="schedule-manager-section-title"><div><h3>Changes this week</h3><span class="muted">Recent one-time schedule changes</span></div></div><div data-res-list class="grid schedule-change-list"></div></div>
         `);
 
         const form=m.querySelector('[data-reschedule-form]');
