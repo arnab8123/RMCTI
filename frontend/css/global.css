@@ -1455,3 +1455,27 @@ button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s 
 @media(max-width:1100px){.report-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.report-sections{grid-template-columns:1fr}.analytics-panels{grid-template-columns:1fr}}
 @media(max-width:700px){.page-heading{align-items:stretch}.report-actions{width:100%}.report-actions .btn,.report-month-input{flex:1}.report-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.report-kpi strong{font-size:20px}.report-period{align-items:flex-start;flex-direction:column;gap:4px}.analytics-bar-row{grid-template-columns:55px minmax(0,1fr) auto}.analytics-note{flex-direction:column}.teacher-hero h1{font-size:25px}.teacher-today-row{min-height:76px}}
 @media(max-width:420px){.report-grid{grid-template-columns:1fr}.report-actions .btn,.report-month-input{flex:1 0 100%;width:100%}}
+
+/* -------------------------------------------------------------------------
+   Sidebar: always hidden, hamburger-controlled
+   Keep the navigation completely off-canvas on desktop, tablet and mobile.
+   The main content always uses the full viewport; opening the menu overlays
+   the page rather than pushing/reflowing it.
+--------------------------------------------------------------------------- */
+.app{display:block;min-height:100vh}
+.side{position:fixed;left:0;top:0;bottom:0;width:min(320px,88vw);height:100vh;z-index:80;transform:translateX(-105%);transition:transform .22s ease;box-shadow:18px 0 44px rgba(15,23,42,.22);overflow-y:auto;overflow-x:hidden}
+.side.open{transform:translateX(0)}
+.main{width:100%;min-width:0}
+.menu{display:inline-flex !important;align-items:center;justify-content:center}
+.sidebar-backdrop{position:fixed;inset:0;background:rgba(2,6,23,.46);z-index:79;opacity:0;pointer-events:none;transition:opacity .2s ease}
+.sidebar-backdrop.open{opacity:1;pointer-events:auto}
+body.sidebar-open{overflow:hidden}
+/* Old desktop collapse styles are intentionally disabled: there is no
+   collapsed rail anymore, only fully hidden or fully open navigation. */
+body.sidebar-open .menu{position:relative;z-index:90}
+
+@media(max-width:900px){
+  .side{width:min(292px,88vw);}
+  .top{position:sticky;z-index:85}
+  .content{padding-bottom:94px}
+}

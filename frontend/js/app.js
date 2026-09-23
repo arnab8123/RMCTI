@@ -66,23 +66,30 @@ function rmctiBindSidebar() {
     backdrop.dataset.sidebarBackdrop = '1';
     document.body.appendChild(backdrop);
   }
-  const closeMobile = () => side.classList.remove('open');
-  backdrop.addEventListener('click', closeMobile);
-  side.querySelectorAll('a').forEach((a) => a.addEventListener('click', closeMobile));
+  // The sidebar is an off-canvas panel at every viewport size. It must stay
+  // hidden on first load and may only be opened/closed from the hamburger,
+  // backdrop, a navigation link, or Escape.
+  document.body.classList.remove('sidebar-collapsed');
+  side.classList.remove('open');
 
-  menu.addEventListener('click', () => {
-    if (window.innerWidth <= 900) {
-      side.classList.toggle('open');
-    } else {
-      document.body.classList.toggle('sidebar-collapsed');
-      side.classList.remove('open');
-    }
-  });
+  if (!side.id) side.id = 'rmcti-side-panel';
+  menu.setAttribute('aria-expanded', 'false');
+  menu.setAttribute('aria-controls', side.id);
+
+  const setOpen = (open) => {
+    side.classList.toggle('open', open);
+    backdrop.classList.toggle('open', open);
+    menu.setAttribute('aria-expanded', String(open));
+    document.body.classList.toggle('sidebar-open', open);
+  };
+  const closePanel = () => setOpen(false);
+
+  backdrop.addEventListener('click', closePanel);
+  side.querySelectorAll('a').forEach((a) => a.addEventListener('click', closePanel));
+
+  menu.addEventListener('click', () => setOpen(!side.classList.contains('open')));
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      closeMobile();
-      if (window.innerWidth > 900) document.body.classList.remove('sidebar-collapsed');
-    }
+    if (event.key === 'Escape') closePanel();
   });
 }
 
