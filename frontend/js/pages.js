@@ -122,6 +122,11 @@ const Page = (() => {
     }
   }
 
+  function bindProfileTabs(modal){
+    const tabs=[...modal.querySelectorAll('[data-profile-tab]')], panels=[...modal.querySelectorAll('[data-profile-panel]')];
+    tabs.forEach(tab=>tab.addEventListener('click',()=>{const key=tab.dataset.profileTab;tabs.forEach(x=>x.classList.toggle('active',x===tab));panels.forEach(x=>x.classList.toggle('active',x.dataset.profilePanel===key));}));
+  }
+
   async function teachersPage() {
     const search = q('[data-search]'); const status = q('[data-status]'); const body = q('[data-body]');
     const load = async () => {
@@ -167,7 +172,7 @@ const Page = (() => {
       } else if (e.target.dataset.idcard) {
         const m=U.modal('Teacher ID Card', idCard(t,'teacher')); bindIdCardDownload(m,t,'teacher');
       } else {
-        U.modal('Teacher Full Details', `<div class="person-detail-head"><div class="person-detail-identity"><h3>${U.esc(t.name)}</h3><p class="muted">${U.esc(t.teacher_id)} · ${U.esc(t.status)}</p></div><img src="${U.photoUrl(t.photo)}" alt="${U.esc(t.name)}" class="person-detail-photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="g2" style="margin-top:16px"><div><b>Gender</b><p>${U.esc(t.gender||'—')}</p></div><div><b>Date of Birth</b><p>${U.date(t.dob)}</p></div><div><b>Phone</b><p>${U.esc(t.phone||'—')}</p></div><div><b>Email</b><p>${U.esc(t.email||'—')}</p></div><div><b>Aadhaar Number</b><p><b>${U.esc(t.aadhaar_number||'—')}</b></p></div><div><b>Joining Date</b><p>${U.date(t.joining_date)}</p></div><div><b>Qualification</b><p>${U.esc(t.qualification||'—')}</p></div><div><b>Experience</b><p>${U.esc(t.experience||'—')}</p></div><div class="full"><b>Address</b><p>${U.esc(t.address||'—')}</p></div><div class="full"><b>Assigned Classes</b><p>${(t.classes||[]).map(c=>`${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)} · ${U.esc(c.day)} ${U.esc(c.start_time)}–${U.esc(c.end_time)}`).join('<br>')||'No active classes assigned.'}</p></div></div>`);
+        const m=U.modal('Teacher Full Details', `<div class="person-detail-head"><div class="person-detail-identity"><h3>${U.esc(t.name)}</h3><p class="muted">${U.esc(t.teacher_id)} · ${U.esc(t.status)}</p></div><img src="${U.photoUrl(t.photo)}" alt="${U.esc(t.name)}" class="person-detail-photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="profile-tabs"><button class="profile-tab active" data-profile-tab="overview">Overview</button><button class="profile-tab" data-profile-tab="classes">Classes</button></div><section class="profile-panel active" data-profile-panel="overview"><div class="g2"><div><b>Gender</b><p>${U.esc(t.gender||'—')}</p></div><div><b>Date of Birth</b><p>${U.date(t.dob)}</p></div><div><b>Phone</b><p>${U.esc(t.phone||'—')}</p></div><div><b>Email</b><p>${U.esc(t.email||'—')}</p></div><div><b>Aadhaar Number</b><p><b>${U.esc(t.aadhaar_number||'—')}</b></p></div><div><b>Joining Date</b><p>${U.date(t.joining_date)}</p></div><div><b>Qualification</b><p>${U.esc(t.qualification||'—')}</p></div><div><b>Experience</b><p>${U.esc(t.experience||'—')}</p></div><div class="full"><b>Address</b><p>${U.esc(t.address||'—')}</p></div></div></section><section class="profile-panel" data-profile-panel="classes"><div class="profile-mini-list">${(t.classes||[]).map(c=>`<div class="profile-mini-item"><b>${U.esc(c.class_name)} · ${U.esc(c.batch)}</b><div class="muted">${U.esc(c.subject)} · ${U.esc(c.day)} · ${U.esc(c.start_time)}–${U.esc(c.end_time)}</div></div>`).join('')||'<div class="empty">No active classes assigned.</div>'}</div></section>`); bindProfileTabs(m);
       }
     });
     await load();
@@ -306,7 +311,7 @@ const Page = (() => {
       } else if (e.target.dataset.idcard) {
         const m=U.modal('Student ID Card', idCard(st,'student')); bindIdCardDownload(m,st,'student');
       } else {
-        U.modal('Student Full Details', `<div class="person-detail-head"><div class="person-detail-identity"><h3>${U.esc(st.name)}</h3><p class="muted">${U.esc(st.student_id)} · ${U.esc(st.status)}</p></div><img src="${U.photoUrl(st.photo)}" alt="${U.esc(st.name)}" class="person-detail-photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="g2" style="margin-top:16px"><div><b>Gender</b><p>${U.esc(st.gender||'—')}</p></div><div><b>Date of Birth</b><p>${U.date(st.dob)}</p></div><div><b>Phone</b><p>${U.esc(st.phone||'—')}</p></div><div><b>Aadhaar Number</b><p><b>${U.esc(st.aadhaar_number||'—')}</b></p></div><div><b>School / College</b><p>${U.esc(st.school_name||'—')}</p></div><div><b>Admission Date</b><p>${U.date(st.admission_date)}</p></div><div class="full"><b>Address</b><p>${U.esc(st.address||'—')}</p></div><div class="full"><b>Guardian</b><p>${U.esc(st.parent?.name||'—')} · ${U.esc(st.parent?.relationship||'')} · ${U.esc(st.parent?.phone||'')} · ${U.esc(st.parent?.email||'')}</p><p>${U.esc(st.parent?.address||'')}</p></div><div class="full"><b>Assigned Classes</b><p>${(st.classes||[]).map(c=>`${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)} · ${U.esc(c.teacher_name||'No teacher')}`).join('<br>')||'No active classes assigned.'}</p></div></div>`);
+        const m=U.modal('Student Full Details', `<div class="person-detail-head"><div class="person-detail-identity"><h3>${U.esc(st.name)}</h3><p class="muted">${U.esc(st.student_id)} · ${U.esc(st.status)}</p></div><img src="${U.photoUrl(st.photo)}" alt="${U.esc(st.name)}" class="person-detail-photo" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="profile-tabs"><button class="profile-tab active" data-profile-tab="overview">Overview</button><button class="profile-tab" data-profile-tab="guardian">Guardian</button><button class="profile-tab" data-profile-tab="classes">Classes</button><button class="profile-tab" data-profile-tab="attendance">Attendance</button></div><section class="profile-panel active" data-profile-panel="overview"><div class="g2"><div><b>Gender</b><p>${U.esc(st.gender||'—')}</p></div><div><b>Date of Birth</b><p>${U.date(st.dob)}</p></div><div><b>Phone</b><p>${U.esc(st.phone||'—')}</p></div><div><b>Aadhaar Number</b><p><b>${U.esc(st.aadhaar_number||'—')}</b></p></div><div><b>School / College</b><p>${U.esc(st.school_name||'—')}</p></div><div><b>Admission Date</b><p>${U.date(st.admission_date)}</p></div><div class="full"><b>Address</b><p>${U.esc(st.address||'—')}</p></div></div></section><section class="profile-panel" data-profile-panel="guardian"><div class="card pad"><b>${U.esc(st.parent?.name||'—')}</b><p class="muted">${U.esc(st.parent?.relationship||'')} · ${U.esc(st.parent?.phone||'')} · ${U.esc(st.parent?.email||'')}</p><p>${U.esc(st.parent?.address||'—')}</p></div></section><section class="profile-panel" data-profile-panel="classes"><div class="profile-mini-list">${(st.classes||[]).map(c=>`<div class="profile-mini-item"><b>${U.esc(c.class_name)} · ${U.esc(c.batch)}</b><div class="muted">${U.esc(c.subject)} · ${U.esc(c.teacher_name||'No teacher')}</div></div>`).join('')||'<div class="empty">No active classes assigned.</div>'}</div></section><section class="profile-panel" data-profile-panel="attendance"><div class="empty"><button type="button" class="btn primary" data-open-profile-attendance>View Attendance</button></div></section>`); bindProfileTabs(m); m.querySelector('[data-open-profile-attendance]')?.addEventListener('click',()=>adminStudentAttendance(st));
       }
     });
     await load();
@@ -1366,6 +1371,22 @@ const Page = (() => {
     });
     syncTarget();await loadRecipients();await load();
   }
+  async function reportsPage() {
+    const stats=q('[data-report-stats]'), classesTarget=q('[data-report-classes]'), auditTarget=q('[data-report-audit]');
+    const load=async()=>{
+      try {
+        const [d,students,teachers,classes,audit]=await Promise.all([Api.get('/admin/dashboard'),Api.get('/students',{status:'active'}),Api.get('/teachers',{status:'active'}),Api.get('/classes',{status:'active'}),Api.get('/audit-logs')]);
+        const assigned=classes.filter(c=>(c.allocations||[]).some(a=>a.teacher_id||a.teacher_name));
+        const totalCapacity=assigned.reduce((n,c)=>n+Number(c.max_students||0),0), totalStudents=assigned.reduce((n,c)=>n+Number(c.student_count||0),0);
+        const utilization=totalCapacity?Math.round(totalStudents/totalCapacity*100):0;
+        fill(stats,[[students.length,'Active Students','students.html'],[teachers.length,'Active Teachers','teachers.html'],[assigned.length,'Assigned Classes','all-classes.html'],[`${utilization}%`,'Class Capacity Used','all-classes.html']].map(x=>`<a class="card report-stat" href="${x[2]}"><span class="muted">${U.esc(x[1])}</span><b>${U.esc(x[0])}</b><small>${x[1]==='Class Capacity Used'?`${totalStudents} / ${totalCapacity} seats`: 'Open management'}</small></a>`).join(''));
+        fill(classesTarget,assigned.map(c=>{const cap=Number(c.max_students||0),count=Number(c.student_count||0),pct=cap?Math.min(100,Math.round(count/cap*100)):0;return `<div class="report-class-row"><div class="report-class-head"><div><b>${U.esc(c.class_name)}</b><span>${U.esc(c.batch||'')} · ${U.esc(c.subject||'')}</span></div><strong>${count}/${cap||'—'}</strong></div><div class="report-progress"><i style="width:${pct}%"></i></div></div>`}).join('')||'<div class="empty">No assigned classes found.</div>');
+        fill(auditTarget,(audit||[]).slice(0,8).map(x=>`<div class="report-activity"><div><b>${U.esc(x.action||'Activity')}</b><span>${U.esc(x.description||'')}</span></div><time>${U.datetime(x.created_at)}</time></div>`).join('')||'<div class="empty">No recent activity.</div>');
+      } catch(e){ U.toast(e.message||'Could not load reports','error'); }
+    };
+    q('[data-refresh-report]')?.addEventListener('click',load); await load();
+  }
+
   async function auditLogs() {
     const rows = await Api.get('/audit-logs');
     fill(q('[data-body]'), rows.map((x) => `<tr><td>${U.datetime(x.created_at)}</td><td>${U.esc(x.action)}</td><td>${U.esc(x.entity_type)}</td><td>${U.esc(x.entity_id || '—')}</td><td>${U.esc(x.description || '')}</td></tr>`).join('') || tableEmpty(5, 'No audit history yet.'));

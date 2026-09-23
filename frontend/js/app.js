@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       'admin:receipts': () => Page.receipts(),
       'admin:attachments': () => Page.attachmentsPage(),
       'admin:receipt-print': () => Page.receiptPrint(),
+      'admin:reports': () => Page.reportsPage(),
       'admin:audit-logs': () => Page.auditLogs(),
       'admin:complaints': () => Page.adminComplaints(),
       'admin:enquiries': () => Page.enquiries(),
