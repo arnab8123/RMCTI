@@ -469,7 +469,7 @@ def class_obj(c):
     tids={x.teacher_id for x in alloc_rows}
     teachers={t.id:t for t in Teacher.query.filter(Teacher.id.in_(tids)).all()} if tids else {}
     s=subjects.get(c.subject_id)
-    return {"id":c.id,"class_name":c.class_name,"batch":c.batch,"subject_id":c.subject_id,"subject":s.name if s else "","room":c.room,"max_students":c.max_students,"status":c.status,"student_count":StudentClass.query.filter_by(class_id=c.id,status="active").count(),"allocations":[{"allocation_id":tc.id,"teacher_id":teachers.get(tc.teacher_id).teacher_id if teachers.get(tc.teacher_id) else None,"teacher_name":teachers.get(tc.teacher_id).name if teachers.get(tc.teacher_id) else None,"day":DAYS[tc.day_of_week],"day_of_week":tc.day_of_week,"start_time":tc.start_time.strftime("%H:%M"),"end_time":tc.end_time.strftime("%H:%M"),"room":c.room} for tc in alloc_rows]}
+    return {"id":c.id,"class_name":c.class_name,"batch":c.batch,"subject_id":c.subject_id,"subject":s.name if s else "","room":c.room,"max_students":c.max_students,"status":c.status,"student_count":StudentClass.query.filter_by(class_id=c.id,status="active").count(),"allocations":[{"allocation_id":tc.id,"teacher_pk":tc.teacher_id,"teacher_id":teachers.get(tc.teacher_id).teacher_id if teachers.get(tc.teacher_id) else None,"teacher_name":teachers.get(tc.teacher_id).name if teachers.get(tc.teacher_id) else None,"day":DAYS[tc.day_of_week],"day_of_week":tc.day_of_week,"start_time":tc.start_time.strftime("%H:%M"),"end_time":tc.end_time.strftime("%H:%M"),"room":c.room} for tc in alloc_rows]}
 
 
 def _class_objs_bulk(classes):
@@ -486,7 +486,7 @@ def _class_objs_bulk(classes):
     out=[]
     for c in classes:
         sub=subjects.get(c.subject_id)
-        out.append({"id":c.id,"class_name":c.class_name,"batch":c.batch,"subject_id":c.subject_id,"subject":sub.name if sub else "","room":c.room,"max_students":c.max_students,"status":c.status,"student_count":int(counts.get(c.id,0)),"allocations":[{"allocation_id":tc.id,"teacher_id":teachers.get(tc.teacher_id).teacher_id if teachers.get(tc.teacher_id) else None,"teacher_name":teachers.get(tc.teacher_id).name if teachers.get(tc.teacher_id) else None,"day":DAYS[tc.day_of_week],"day_of_week":tc.day_of_week,"start_time":tc.start_time.strftime("%H:%M"),"end_time":tc.end_time.strftime("%H:%M"),"room":c.room} for tc in alloc_by_class.get(c.id,[])]})
+        out.append({"id":c.id,"class_name":c.class_name,"batch":c.batch,"subject_id":c.subject_id,"subject":sub.name if sub else "","room":c.room,"max_students":c.max_students,"status":c.status,"student_count":int(counts.get(c.id,0)),"allocations":[{"allocation_id":tc.id,"teacher_pk":tc.teacher_id,"teacher_id":teachers.get(tc.teacher_id).teacher_id if teachers.get(tc.teacher_id) else None,"teacher_name":teachers.get(tc.teacher_id).name if teachers.get(tc.teacher_id) else None,"day":DAYS[tc.day_of_week],"day_of_week":tc.day_of_week,"start_time":tc.start_time.strftime("%H:%M"),"end_time":tc.end_time.strftime("%H:%M"),"room":c.room} for tc in alloc_by_class.get(c.id,[])]})
     return out
 
 

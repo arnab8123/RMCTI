@@ -953,7 +953,7 @@ const Page = (() => {
               const st=new Date(),et=new Date();st.setHours(sh,sm,0,0);et.setHours(eh,em,0,0);
               if(now>et)status='completed'; else if(now>=st&&now<=et)status='ongoing';
             }
-            return `<button type="button" class="calendar-class-item" data-calendar-class="${U.esc(r.class_id)}">
+            return `<button type="button" class="calendar-class-item" data-calendar-class="${U.esc(r.class_id)}" data-calendar-allocation="${U.esc(r.allocation_id ?? '')}" data-calendar-date="${U.esc(r.date)}">
               <span class="calendar-class-time">${U.esc(U.time(r.start_time))}<small>${U.esc(U.time(r.end_time))}</small></span>
               <span class="calendar-class-copy"><b>${U.esc(r.subject||'')}</b><small>${U.esc(r.class_name||'')} · ${U.esc(r.teacher_name||'Unassigned')}</small></span>
               <span class="badge ${status}">${status.toUpperCase()}</span>
@@ -1003,10 +1003,70 @@ const Page = (() => {
     calendarPanel?.querySelector('[data-calendar-course]')?.addEventListener('change',renderCalendar);
     calendarPanel?.querySelector('[data-calendar-teacher]')?.addEventListener('change',renderCalendar);
     calendarPanel?.querySelectorAll('[data-schedule-view]').forEach(btn=>btn.addEventListener('click',()=>setCalendarView(btn.dataset.scheduleView)));
+    const openAllocationDetails=async(row)=>{
+      if(!row || row.allocation_id==null) return;
+      const c=classMap.get(Number(row.class_id));
+      if(!c)return;
+      const allocation=(c.allocations||[]).find(a=>Number(a.allocation_id)===Number(row.allocation_id));
+      const dayNameFull=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+      const exactDate=row.date;
+      const exactDay=dayNameFull[Number(row.day_of_week)] || dayNameFull[(new Date(`${exactDate}T00:00:00`).getDay()+6)%7];
+      const dateText=U.date(exactDate);
+      const weekly=(c.allocations||[]).map(a=>`
+        <div class="profile-list-row">
+          <div><b>${U.esc(a.teacher_name||'Unassigned')}</b><small>${U.esc(a.day)}</small></div>
+          <span>${U.esc(U.time(a.start_time))}–${U.esc(U.time(a.end_time))}</span>
+        </div>`).join('') || '<div class="empty-card"><b>No allocation</b><span>No active weekly allocation exists for this course.</span></div>';
+
+      const m=U.modal(`${U.esc(c.class_name)} · Schedule`,`
+        <div class="profile-card">
+          <div class="profile-kicker">${U.esc(c.subject||'Course')}</div>
+          <h2 style="margin:4px 0">${U.esc(c.class_name)}</h2>
+          <p class="muted">${U.esc(c.batch||'')}${c.room?` · Room ${U.esc(c.room)}`:''}</p>
+          <div class="detail-grid">
+            <div><small>Course</small><b>${U.esc(c.class_name)}</b></div>
+            <div><small>Batch</small><b>${U.esc(c.batch||'—')}</b></div>
+            <div><small>Exact date</small><b>${U.esc(dateText)}</b></div>
+            <div><small>Day</small><b>${U.esc(exactDay)}</b></div>
+            <div><small>Start time</small><b>${U.esc(U.time(row.start_time))}</b></div>
+            <div><small>End time</small><b>${U.esc(U.time(row.end_time))}</b></div>
+            <div><small>Teacher</small><b>${U.esc(row.teacher_name||'Unassigned')}</b></div>
+            <div><small>Room</small><b>${U.esc(row.room||'Not set')}</b></div>
+          </div>
+        </div>
+        <div class="profile-card">
+          <h3>Existing weekly allocations</h3>
+          ${weekly}
+        </div>
+        <div class="right" style="justify-content:flex-end;gap:8px">
+          <button type="button" class="btn danger" data-calendar-delete-allocation="${U.esc(row.allocation_id)}">Delete allocation</button>
+          <button type="button" class="btn primary" data-calendar-edit-allocation="${U.esc(row.allocation_id)}">Edit Schedule</button>
+        </div>`);
+
+      m.querySelector('[data-calendar-delete-allocation]')?.addEventListener('click',()=>{
+        U.confirm('Delete allocation?',`Delete the recurring ${U.esc(c.class_name)} allocation for ${U.esc(row.teacher_name||'this teacher')} on ${U.esc(exactDay)} at ${U.esc(U.time(row.start_time))}–${U.esc(U.time(row.end_time))}? This does not delete the course or students.`,async()=>{
+          try{
+            await Api.del(`/teacher-classes/${row.allocation_id}`);
+            m.remove();
+            U.toast('Allocation deleted');
+            await loadCalendar();
+            await load();
+          }catch(x){U.toast(x.message||'Could not delete allocation','error')}
+        });
+      });
+      m.querySelector('[data-calendar-edit-allocation]')?.addEventListener('click',()=>{
+        m.remove();
+        location.href=`teacher-classes.html?edit_allocation=${encodeURIComponent(row.allocation_id)}`;
+      });
+    };
+
     calendarPanel?.querySelector('[data-schedule-calendar-body]')?.addEventListener('click',async e=>{
       const btn=e.target.closest('[data-calendar-class]'); if(!btn)return;
+      const allocationId=btn.dataset.calendarAllocation;
+      const row=calendarRows.find(x=>String(x.allocation_id)===String(allocationId) && x.date===btn.dataset.calendarDate);
+      if(row){await openAllocationDetails(row);return;}
       const c=classMap.get(Number(btn.dataset.calendarClass)); if(!c)return;
-      U.modal(`${U.esc(c.subject||'Course')} · ${U.esc(c.class_name)}`,`<div class="profile-card"><div class="profile-kicker">${U.esc(c.subject||'Course')}</div><h2 style="margin:4px 0">${U.esc(c.class_name)}</h2><p class="muted">${U.esc(c.batch)}${c.room?` · ${U.esc(c.room)}`:''}</p><div class="detail-grid"><div><small>Students</small><b>${U.esc(c.student_count||0)} / ${U.esc(c.max_students||'—')}</b></div><div><small>Teachers</small><b>${U.esc(new Set((c.allocations||[]).map(a=>a.teacher_id)).size)}</b></div></div></div><div class="profile-card"><h3>Weekly allocation</h3>${(c.allocations||[]).map(a=>`<div class="profile-list-row"><div><b>${U.esc(a.teacher_name||'Unassigned')}</b><small>${U.esc(a.day)}</small></div><span>${U.esc(a.start_time)}–${U.esc(a.end_time)}</span></div>`).join('')||'<div class="empty-card"><b>No allocation</b><span>No active teacher allocation exists for this course.</span></div>'}</div><div class="right" style="justify-content:flex-end"><a href="teacher-classes.html" class="btn primary">Manage Schedule</a></div>`);
+      U.modal(`${U.esc(c.subject||'Course')} · ${U.esc(c.class_name)}`,`<div class="profile-card"><div class="profile-kicker">${U.esc(c.subject||'Course')}</div><h2 style="margin:4px 0">${U.esc(c.class_name)}</h2><p class="muted">${U.esc(c.batch)}${c.room?` · ${U.esc(c.room)}`:''}</p><div class="detail-grid"><div><small>Students</small><b>${U.esc(c.student_count||0)} / ${U.esc(c.max_students||'—')}</b></div><div><small>Teachers</small><b>${U.esc(new Set((c.allocations||[]).map(a=>a.teacher_id)).size)}</b></div></div></div><div class="profile-card"><h3>Weekly allocation</h3>${(c.allocations||[]).map(a=>`<div class="profile-list-row"><div><b>${U.esc(a.teacher_name||'Unassigned')}</b><small>${U.esc(a.day)}</small></div><span>${U.esc(a.start_time)}–${U.esc(a.end_time)}</span></div>`).join('')||'<div class="empty-card"><b>No allocation</b><span>No active teacher allocation exists for this course.</span></div>'}</div>`);
     });
     setCalendarView('calendar');
     loadCalendar();
@@ -1063,7 +1123,7 @@ const Page = (() => {
       const seen = new Set();
       const html = rows.flatMap((c) => (c.allocations || []).map((a) => {
         const firstForClass = !seen.has(c.id); seen.add(c.id);
-        return `<tr><td>${U.esc(c.class_name)}</td><td>${U.esc(c.batch)}</td><td>${U.esc(c.subject)}</td><td>${U.esc(a.teacher_name || '')}</td><td>${U.esc(a.day)}</td><td>${U.esc(a.start_time)}–${U.esc(a.end_time)}</td><td>${U.esc(a.room || '')}</td><td><button class="btn warning small" data-edit-allocation="${a.allocation_id}" data-teacher="${a.teacher_id || ''}" data-day="${a.day_of_week}" data-start="${a.start_time}" data-end="${a.end_time}" data-class-id="${c.id}">Edit</button> <button class="btn danger small" data-del="${a.allocation_id}">Deactivate allocation</button>${firstForClass?` <button class="btn danger small" data-delete-class="${c.id}">Delete class</button>`:''}</td></tr>`;
+        return `<tr><td>${U.esc(c.class_name)}</td><td>${U.esc(c.batch)}</td><td>${U.esc(c.subject)}</td><td>${U.esc(a.teacher_name || '')}</td><td>${U.esc(a.day)}</td><td>${U.esc(a.start_time)}–${U.esc(a.end_time)}</td><td>${U.esc(a.room || '')}</td><td><button class="btn warning small" data-edit-allocation="${a.allocation_id}" data-teacher="${a.teacher_pk || ''}" data-day="${a.day_of_week}" data-start="${a.start_time}" data-end="${a.end_time}" data-class-id="${c.id}">Edit</button> <button class="btn danger small" data-del="${a.allocation_id}">Deactivate allocation</button>${firstForClass?` <button class="btn danger small" data-delete-class="${c.id}">Delete class</button>`:''}</td></tr>`;
       })).join('');
       fill(body, html || tableEmpty(8));
     };
@@ -1128,25 +1188,61 @@ const Page = (() => {
       } catch (x) { U.toast(x.message || 'Could not save allocation', 'error'); }
     });
 
+    const beginAllocationEdit=(a,classId)=>{
+      if(!a || !a.allocation_id)return;
+      const teacherPk=a.teacher_pk || a.teacher_db_id || a.teacher_id;
+      const teacherId=Number(teacherPk);
+      if(!Number.isFinite(teacherId) || teacherId<=0) return U.toast('Could not identify the teacher for this allocation','error');
+      selectedTeacherIds = new Set([teacherId]);
+      renderTeacherSummary();
+      selectedClassIds = new Set([Number(classId)]);
+      renderCourseSummary();
+      q('[data-class]').value = String(classId);
+      q('[name="day_of_week"]').value = String(a.day_of_week);
+      form.querySelectorAll('[name="day_of_week_multi"]').forEach(cb=>cb.checked=Number(cb.value)===Number(a.day_of_week));
+      renderDayTimes({[Number(a.day_of_week)]: {start:a.start_time, end:a.end_time}});
+      form.dataset.editId = String(a.allocation_id);
+      form.querySelector('button[type="submit"]').textContent = 'Update allocation';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      const heading=form.closest('.card')?.querySelector('h3');
+      if(heading) heading.textContent='Edit Schedule';
+    };
+
     body?.addEventListener('click', async (e) => {
       const del = e.target.dataset.del; const edit = e.target.dataset.editAllocation; const deleteClass = e.target.dataset.deleteClass;
       if (deleteClass) return adminVerifiedAction('Delete class','This permanently removes the class, its allocations, fee structures, homework, classwork and attendance. It will no longer appear anywhere on the website.',async()=>{await Api.del(`/classes/${deleteClass}`);U.toast('Class deleted permanently');load();});
       if (del) { await Api.del(`/teacher-classes/${del}`); U.toast('Allocation deactivated'); load(); return; }
       if (edit) {
-        selectedTeacherIds = new Set([Number(e.target.dataset.teacher)]);
-        renderTeacherSummary();
-        selectedClassIds = new Set([Number(e.target.dataset.classId)]);
-        renderCourseSummary();
-        q('[data-class]').value = e.target.dataset.classId;
-        q('[name="day_of_week"]').value = e.target.dataset.day;
-        form.querySelectorAll('[name="day_of_week_multi"]').forEach(cb=>cb.checked=Number(cb.value)===Number(e.target.dataset.day));
-        renderDayTimes({[Number(e.target.dataset.day)]: {start:e.target.dataset.start, end:e.target.dataset.end}});
-        form.dataset.editId = edit;
-        form.querySelector('button[type="submit"]').textContent = 'Update allocation';
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        beginAllocationEdit({
+          allocation_id: edit,
+          teacher_pk: e.target.dataset.teacher,
+          day_of_week: Number(e.target.dataset.day),
+          start_time: e.target.dataset.start,
+          end_time: e.target.dataset.end
+        }, e.target.dataset.classId);
       }
     });
+
     await load();
+
+    const requestedAllocationId=new URLSearchParams(location.search).get('edit_allocation');
+    if(requestedAllocationId){
+      try{
+        const allocationId=Number(requestedAllocationId);
+        const rows=await Api.get('/classes',{status:'active'});
+        let found=null, foundClassId=null;
+        for(const c of (rows||[])){
+          const a=(c.allocations||[]).find(x=>Number(x.allocation_id)===allocationId);
+          if(a){found=a;foundClassId=c.id;break;}
+        }
+        if(found){
+          beginAllocationEdit(found,foundClassId);
+          U.toast('Schedule loaded for editing');
+        }else{
+          U.toast('Allocation not found or already deleted','error');
+        }
+      }catch(x){U.toast(x.message||'Could not load the requested schedule','error');}
+    }
   }
 
   async function feePayment() {
