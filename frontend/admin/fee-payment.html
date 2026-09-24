@@ -1,0 +1,38 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RMCTI · Collect Fee</title><link rel="stylesheet" href="../css/variables.css"><link rel="stylesheet" href="../css/global.css"></head><body data-role="admin" data-page="fee-payment"><div class="app"><aside class="side"><div class="brand"><img class="brandlogo" src="../asset/image.jpeg" alt="RMCTI logo"> <span>RMCTI</span></div><nav class="nav"><a href="dashboard.html">⌂ Dashboard</a><a href="teachers.html">♙ Teachers</a><a href="register-teacher.html">＋ Register Teacher</a><a href="teacher-classes.html">▦ Allot Classes</a><a href="all-classes.html">▣ All Classes</a><a href="students.html">♧ Students</a><a href="register-student.html">＋ Register Student</a><a href="fee-structure.html">₹ Fee Structure</a><a href="fee-payment.html">₹ Collect Fee</a><a href="receipts.html">▤ Receipts</a><a href="attachments.html">📎 Attach File</a><a href="audit-logs.html">◷ Audit History</a><a href="reports.html">▤ Reports</a><a href="analytics.html">◈ Analytics</a><a href="complaints.html">⚠ Complaints</a><a href="enquiries.html">✉ Enquire</a><button type="button" data-theme>◐ Theme</button><button type="button" data-logout>↪ Logout</button></nav></aside><main class="main"><header class="top"><div><button type="button" class="btn secondary menu" data-menu>☰</button> <b>Collect Fee</b></div><span class="muted" data-user></span></header><section class="content fee-content">
+  <div class="page-heading-row">
+    <div><span class="eyebrow">FINANCE</span><h1>Fee Collection</h1><p class="muted">Search a student, review the month-by-month balance, then collect the outstanding amount.</p></div>
+    <a class="btn secondary" href="receipts.html">▤ Payment History</a>
+  </div>
+  <div class="fee-summary-grid" data-fee-summary>
+    <div class="card fee-summary-card"><span>Collected</span><strong data-fee-summary-collected>—</strong><small>This month</small></div>
+    <div class="card fee-summary-card"><span>Pending</span><strong data-fee-summary-pending>—</strong><small>Current balance</small></div>
+    <div class="card fee-summary-card"><span>Partial</span><strong data-fee-summary-partial>—</strong><small>Partial-payment balance</small></div>
+    <div class="card fee-summary-card"><span>Fine</span><strong data-fee-summary-fine>—</strong><small>Current-month fine</small></div>
+  </div>
+
+  <div class="grid g2 fee-workspace">
+    <div class="card pad fee-selector-card">
+      <div class="section-title-row"><div><h2>Find Student</h2><span class="muted">Search by name, ID or phone.</span></div></div>
+      <div class="toolbar">
+        <div class="left" style="flex:1"><input class="input" data-student-search placeholder="🔎 Search student by name, ID or phone" aria-label="Search student"></div>
+        <div class="right"><select class="select" data-fee-filter aria-label="Filter students"><option value="all">All students</option><option value="due">Fees due</option><option value="paid">Paid this month</option></select></div>
+      </div>
+      <label class="label">Student</label>
+      <select class="select" data-student></select>
+      <div class="selected-student-hint"><span class="hint-icon">₹</span><div><b>Payment priority</b><small>The oldest outstanding month is selected automatically.</small></div></div>
+      <div class="fee-history-wrap"><div class="section-title-row"><h3>Payment Timeline</h3></div><div data-history></div></div>
+    </div>
+
+    <div class="card pad fee-payment-card">
+      <div class="payment-card-head"><span class="eyebrow">COLLECT PAYMENT</span><h2>Record a payment</h2><p class="muted">Only the remaining balance for the oldest outstanding month can be collected.</p></div>
+      <form class="form fee-payment-form" data-fee-payment style="grid-template-columns:1fr">
+        <div><label class="label">Fee Month</label><input class="input" type="month" name="month" required></div>
+        <div class="payment-amount-wrap"><label class="label">Payment Amount</label><div class="payment-amount-field"><span>₹</span><input class="input" name="amount" type="number" min="0.01" step="0.01" required></div><small class="muted">Partial payments are allowed. The maximum is the selected month’s remaining balance.</small></div>
+        <div><label class="label">Payment Method</label><select class="select" name="payment_method"><option value="cash">Cash</option><option value="upi">UPI</option><option value="bank_transfer">Bank Transfer</option><option value="other">Other</option></select></div>
+        <div><label class="label">Notes <span class="muted">(optional)</span></label><textarea class="textarea" name="notes" placeholder="Optional note for the receipt"></textarea></div>
+        <button type="submit" class="btn success payment-submit">✓ Collect Payment</button>
+      </form>
+      <div class="payment-safety-note">✓ Payment is recorded only after server validation. The receipt number is generated automatically.</div>
+    </div>
+  </div>
+</section></section></main></div><script src="../js/theme.js"></script><script src="../js/api.js"></script><script src="../js/utils.js"></script><script src="../js/auth.js"></script><script src="../js/pages.js"></script><script src="../js/app.js"></script></body></html>
