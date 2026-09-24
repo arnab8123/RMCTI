@@ -14,7 +14,27 @@
     <div data-day-time-list class="grid"></div>
   </div>
 </div>
-<div class="full"><div class="badge active" style="margin-bottom:10px">Overlapping schedules are allowed: multiple courses can use the same room/time, and one teacher can be assigned to multiple courses at the same time.</div><button class="btn primary" type="submit">Allocate class</button></div></form></div></div>
+<div class="full"><div class="badge active" style="margin-bottom:10px">Overlapping schedules are allowed: multiple courses can use the same room/time, and one teacher can be assigned to multiple courses at the same time.</div><button class="btn primary" type="submit">Allocate class</button></div></form>
+<div class="card pad" data-edit-schedule-slots style="display:none;margin-top:14px">
+  <div class="section-head" style="margin-bottom:12px">
+    <div>
+      <h3 style="margin-bottom:4px">Course Schedule</h3>
+      <p class="muted" style="margin:0">All recurring days and times for the selected course. Delete an existing slot or add a new day/time without leaving Edit Schedule.</p>
+    </div>
+  </div>
+  <div data-edit-schedule-slots-body class="grid" style="gap:8px"></div>
+  <div data-edit-schedule-add class="card" style="display:none;margin-top:12px;padding:12px;background:var(--muted-surface)">
+    <div class="section-head" style="margin-bottom:10px"><div><b>Add day &amp; time</b><div class="muted" style="font-size:12px">Adds another recurring allocation to this course.</div></div></div>
+    <div class="grid g3">
+      <div><label class="label">Day</label><select class="select" data-edit-add-day><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select></div>
+      <div><label class="label">Start</label><input class="input" type="time" data-edit-add-start></div>
+      <div><label class="label">End</label><input class="input" type="time" data-edit-add-end></div>
+    </div>
+    <div class="right" style="justify-content:flex-end;margin-top:10px"><button type="button" class="btn secondary small" data-edit-add-cancel>Cancel</button><button type="button" class="btn primary small" data-edit-add-save>＋ Add Schedule</button></div>
+  </div>
+  <div class="right" style="justify-content:flex-end;margin-top:12px"><button type="button" class="btn secondary small" data-edit-add-open>＋ Add Day &amp; Time</button></div>
+</div>
+</div></div>
 <section class="card schedule-calendar-panel" data-schedule-calendar>
   <div class="schedule-calendar-head">
     <div><span class="eyebrow">SCHEDULE</span><h2>Weekly Calendar</h2><p class="muted">See the effective timetable, including this week’s changes and extra classes.</p></div>

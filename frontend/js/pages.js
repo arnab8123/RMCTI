@@ -825,6 +825,7 @@ const Page = (() => {
         if (!selectedClassIds.size) { U.toast('Select at least one course', 'error'); return; }
         m.remove();
         renderCourseSummary();
+        if (form?.dataset.editId) renderEditScheduleSlots();
       });
     };
 
@@ -1118,8 +1119,53 @@ const Page = (() => {
 
     const form = q('form[data-allocation-form]');
     const body = q('[data-body]');
+    const editSchedulePanel = q('[data-edit-schedule-slots]');
+    const editScheduleBody = q('[data-edit-schedule-slots-body]');
+    const editAddPanel = q('[data-edit-schedule-add]');
+    const dayNamesLong = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    let allocationRows = [];
+    let allocationClasses = [];
+
+    const resetEditSchedulePanel = () => {
+      if (editSchedulePanel) editSchedulePanel.style.display = 'none';
+      if (editScheduleBody) editScheduleBody.innerHTML = '';
+      if (editAddPanel) editAddPanel.style.display = 'none';
+    };
+
+    const currentEditClassId = () => Number([...selectedClassIds][0] || form?.querySelector('[name="class_id"]')?.value || 0);
+
+    const renderEditScheduleSlots = () => {
+      if (!editSchedulePanel || !editScheduleBody) return;
+      const classId = currentEditClassId();
+      if (!form?.dataset.editId || !classId) { resetEditSchedulePanel(); return; }
+      const course = allocationClasses.find(c => Number(c.id) === classId);
+      const slots = (course?.allocations || []).slice().sort((a,b) => (Number(a.day_of_week)-Number(b.day_of_week)) || String(a.start_time).localeCompare(String(b.start_time)));
+      editSchedulePanel.style.display = '';
+      if (!slots.length) {
+        editScheduleBody.innerHTML = '<div class="empty-card"><b>No recurring schedule</b><span>Add a day and time below to create one.</span></div>';
+      } else {
+        editScheduleBody.innerHTML = slots.map(a => `<div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px">
+          <div><b>${U.esc(a.day || dayNamesLong[Number(a.day_of_week)])}</b><div class="muted">${U.esc(a.start_time)}–${U.esc(a.end_time)}${a.teacher_name ? ` · ${U.esc(a.teacher_name)}` : ''}${a.room ? ` · Room ${U.esc(a.room)}` : ''}</div></div>
+          <button type="button" class="btn danger small" data-edit-slot-delete="${U.esc(a.allocation_id)}">Delete</button>
+        </div>`).join('');
+      }
+    };
+
+    const refreshAllocationData = async (classIdToSelect = null) => {
+      allocationClasses = await Api.get('/classes', { status: 'active', include_unassigned: '1' });
+      allocationRows = allocationClasses.flatMap(c => (c.allocations || []).map(a => ({...a, class_id: c.id})));
+      if (classIdToSelect) {
+        selectedClassIds = new Set([Number(classIdToSelect)]);
+        renderCourseSummary();
+      }
+      renderEditScheduleSlots();
+      await load();
+    };
+
     const load = async () => {
       const rows = await Api.get('/classes', { status: 'active' });
+      allocationClasses = rows || [];
+      allocationRows = allocationClasses.flatMap(c => (c.allocations || []).map(a => ({...a, class_id: c.id})));
       const seen = new Set();
       const html = rows.flatMap((c) => (c.allocations || []).map((a) => {
         const firstForClass = !seen.has(c.id); seen.add(c.id);
@@ -1176,6 +1222,7 @@ const Page = (() => {
           await Api.put(`/teacher-classes/${id}`, payload);
           delete form.dataset.editId;
           form.querySelector('button[type="submit"]').textContent='Allocate class';
+          resetEditSchedulePanel();
           U.toast('Allocation updated');
         }
         selectedTeacherIds = new Set();
@@ -1203,6 +1250,7 @@ const Page = (() => {
       renderDayTimes({[Number(a.day_of_week)]: {start:a.start_time, end:a.end_time}});
       form.dataset.editId = String(a.allocation_id);
       form.querySelector('button[type="submit"]').textContent = 'Update allocation';
+      renderEditScheduleSlots();
       window.scrollTo({ top: 0, behavior: 'smooth' });
       const heading=form.closest('.card')?.querySelector('h3');
       if(heading) heading.textContent='Edit Schedule';
@@ -1221,6 +1269,51 @@ const Page = (() => {
           end_time: e.target.dataset.end
         }, e.target.dataset.classId);
       }
+    });
+
+    editScheduleBody?.addEventListener('click', async (e) => {
+      const id = e.target.closest('[data-edit-slot-delete]')?.dataset.editSlotDelete;
+      if (!id) return;
+      const numericId = Number(id);
+      const courseId = currentEditClassId();
+      if (!numericId) return;
+      const slot = allocationRows.find(a => Number(a.allocation_id) === numericId);
+      if (!slot) return U.toast('Schedule slot not found', 'error');
+      U.confirm('Delete schedule slot?', `Delete ${U.esc(slot.day || dayNamesLong[Number(slot.day_of_week)])} ${U.esc(slot.start_time)}–${U.esc(slot.end_time)} from this course?`, async () => {
+        try {
+          await Api.del(`/teacher-classes/${numericId}`);
+          if (String(form.dataset.editId) === String(numericId)) {
+            delete form.dataset.editId;
+            form.querySelector('button[type="submit"]').textContent = 'Allocate class';
+          }
+          await refreshAllocationData(courseId);
+          U.toast('Schedule slot deleted');
+        } catch (x) { U.toast(x.message || 'Could not delete schedule slot', 'error'); }
+      });
+    });
+
+    q('[data-edit-add-open]')?.addEventListener('click', () => {
+      if (!form?.dataset.editId) return U.toast('Open an allocation in Edit Schedule first');
+      editAddPanel.style.display = '';
+      q('[data-edit-add-start]')?.focus();
+    });
+    q('[data-edit-add-cancel]')?.addEventListener('click', () => { if (editAddPanel) editAddPanel.style.display = 'none'; });
+    q('[data-edit-add-save]')?.addEventListener('click', async () => {
+      const classId = currentEditClassId();
+      const teacherId = Number([...selectedTeacherIds][0] || 0);
+      const day = Number(q('[data-edit-add-day]')?.value);
+      const start = q('[data-edit-add-start]')?.value || '';
+      const end = q('[data-edit-add-end]')?.value || '';
+      if (!classId || !teacherId) return U.toast('Select a course and teacher first', 'error');
+      if (!start || !end || start >= end) return U.toast('Choose a valid start and end time', 'error');
+      try {
+        await Api.post('/teacher-classes', { teacher_ids:[teacherId], class_ids:[classId], day_schedules:[{day, start_time:start, end_time:end}] });
+        if (q('[data-edit-add-start]')) q('[data-edit-add-start]').value = '';
+        if (q('[data-edit-add-end]')) q('[data-edit-add-end]').value = '';
+        if (editAddPanel) editAddPanel.style.display = 'none';
+        await refreshAllocationData(classId);
+        U.toast('Day and time added');
+      } catch (x) { U.toast(x.message || 'Could not add schedule slot', 'error'); }
     });
 
     await load();
