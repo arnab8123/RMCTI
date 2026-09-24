@@ -1246,7 +1246,17 @@ def classes():
     if request.args.get("include_unassigned") not in ("1","true","yes"):
         query=query.join(TeacherClass,TeacherClass.class_id==Class.id).filter(TeacherClass.status=="active").distinct()
     if q:query=query.filter(or_(Class.class_name.like(f"%{q}%"),Class.batch.like(f"%{q}%")))
-    return ok(_class_objs_bulk(query.order_by(Class.class_name,Class.batch).limit(_bounded_limit()).all()))
+    rows=_class_objs_bulk(query.order_by(Class.class_name,Class.batch).limit(_bounded_limit()).all())
+    if request.args.get("include_current") in ("1","true","yes"):
+        now=datetime.now(ZoneInfo("Asia/Kolkata")); by_id={x["id"]:x for x in rows}
+        for c in query.order_by(Class.class_name,Class.batch).limit(_bounded_limit()).all():
+            current=[x for x in _effective_class_schedule(c,now.date(),1)
+                     if x.get("date")==now.date().isoformat() and x.get("start_time")<=now.strftime("%H:%M")<=x.get("end_time")]
+            row=by_id.get(c.id)
+            if row:
+                row["current_schedules"]=current
+                row["is_ongoing"]=bool(current)
+    return ok(rows)
 @api.get("/classes/<int:id>")
 @roles("admin")
 def get_class(id):
@@ -1489,7 +1499,19 @@ def students():
 @api.get("/students/<int:id>")
 @roles("admin")
 def student(id):
-    s=Student.query.get(id);return ok(student_obj(s)) if s else err("Student not found",404)
+    s=Student.query.get(id)
+    if not s:return err("Student not found",404)
+    data=student_obj(s)
+    # The overall student profile must use the same chronological fee engine
+    # as the dashboard/fees/receipt screens. This is intentionally calculated
+    # here (rather than in the bulk student list) so the admin student list
+    # stays fast while the detailed profile gets the complete outstanding total.
+    balances=_fee_month_balances(s.id)
+    data["fee_summary"]={
+        "total_paid":float(sum((x["paid"] for x in balances),Decimal("0.00"))),
+        "total_due":float(sum((x["balance"] for x in balances),Decimal("0.00")))
+    }
+    return ok(data)
 @api.post("/students")
 @roles("admin")
 def add_student():
@@ -1635,22 +1657,28 @@ def admin_class_attendance_history(class_id):
     students={s.id:s for s in Student.query.filter(Student.id.in_(student_ids)).all()} if student_ids else {}
     grouped={}
     for r in records:
-        key=r.attendance_date.isoformat()
+        day=r.attendance_date.isoformat()
+        start=r.session_start_time.strftime("%H:%M") if r.session_start_time else None
+        end=r.session_end_time.strftime("%H:%M") if r.session_end_time else None
+        key=(day,start,end)
         grouped.setdefault(key,[]).append({
             "student_id":students[r.student_id].student_id if r.student_id in students else "",
             "name":students[r.student_id].name if r.student_id in students else "Unknown",
             "status":r.status
         })
     days=[]
-    for day,items in grouped.items():
+    for (day,start,end),items in grouped.items():
         items.sort(key=lambda x:x["name"].lower())
         days.append({
             "date":day,
             "day":date.fromisoformat(day).strftime("%A"),
+            "start_time":start,
+            "end_time":end,
             "present":sum(1 for x in items if x["status"]=="present"),
             "absent":sum(1 for x in items if x["status"]=="absent"),
             "students":items
         })
+    days.sort(key=lambda x:(x["date"],x.get("start_time") or ""),reverse=True)
     sub=subject_obj(c.subject_id)
     return ok({"class_id":class_id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "","history":days})
 
@@ -1906,28 +1934,62 @@ def _fee_for_month_from_rows(rows, month):
 
 
 def _fee_month_balances(sid):
-    """Return chronological fee balances; excess payments carry into later months."""
+    """Return chronological fee balances with fines based on actual payment timing.
+
+    A ₹50 fine is added on each 15th only when that month's fee was still
+    outstanding immediately after that 15th. This means a month paid in full
+    before its first fine date does not later acquire a fine, while a partial
+    or late payment keeps the applicable accumulated fines.
+    """
     student=Student.query.get(sid)
     if not student:return []
     rows=_fee_rows_for_student(sid)
     if not rows:return []
-    today=today_ist().replace(day=1)
-    starts=[today]
+    today=today_ist()
+    today_month=today.replace(day=1)
+    starts=[today_month]
     if student.admission_date: starts.append(student.admission_date.replace(day=1))
     starts.extend(r.effective_from.replace(day=1) for r in rows if r.effective_from)
-    start=min(starts) if starts else today
+    start=min(starts) if starts else today_month
     payments=(FeePayment.query.filter_by(student_id=sid)
               .order_by(FeePayment.payment_date.asc(),FeePayment.id.asc()).all())
     paid_by_month={}
+    payments_by_month={}
     for p in payments:
         m=p.fee_month.replace(day=1)
-        paid_by_month[m]=paid_by_month.get(m,Decimal("0.00"))+Decimal(str(p.amount))
+        amount=Decimal(str(p.amount))
+        paid_by_month[m]=paid_by_month.get(m,Decimal("0.00"))+amount
+        payments_by_month.setdefault(m,[]).append(p)
+
+    def payment_ist_date(payment):
+        value=payment.payment_date
+        if not value:return None
+        if value.tzinfo is None:value=value.replace(tzinfo=__import__('datetime').timezone.utc)
+        return value.astimezone(ZoneInfo("Asia/Kolkata")).date()
+
     months=[]
     m=start
-    while m<=today:
-        due=_fee_for_month_from_rows(rows,m)
-        months.append({"month":m,"base":_fee_base_for_month(rows,m),"due":due,"paid":Decimal("0.00"),"credit":Decimal("0.00")})
+    while m<=today_month:
+        base=_fee_base_for_month(rows,m)
+        due=base
+        # Fine dates are the 15th of this month and every following month up
+        # to today. A fine is created only if the month was still outstanding
+        # at that date.
+        if base>Decimal("0.00") and m<=today_month:
+            cycle=m.replace(day=15)
+            month_payments=payments_by_month.get(m,[])
+            while cycle<=today:
+                paid_by_cycle=sum((Decimal(str(p.amount)) for p in month_payments
+                                   if payment_ist_date(p) and payment_ist_date(p)<=cycle),Decimal("0.00"))
+                if due>paid_by_cycle:
+                    due += Decimal("50.00")
+                cycle=(cycle+timedelta(days=32)).replace(day=15)
+        months.append({"month":m,"base":base,"due":due,"paid":Decimal("0.00"),"credit":Decimal("0.00")})
         m=(m+timedelta(days=32)).replace(day=1)
+
+    # Payments are allocated chronologically to their fee month; any historical
+    # overpayment remains a credit and can carry into later months. Normal fee
+    # collection never permits overpaying the oldest balance.
     credit=Decimal("0.00")
     for item in months:
         incoming=paid_by_month.get(item["month"],Decimal("0.00"))+credit
@@ -1949,9 +2011,9 @@ def oldest_due_month(sid):
 def history(sid):
     balances=_fee_month_balances(sid)
     current=today_ist().replace(day=1)
-    selected=[x for x in balances if x["month"]<=current][-12:]
-    oldest=next((x for x in balances if x["balance"]>Decimal("0.00")),None)
-    if oldest and oldest not in selected:selected=[oldest]+selected
+    # Show the complete fee history so every outstanding month is visible; the
+    # total_due value is calculated from this same complete balance set.
+    selected=[x for x in balances if x["month"]<=current]
     selected=sorted({x["month"]:x for x in selected}.values(),key=lambda x:x["month"],reverse=True)
     payment_map={}
     for p in FeePayment.query.filter_by(student_id=sid).order_by(FeePayment.payment_date.desc(),FeePayment.id.desc()).all():
@@ -1961,6 +2023,8 @@ def history(sid):
         latest=(payment_map.get(x["month"]) or [None])[0]
         out.append({"month":x["month"].strftime("%Y-%m"),"month_label":x["month"].strftime("%B %Y"),
                     "amount":float(x["due"]),"due_amount":float(x["balance"]),"base_fee":float(x["base"]),
+                    "fine_amount":float(max(Decimal("0.00"),x["due"]-x["base"])),
+                    "fine_cycles":int(max(Decimal("0.00"),x["due"]-x["base"]) / Decimal("50.00")),
                     "paid_amount":float(x["paid"]),"credit":float(x.get("credit",0)),
                     "status":x["status"],"payment_date":iso_ist(latest.payment_date) if latest else None,
                     "receipt_number":latest.receipt_number if latest else None})
@@ -2147,78 +2211,98 @@ def my_classes():
     classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1]),Class.status=="active").all()}
     items={x["id"]:x for x in _class_objs_bulk(classes.values())};out=[];seen_class_ids=set()
     for a in allocations:
-        # Multiple TeacherClass rows may represent multiple sessions of the
-        # same course. The teacher portal should show one course card.
         if a.class_id in seen_class_ids:continue
         seen_class_ids.add(a.class_id)
         item=items.get(a.class_id)
         if not item:continue
         item=dict(item)
-        effective=_teacher_current_schedule(t,a.class_id,now)
-        item["attendance_active"]=bool(effective)
-        item["attendance_schedule"]=({"day_of_week":now.weekday(),"date":effective["date"],
-                                      "start_time":effective["start_time"],"end_time":effective["end_time"],
-                                      "kind":effective["kind"]} if effective else
-                                     {"day_of_week":now.weekday(),"date":now.date().isoformat(),"start_time":None,"end_time":None,"kind":None})
-        # Show the effective schedule for today, not only the original recurring allocation.
-        item["today_schedule"]=effective
+        todays=[x for x in _effective_class_schedule(classes[a.class_id],now.date(),1)
+                if x.get("teacher_id")==t.id and x.get("date")==now.date().isoformat()]
+        sessions=[]
+        total_students=StudentClass.query.filter_by(class_id=a.class_id,status="active").count()
+        for row in todays:
+            marked=Attendance.query.filter_by(class_id=a.class_id,attendance_date=now.date(),
+                                               session_start_time=datetime.strptime(row["start_time"],"%H:%M").time(),
+                                               session_end_time=datetime.strptime(row["end_time"],"%H:%M").time()).count()
+            sh,sm=map(int,row["start_time"].split(":")); eh,em=map(int,row["end_time"].split(":"))
+            st=now.replace(hour=sh,minute=sm,second=0,microsecond=0)
+            et=now.replace(hour=eh,minute=em,second=0,microsecond=0)
+            active=st<=now<=et
+            sessions.append({**row,"active":active,"marked_count":marked,"student_count":total_students,
+                             "attendance_complete":total_students==0 or marked>=total_students})
+        current=next((x for x in sessions if x["active"]),None)
+        item["today_schedules"]=sessions
+        item["attendance_active"]=bool(current)
+        item["attendance_complete"]=bool(current and current["attendance_complete"])
+        item["attendance_schedule"]=(current or (sessions[0] if sessions else
+                                  {"date":now.date().isoformat(),"start_time":None,"end_time":None,"kind":None}))
+        item["today_schedule"]=current or (sessions[0] if sessions else None)
         out.append(item)
     # Extra class can be taught by a teacher who is not normally allotted to the course.
     for ex in extras:
         item=items.get(ex.class_id)
         if not item:continue
+        if any(x["id"]==item["id"] for x in out):continue
         item=dict(item)
-        item["attendance_active"]=bool(_teacher_current_schedule(t,ex.class_id,now))
-        item["attendance_schedule"]={"day_of_week":now.weekday(),"date":now.date().isoformat(),
-                                     "start_time":ex.start_time.strftime("%H:%M"),
-                                     "end_time":ex.end_time.strftime("%H:%M"),"kind":"extra"}
-        item["today_schedule"]=_teacher_current_schedule(t,ex.class_id,now)
-        if not any(x["id"]==item["id"] for x in out):out.append(item)
+        total_students=StudentClass.query.filter_by(class_id=ex.class_id,status="active").count()
+        st=ex.start_time; et=ex.end_time
+        now_t=now.time().replace(second=0,microsecond=0)
+        marked=Attendance.query.filter_by(class_id=ex.class_id,attendance_date=now.date(),
+                                           session_start_time=st,session_end_time=et).count()
+        session={"date":now.date().isoformat(),"allocation_id":None,"teacher_id":t.id,
+                 "teacher_name":t.name,"start_time":st.strftime("%H:%M"),"end_time":et.strftime("%H:%M"),
+                 "day_of_week":now.weekday(),"room":item.get("room"),"kind":"extra",
+                 "active":st<=now_t<=et,"marked_count":marked,"student_count":total_students,
+                 "attendance_complete":total_students==0 or marked>=total_students}
+        item["today_schedules"]=[session];item["today_schedule"]=session
+        item["attendance_active"]=session["active"];item["attendance_complete"]=session["attendance_complete"]
+        item["attendance_schedule"]=session
+        out.append(item)
+    out.sort(key=lambda x:(not x.get("attendance_active",False),
+                           x.get("attendance_schedule",{}).get("start_time") or "99:99",
+                           x.get("class_name","").lower()))
     return ok(out)
 
 @api.get("/teacher/classes/<int:class_id>/attendance")
 @roles("teacher")
 def get_attendance(class_id):
-    t=teacher_for_user()
-    now=datetime.now(ZoneInfo("Asia/Kolkata"))
+    t=teacher_for_user(); now=datetime.now(ZoneInfo("Asia/Kolkata"))
     c=Class.query.get(class_id)
     if not c or c.status!="active":return err("Course not found",404)
     allocations=TeacherClass.query.filter_by(teacher_id=t.id,class_id=class_id,status="active").all()
-    effective=_teacher_current_schedule(t,class_id,now)
-    if not allocations and not effective:
-        return err("Class is not assigned to you",403)
+    rows=[x for x in _effective_class_schedule(c,now.date(),1) if x.get("teacher_id")==t.id and x.get("date")==now.date().isoformat()]
+    start_arg=request.args.get("start_time")
+    end_arg=request.args.get("end_time")
+    effective=next((x for x in rows if x.get("start_time")==start_arg and x.get("end_time")==end_arg),None) if start_arg or end_arg else next((x for x in rows if x["start_time"]<=now.strftime("%H:%M")<=x["end_time"]),None)
+    if not allocations and not effective:return err("Class is not assigned to you",403)
     if not effective:
-        return ok({"class_id":class_id,"active":False,"date":now.date().isoformat(),
-                   "start_time":None,"end_time":None,"students":[]})
+        return ok({"class_id":class_id,"active":False,"date":now.date().isoformat(),"start_time":start_arg,"end_time":end_arg,"students":[]})
     students=(Student.query.join(StudentClass,StudentClass.student_id==Student.id)
               .filter(StudentClass.class_id==class_id,StudentClass.status=="active",Student.status=="active")
               .order_by(Student.name.asc()).all())
-    records={x.student_id:x for x in Attendance.query.filter_by(class_id=class_id,attendance_date=now.date()).all()}
-    return ok({"class_id":class_id,"active":True,"date":now.date().isoformat(),
-               "start_time":effective["start_time"],"end_time":effective["end_time"],
-               "schedule_kind":effective["kind"],
-               "students":[{"id":s.id,"student_id":s.student_id,"name":s.name,
-                            "status":records[s.id].status if s.id in records else None} for s in students]})
+    st=datetime.strptime(effective["start_time"],"%H:%M").time(); et=datetime.strptime(effective["end_time"],"%H:%M").time()
+    records={x.student_id:x for x in Attendance.query.filter_by(class_id=class_id,attendance_date=now.date(),session_start_time=st,session_end_time=et).all()}
+    return ok({"class_id":class_id,"active":True,"date":now.date().isoformat(),"start_time":effective["start_time"],"end_time":effective["end_time"],
+               "schedule_kind":effective["kind"],"students":[{"id":s.id,"student_id":s.student_id,"name":s.name,"status":records[s.id].status if s.id in records else None} for s in students]})
 
 @api.post("/teacher/classes/<int:class_id>/attendance")
 @roles("teacher")
 def save_attendance(class_id):
-    t=teacher_for_user()
-    now=datetime.now(ZoneInfo("Asia/Kolkata"))
+    t=teacher_for_user(); now=datetime.now(ZoneInfo("Asia/Kolkata"))
     c=Class.query.get(class_id)
     if not c or c.status!="active":return err("Course not found",404)
-    effective=_teacher_current_schedule(t,class_id,now)
-    if not effective:
-        return err("Attendance can only be submitted during the scheduled class hours",403)
-
     b=request.get_json() or {}
-    rows=b.get("attendance")
-    if not isinstance(rows,list) or not rows:
-        return err("Please mark attendance for all students before submitting")
-    allowed={x.student_id for x in StudentClass.query.filter_by(class_id=class_id,status="active").all()}
-    seen=set()
+    start_arg=str(b.get("start_time") or ""); end_arg=str(b.get("end_time") or "")
+    rows=[x for x in _effective_class_schedule(c,now.date(),1) if x.get("teacher_id")==t.id and x.get("date")==now.date().isoformat()]
+    effective=next((x for x in rows if x.get("start_time")==start_arg and x.get("end_time")==end_arg),None)
+    if not effective:return err("This attendance session is not scheduled for you today",403)
+    if not (effective["start_time"]<=now.strftime("%H:%M")<=effective["end_time"]):return err("Attendance can only be submitted during the scheduled class hours",403)
+    attendance_rows=b.get("attendance")
+    if not isinstance(attendance_rows,list) or not attendance_rows:return err("Please mark attendance for all students before submitting")
+    allowed={x.student_id for x in StudentClass.query.filter_by(class_id=class_id,status="active").all()}; seen=set()
+    st=datetime.strptime(effective["start_time"],"%H:%M").time(); et=datetime.strptime(effective["end_time"],"%H:%M").time()
     try:
-        for item in rows:
+        for item in attendance_rows:
             student_id=int(item.get("student_id",0)); status=str(item.get("status","")).lower()
             if student_id in seen:return err("Duplicate student in attendance")
             if student_id not in allowed:return err("Student is not allotted to this course",403)
@@ -2226,14 +2310,12 @@ def save_attendance(class_id):
             seen.add(student_id)
         missing=allowed-seen
         if missing:return err("Please mark attendance for every student before submitting")
-        for item in rows:
+        for item in attendance_rows:
             student_id=int(item["student_id"]);status=str(item["status"]).lower()
-            rec=Attendance.query.filter_by(student_id=student_id,class_id=class_id,attendance_date=now.date()).first()
+            rec=Attendance.query.filter_by(student_id=student_id,class_id=class_id,attendance_date=now.date(),session_start_time=st,session_end_time=et).first()
             if rec:rec.status=status;rec.marked_by=current_user().id
-            else:db.session.add(Attendance(student_id=student_id,class_id=class_id,attendance_date=now.date(),
-                                           status=status,marked_by=current_user().id))
-        db.session.commit()
-        return ok({"date":now.date().isoformat(),"count":len(rows)},"Attendance submitted successfully")
+            else:db.session.add(Attendance(student_id=student_id,class_id=class_id,attendance_date=now.date(),session_start_time=st,session_end_time=et,status=status,marked_by=current_user().id))
+        db.session.commit();return ok({"date":now.date().isoformat(),"start_time":effective["start_time"],"end_time":effective["end_time"],"count":len(attendance_rows)},"Attendance submitted successfully")
     except Exception:
         db.session.rollback();return err("Could not submit attendance")
 
@@ -2268,22 +2350,28 @@ def attendance_history(class_id):
 
     grouped={}
     for r in records:
-        key=r.attendance_date.isoformat()
+        day=r.attendance_date.isoformat()
+        start=r.session_start_time.strftime("%H:%M") if r.session_start_time else None
+        end=r.session_end_time.strftime("%H:%M") if r.session_end_time else None
+        key=(day,start,end)
         grouped.setdefault(key,[]).append({
             "student_id":students[r.student_id].student_id if r.student_id in students else "",
             "name":students[r.student_id].name if r.student_id in students else "Unknown",
             "status":r.status
         })
     days=[]
-    for day,items in grouped.items():
+    for (day,start,end),items in grouped.items():
         items.sort(key=lambda x:x["name"].lower())
         days.append({
             "date":day,
             "day":date.fromisoformat(day).strftime("%A"),
+            "start_time":start,
+            "end_time":end,
             "present":sum(1 for x in items if x["status"]=="present"),
             "absent":sum(1 for x in items if x["status"]=="absent"),
             "students":items
         })
+    days.sort(key=lambda x:(x["date"],x.get("start_time") or ""),reverse=True)
     return ok({"class_id":class_id,"class_name":c.class_name,
                "batch":c.batch,"subject":(subject_obj(c.subject_id).name if subject_obj(c.subject_id) else ""),
                "history":days})

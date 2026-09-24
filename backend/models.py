@@ -60,11 +60,13 @@ class Attendance(db.Model):
     student_id=db.Column(db.BigInteger,db.ForeignKey("students.id"),nullable=False)
     class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False)
     attendance_date=db.Column(db.Date,nullable=False)
+    session_start_time=db.Column(db.Time,nullable=True)
+    session_end_time=db.Column(db.Time,nullable=True)
     status=db.Column(db.Enum("present","absent"),nullable=False)
     marked_by=db.Column(db.BigInteger,db.ForeignKey("users.id"),nullable=False)
     created_at=db.Column(db.DateTime,default=datetime.utcnow)
     updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
-    __table_args__=(db.UniqueConstraint("student_id","class_id","attendance_date",name="uq_attendance_student_class_date"),)
+    __table_args__=(db.UniqueConstraint("student_id","class_id","attendance_date","session_start_time","session_end_time",name="uq_attendance_student_class_session"),)
 
 class Complaint(db.Model):
     __tablename__="complaints"

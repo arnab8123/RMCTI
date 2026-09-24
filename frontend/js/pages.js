@@ -369,9 +369,10 @@ const Page = (() => {
   async function allClasses() {
     const wrap=q('[data-class-list]');
     const load=async()=>{
-      const rows=await Api.get('/classes',{status:'active'});
+      const rows=await Api.get('/classes',{status:'active',include_current:'1'});
+      rows.sort((a,b)=>Number(!!b.is_ongoing)-Number(!!a.is_ongoing) || String(a.class_name).localeCompare(String(b.class_name)));
       fill(wrap, rows.map(c=>`<article class="class-admin-card">
-        <div class="class-admin-head"><div><h3>${U.esc(c.class_name)}</h3><div class="muted">${U.esc(c.batch)} · ${U.esc(c.subject)}</div></div><span class="badge active">Active</span></div>
+        <div class="class-admin-head"><div><h3>${U.esc(c.class_name)}</h3><div class="muted">${U.esc(c.batch)} · ${U.esc(c.subject)}</div></div><span class="badge ${c.is_ongoing?'success':'active'}">${c.is_ongoing?'ONGOING NOW':'Active'}</span></div>
         <div class="class-admin-meta"><span><b>${U.esc(c.student_count)}</b> / ${U.esc(c.max_students)} Students</span><span>${U.esc(c.room||'Room not set')}</span></div>
         <div class="class-admin-schedule">${(c.allocations||[]).map(a=>`<div><b>${U.esc(a.teacher_name||'Unassigned')}</b><span>${U.esc(a.day)} · ${U.esc(a.start_time)}–${U.esc(a.end_time)}${a.room?` · ${U.esc(a.room)}`:''}</span></div>`).join('')||'<span class="muted">No teacher allocation yet.</span>'}</div>
         <div class="right" style="justify-content:flex-end;margin-top:14px"><button class="btn secondary small" data-class-attendance="${c.id}">See Attendance</button><button class="btn secondary small" data-class-students="${c.id}">View Students</button><button class="btn warning small" data-reschedule-class="${c.id}">Manage Schedule</button><button class="btn danger small" data-class-deactivate="${c.id}">Delete Class</button></div>
@@ -383,7 +384,7 @@ const Page = (() => {
         const c=await Api.get(`/classes/${classId}`);
         let d=await Api.get(`/admin/classes/${classId}/attendance/history`);
         const m=U.modal(`Attendance · ${c.class_name}`,`<div class="form" style="margin-bottom:16px"><div><label class="label">From date</label><input class="input" type="date" data-history-from></div><div><label class="label">To date</label><input class="input" type="date" data-history-to></div><div class="full right" style="justify-content:flex-end"><button type="button" class="btn secondary small" data-history-clear>Clear</button><button type="button" class="btn primary small" data-history-filter>Filter</button></div></div><div data-history-results></div>`);
-        const renderHistory=(data)=>{const target=m.querySelector('[data-history-results]');target.innerHTML=(data.history||[]).map(day=>`<div class="card pad" style="margin-bottom:12px"><div class="right" style="justify-content:space-between;align-items:center"><div><b>${U.date(day.date)}</b> <span class="muted">(${U.esc(day.day)})</span></div><span class="badge active">Present ${day.present} · Absent ${day.absent}</span></div><div class="table" style="margin-top:10px"><table><thead><tr><th>Student</th><th>ID</th><th>Status</th></tr></thead><tbody>${(day.students||[]).map(st=>`<tr><td><b>${U.esc(st.name)}</b></td><td>${U.esc(st.student_id)}</td><td><span class="badge ${st.status==='present'?'active':'due'}">${U.esc(st.status)}</span></td></tr>`).join('')}</tbody></table></div></div>`).join('')||'<div class="empty">No attendance records found for the selected dates.</div>';};
+        const renderHistory=(data)=>{const target=m.querySelector('[data-history-results]');target.innerHTML=(data.history||[]).map(day=>`<div class="card pad" style="margin-bottom:12px"><div class="right" style="justify-content:space-between;align-items:center"><div><b>${U.date(day.date)}</b> <span class="muted">(${U.esc(day.day)})</span>${day.start_time?` <span class="badge active">${U.esc(day.start_time)}–${U.esc(day.end_time||'')}</span>`:' <span class="muted">Legacy/unspecified session</span>'}</div><span class="badge active">Present ${day.present} · Absent ${day.absent}</span></div><div class="table" style="margin-top:10px"><table><thead><tr><th>Student</th><th>ID</th><th>Status</th></tr></thead><tbody>${(day.students||[]).map(st=>`<tr><td><b>${U.esc(st.name)}</b></td><td>${U.esc(st.student_id)}</td><td><span class="badge ${st.status==='present'?'active':'due'}">${U.esc(st.status)}</span></td></tr>`).join('')}</tbody></table></div></div>`).join('')||'<div class="empty">No attendance records found for the selected dates.</div>';};
         renderHistory(d);
         m.querySelector('[data-history-filter]')?.addEventListener('click',async()=>{try{const from=m.querySelector('[data-history-from]').value,to=m.querySelector('[data-history-to]').value;if(from&&to&&from>to)return U.toast('From date cannot be after To date','error');d=await Api.get(`/admin/classes/${classId}/attendance/history`,{from,to});renderHistory(d);}catch(e){U.toast(e.message||'Could not load attendance history','error')}});
         m.querySelector('[data-history-clear]')?.addEventListener('click',async()=>{m.querySelector('[data-history-from]').value='';m.querySelector('[data-history-to]').value='';try{d=await Api.get(`/admin/classes/${classId}/attendance/history`);renderHistory(d);}catch(e){U.toast(e.message||'Could not load attendance history','error')}});
@@ -1205,16 +1206,11 @@ const Page = (() => {
       if(!btn || !currentFeeData) return;
       const h=(currentFeeData.history||[]).find(x=>x.month===btn.dataset.feeDetail);
       if(!h)return;
-      const [yy,mm]=h.month.split('-').map(Number);
-      const today=new Date();
-      const current=new Date(today.getFullYear(),today.getMonth(),1);
-      const month=new Date(yy,mm-1,1);
-      const months=Math.max(0,(current.getFullYear()-month.getFullYear())*12+(current.getMonth()-month.getMonth()));
-      const cycles=months+(today.getDate()>=15?1:0);
-      const fine=Math.max(0,Number(h.amount)-Number(h.base_fee||0));
+      const fine=Math.max(0,Number(h.fine_amount ?? Number(h.amount)-Number(h.base_fee||0)));
+      const cycles=Number(h.fine_cycles ?? (fine/50));
       U.modal(`Fee calculation · ${h.month_label}`,`<div class="card pad">
         <p><b>Base monthly fee:</b> ${U.money(h.base_fee)}</p>
-        <p><b>Fine rule:</b> ₹50 is added for each applicable 15th-of-month fine cycle while the month remains unpaid.</p>
+        <p><b>Fine rule:</b> ₹50 is added on each applicable 15th while the month's balance remains outstanding.</p>
         <p><b>Applicable fine cycles:</b> ${cycles}</p>
         <p><b>Fine:</b> ${U.money(fine)}</p>
         <hr style="border:0;border-top:1px solid var(--border)">
@@ -1255,7 +1251,7 @@ const Page = (() => {
     return `<div class="receipt-doc" data-receipt-capture style="border:1px solid #d6dde6;border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.08)">
       <div style="padding:22px 26px;background:#0f3d5e;color:#fff;display:flex;justify-content:space-between;gap:20px;align-items:center"><div style="display:flex;gap:14px;align-items:center"><img crossorigin="anonymous" src="${U.photoUrl('/asset/image.jpeg')}" style="width:54px;height:54px;border-radius:10px;background:#fff;padding:4px;object-fit:contain"><div><div style="font-size:22px;font-weight:800;letter-spacing:.02em">RMCTI</div><div style="font-size:12px;opacity:.86">Ratna's Modern Computer Training Institute</div></div></div><div style="text-align:right"><div style="font-size:11px;opacity:.78;text-transform:uppercase;letter-spacing:.1em">Official Fee Receipt</div><div style="font-size:18px;font-weight:800;margin-top:4px">${U.esc(r.receipt_number)}</div></div></div>
       <div style="padding:24px 26px"><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 28px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Student</div><div style="font-weight:800;font-size:17px;margin-top:5px">${U.esc(r.student)}</div><div class="muted" style="margin-top:3px">${U.esc(r.student_id)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Course</div><div style="font-weight:700;margin-top:5px">${U.esc(r.class||'—')}</div>${r.teacher?`<div class="muted" style="margin-top:3px">Teacher: ${U.esc(r.teacher)}</div>`:''}</div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Fee Month</div><div style="font-weight:700;margin-top:5px">${U.esc(r.fee_month)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Date</div><div style="font-weight:700;margin-top:5px">${U.datetime(r.payment_date)}</div></div></div>
-      <div style="margin:24px 0;border-top:1px solid #e2e8f0"></div><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Method</div><div style="font-weight:700;margin-top:5px;text-transform:capitalize">${U.esc(String(r.payment_method||'').replace('_',' '))}</div></div><div style="display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:18px;text-align:right"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Amount Paid</div><div style="font-size:26px;font-weight:900;margin-top:2px;color:#0f3d5e">${U.money(r.amount)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Remaining</div><div style="font-size:22px;font-weight:900;margin-top:4px;color:#b45309">${U.money(r.remaining||0)}</div></div></div></div>
+      <div style="margin:24px 0;border-top:1px solid #e2e8f0"></div><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Method</div><div style="font-weight:700;margin-top:5px;text-transform:capitalize">${U.esc(String(r.payment_method||'').replace('_',' '))}</div></div><div style="display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:18px;text-align:right"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Amount Paid</div><div style="font-size:26px;font-weight:900;margin-top:2px;color:#0f3d5e">${U.money(r.amount)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Total Remaining Due</div><div style="font-size:22px;font-weight:900;margin-top:4px;color:#b45309">${U.money(r.remaining||0)}</div></div></div></div>
       <div style="margin-top:28px;padding-top:14px;border-top:1px dashed #cbd5e1;display:flex;justify-content:space-between;gap:20px;font-size:11px;color:#64748b"><span>Collected by: ${U.esc(r.collected_by||'Admin')}</span><span>System generated receipt</span></div></div></div>`;
   }
 
@@ -1407,21 +1403,27 @@ const Page = (() => {
 
     const render = () => {
       fill(container, rows.map((c) => {
-        const active = !!c.attendance_active;
         const schedules = (c.allocations || []).map((a) => `<div class="item"><b>${U.esc(a.day)}</b> · ${U.esc(a.start_time)}–${U.esc(a.end_time)} · ${U.esc(a.room || '')}</div>`).join('');
-        const todaySchedule = c.today_schedule ? `<div class="card pad" style="margin:10px 0"><b>Today</b><div>${U.esc(c.today_schedule.start_time)}–${U.esc(c.today_schedule.end_time)} · ${U.esc(c.today_schedule.kind)}</div></div>` : `<div class="card pad" style="margin:10px 0"><b>Today</b><div class="muted">No scheduled class today for this course.</div></div>`;
+        const today = c.today_schedules || [];
+        const todaySchedule = today.length ? today.map((s,i) => {
+          const active=!!s.active, complete=!!s.attendance_complete;
+          const cls=!active ? 'danger' : (complete ? 'success' : 'warning');
+          const label=!active ? 'Attendance unavailable' : (complete ? 'Attendance complete' : 'Mark Attendance');
+          return `<div class="card pad" style="margin:8px 0;border-left:4px solid var(--${!active?'danger':complete?'success':'warning'});display:flex;justify-content:space-between;align-items:center;gap:12px">
+            <div><b>${U.esc(s.start_time)}–${U.esc(s.end_time)}</b><div class="muted">${U.esc(s.kind||'regular')} · ${s.marked_count||0}/${s.student_count||0} marked</div></div>
+            <button class="btn ${cls} small" data-attendance="${c.id}" data-start-time="${U.esc(s.start_time)}" data-end-time="${U.esc(s.end_time)}" ${active?'':'disabled'}>${label}</button>
+          </div>`;
+        }).join('') : `<div class="card pad" style="margin:10px 0;display:flex;justify-content:space-between;align-items:center"><div><b>Today</b><div class="muted">No class is currently scheduled for this course.</div></div><button class="btn danger small" disabled>Attendance unavailable</button></div>`;
+        const current= today.find(s=>s.active);
         return `<article class="card pad">
           <h3>${U.esc(c.class_name)} · ${U.esc(c.batch)}</h3>
           <p class="muted">${U.esc(c.subject)} · ${U.esc(c.room || 'No room')}</p>
           <p><b>${c.student_count}</b> students</p>
-          ${todaySchedule}
+          <div><b>Today's sessions</b>${todaySchedule}</div>
           <details><summary>Normal weekly schedule</summary><div style="margin-top:8px">${schedules || '<div class="empty">No schedule assigned.</div>'}</div></details>
-          <div class="right" style="justify-content:space-between;align-items:center;margin-top:14px">
-            <span class="badge ${active ? 'active' : 'inactive'}">${active ? 'Class active' : 'Outside class hours'}</span>
-            <div class="right">
-              <button class="btn secondary small" data-see-attendance="${c.id}">See Attendance</button>
-              <button class="btn ${active ? 'success' : 'danger'} small" data-attendance="${c.id}" ${active ? '' : 'disabled'}>${active ? 'Attendance' : 'Attendance unavailable'}</button>
-            </div>
+          <div class="right" style="justify-content:flex-end;align-items:center;margin-top:14px">
+            <span class="badge ${current ? (current.attendance_complete?'active':'pending') : 'inactive'}">${current ? (current.attendance_complete?'Attendance complete':'Class ongoing') : 'Outside class hours'}</span>
+            <button class="btn secondary small" data-see-attendance="${c.id}">See Attendance</button>
           </div>
         </article>`;
       }).join('') || '<div class="empty">No classes assigned.</div>');
@@ -1432,9 +1434,9 @@ const Page = (() => {
       catch (e) { U.toast(e.message || 'Could not load classes', 'error'); }
     };
 
-    const openAttendance = async (classId) => {
+    const openAttendance = async (classId, startTime, endTime) => {
       try {
-        const d = await Api.get(`/teacher/classes/${classId}/attendance`);
+        const d = await Api.get(`/teacher/classes/${classId}/attendance`, {start_time:startTime, end_time:endTime});
         if (!d.active) { await refresh(); return U.toast('Attendance is only available during class hours', 'error'); }
 
         // Keep all changes locally. Nothing is written to the database until Submit Attendance.
@@ -1510,6 +1512,7 @@ const Page = (() => {
           submitBtn.textContent='Submitting…';
           try{
             await Api.post(`/teacher/classes/${classId}/attendance`,{
+              start_time:d.start_time, end_time:d.end_time,
               attendance:[...marks.entries()].map(([student_id,status])=>({student_id,status}))
             });
             U.toast('Attendance submitted successfully');
@@ -1555,7 +1558,7 @@ const Page = (() => {
           target.innerHTML=(data.history||[]).map(day=>`
             <div class="card pad" style="margin-bottom:12px">
               <div class="right" style="justify-content:space-between;align-items:center">
-                <div><b>${U.date(day.date)}</b> <span class="muted">(${U.esc(day.day)})</span></div>
+                <div><b>${U.date(day.date)}</b> <span class="muted">(${U.esc(day.day)})</span>${day.start_time?` <span class="badge active">${U.esc(day.start_time)}–${U.esc(day.end_time||'')}</span>`:' <span class="muted">Legacy/unspecified session</span>'}</div>
                 <span class="badge active">Present ${day.present} · Absent ${day.absent}</span>
               </div>
               <div class="table" style="margin-top:10px"><table>
@@ -1591,7 +1594,7 @@ const Page = (() => {
 
     container?.addEventListener('click', (e) => {
       const attendance=e.target.closest('[data-attendance]');
-      if(attendance && !attendance.disabled)openAttendance(Number(attendance.dataset.attendance));
+      if(attendance && !attendance.disabled)openAttendance(Number(attendance.dataset.attendance),attendance.dataset.startTime,attendance.dataset.endTime);
       const history=e.target.closest('[data-see-attendance]');
       if(history)openAttendanceHistory(Number(history.dataset.seeAttendance));
     });
@@ -1736,7 +1739,9 @@ const Page = (() => {
 
   async function studentFees() {
     const d = await Api.get('/student/dashboard'); const f = await Api.get(`/fees/student/${d.student.id}`);
-    fill(q('[data-fees]'), `<div class="g2"><div><div class="muted">Current monthly fee</div><div class="statv">${U.money(f.current_monthly_fee)}</div></div><div><div class="muted">Current status</div><div class="statv">${U.esc(d.current_fee.status)}</div></div></div><div class="table" style="margin-top:18px"><table><tr><th>Month</th><th>Amount</th><th>Status</th><th>Payment Date</th><th>Receipt</th></tr>${(f.history || []).map((h) => `<tr><td>${U.esc(h.month_label)}</td><td>${U.money(h.amount)}</td><td><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></td><td>${h.payment_date ? U.date(h.payment_date) : '—'}</td><td>${U.esc(h.receipt_number || '—')}</td></tr>`).join('')}</table></div>`);
+    const totalDue=Number(f.total_due||0);
+    const totalPaid=Number(f.total_paid||0);
+    fill(q('[data-fees]'), `<div class="g3"><div><div class="muted">Current monthly fee</div><div class="statv">${U.money(f.current_monthly_fee)}</div></div><div><div class="muted">Total Paid</div><div class="statv">${U.money(totalPaid)}</div><small class="muted">All recorded fee payments</small></div><div><div class="muted">Total Due</div><div class="statv">${U.money(totalDue)}</div><small class="muted">All unpaid months + applicable fines</small></div></div><div class="table" style="margin-top:18px"><table><tr><th>Month</th><th>Total Amount</th><th>Paid</th><th>Remaining</th><th>Status</th><th>Payment Date</th><th>Receipt</th></tr>${(f.history || []).map((h) => `<tr><td>${U.esc(h.month_label)}</td><td>${U.money(h.amount)}</td><td>${U.money(h.paid_amount)}</td><td><b>${U.money(h.due_amount)}</b></td><td><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'PARTIAL' ? 'partial' : h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></td><td>${h.payment_date ? U.date(h.payment_date) : '—'}</td><td>${U.esc(h.receipt_number || '—')}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No fee history.</td></tr>'}</table></div>`);
   }
 
   return { auth, dashboard, teachersPage, studentsPage, allClasses, registerPage, feeStructure, allocationPage, feePayment, receipts, receiptPrint, attachmentsPage, workPage, studentList, studentFees, teacherStudents, teacherClasses, auditLogs, studentDetails, adminComplaints, enquiries, studentComplaints, reportsPage, analyticsPage };

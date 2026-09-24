@@ -281,6 +281,9 @@ window.RMCTIProfiles = {
     const feeData = fee.status === 'fulfilled' ? fee.value : null;
     const attendance = attendanceMonth.status === 'fulfilled' ? attendanceMonth.value : null;
     const current = feeData?.history?.[0] || {};
+    const totalPaid = Number(feeData?.total_paid ?? student?.fee_summary?.total_paid ?? 0);
+    const totalDue = Number(feeData?.total_due ?? student?.fee_summary?.total_due ?? 0);
+    const overallStatus = totalDue <= 0 && (feeData?.history?.length || feeData?.current_monthly_fee) ? 'PAID' : (totalDue > 0 ? 'DUE' : 'N/A');
     const attendanceRows = Object.values(attendance?.records || {});
     const present = attendanceRows.filter((x) => x.status === 'present').length;
     const absent = attendanceRows.filter((x) => x.status === 'absent').length;
@@ -323,9 +326,9 @@ window.RMCTIProfiles = {
               <div><small>School / College</small><b>${esc(student.school_name || '—')}</b></div>
             </div></div>
             <div class="profile-card"><h3>Fee Status</h3><div class="profile-money-grid">
-              <div><small>Paid</small><b>${U.money(current.paid_amount || 0)}</b></div>
-              <div class="warning-money"><small>Due</small><b>${U.money(current.due_amount || 0)}</b></div>
-            </div><span class="badge ${String(current.status||'due').toLowerCase()}">${esc(current.status || 'N/A')}</span></div>
+              <div><small>Total Paid</small><b>${U.money(totalPaid)}</b></div>
+              <div class="warning-money"><small>Total Due</small><b>${U.money(totalDue)}</b></div>
+            </div><span class="badge ${String(overallStatus).toLowerCase()}">${esc(overallStatus)}</span><small class="muted" style="display:block;margin-top:8px">Includes all outstanding months and applicable fines.</small></div>
           </div>
           <div class="profile-card"><h3>Courses</h3>${courseHtml}</div>
           <div class="profile-card"><h3>Guardian</h3><div class="detail-grid">

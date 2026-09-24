@@ -100,6 +100,29 @@ def ensure_attendance_marker():
             db.session.rollback()
 
 
+def ensure_attendance_sessions():
+    """Make attendance records session-specific for multiple classes per day."""
+    inspector=inspect(db.engine)
+    if "attendance" not in inspector.get_table_names():
+        return
+    existing={c["name"] for c in inspector.get_columns("attendance")}
+    if "session_start_time" not in existing:
+        db.session.execute(text("ALTER TABLE attendance ADD COLUMN session_start_time TIME NULL AFTER attendance_date"))
+    if "session_end_time" not in existing:
+        db.session.execute(text("ALTER TABLE attendance ADD COLUMN session_end_time TIME NULL AFTER session_start_time"))
+    # Replace the legacy one-record-per-student/class/day constraint.
+    indexes={ix.get("name") for ix in inspect(db.engine).get_indexes("attendance")}
+    if "uq_attendance_student_class_date" in indexes:
+        try: db.session.execute(text("ALTER TABLE attendance DROP INDEX uq_attendance_student_class_date"))
+        except Exception: db.session.rollback()
+    indexes={ix.get("name") for ix in inspect(db.engine).get_indexes("attendance")}
+    if "uq_attendance_student_class_session" not in indexes:
+        try:
+            db.session.execute(text("ALTER TABLE attendance ADD UNIQUE KEY uq_attendance_student_class_session (student_id,class_id,attendance_date,session_start_time,session_end_time)"))
+        except Exception:
+            db.session.rollback()
+
+
 def ensure_complaint_class():
     inspector=inspect(db.engine)
     if "complaints" not in inspector.get_table_names() or "classes" not in inspector.get_table_names():
@@ -240,6 +263,7 @@ with app.app_context():
     ensure_token_blocklist()
     ensure_enquiries()
     ensure_attendance_marker()
+    ensure_attendance_sessions()
     ensure_complaint_class()
     ensure_schedule_exceptions()
     ensure_personal_fields()
