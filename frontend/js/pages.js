@@ -762,7 +762,10 @@ const Page = (() => {
     const [teachers, classes, subjects] = await Promise.all([Api.get('/teachers', { status: 'active' }), Api.get('/classes', { status: 'active', include_unassigned: '1' }), Api.get('/subjects')]);
     const teacherPicker = q('[data-choose-teachers]');
     const teacherSummary = q('[data-selected-teachers]');
+    const coursePicker = q('[data-choose-courses]');
+    const courseSummary = q('[data-selected-courses]');
     let selectedTeacherIds = new Set();
+    let selectedClassIds = new Set();
 
     const renderTeacherSummary = () => {
       const selected = teachers.filter(t => selectedTeacherIds.has(Number(t.id)));
@@ -792,6 +795,40 @@ const Page = (() => {
         renderTeacherSummary();
       });
     };
+
+    const renderCourseSummary = () => {
+      const selected = classes.filter(c => selectedClassIds.has(Number(c.id)));
+      if (coursePicker) coursePicker.textContent = selected.length ? `Choose Courses (${selected.length})` : 'Choose Courses';
+      if (courseSummary) courseSummary.textContent = selected.length ? selected.map(c => `${c.class_name} · ${c.batch}`).join(', ') : '0 courses selected';
+      const single = q('[data-class]');
+      if (single && selected.length) single.value = String(selected[0].id);
+    };
+
+    const openCoursePicker = () => {
+      const html = `<div>
+        <p class="muted" style="margin-top:0">Select one or multiple courses. The same teachers and selected time slots will be applied to every selected course.</p>
+        <div style="display:grid;gap:8px;max-height:55vh;overflow:auto">
+          ${classes.map(c => `<label class="card" style="display:flex;align-items:center;gap:10px;padding:11px;cursor:pointer">
+            <input type="checkbox" value="${c.id}" data-course-choice ${selectedClassIds.has(Number(c.id))?'checked':''}>
+            <span><b>${U.esc(c.class_name)}</b><small class="muted" style="display:block">${U.esc(c.batch)} · ${U.esc(c.subject)}${c.room ? ` · Room ${U.esc(c.room)}` : ''}</small></span>
+          </label>`).join('') || '<div class="empty">No active courses found.</div>'}
+        </div>
+        <div class="right" style="justify-content:flex-end;margin-top:14px">
+          <button type="button" class="btn secondary" data-close>Cancel</button>
+          <button type="button" class="btn primary" data-save-courses>Use Selected Courses</button>
+        </div>
+      </div>`;
+      const m = U.modal('Choose Courses', html);
+      m.querySelector('[data-save-courses]')?.addEventListener('click', () => {
+        selectedClassIds = new Set([...m.querySelectorAll('[data-course-choice]:checked')].map(x => Number(x.value)));
+        if (!selectedClassIds.size) { U.toast('Select at least one course', 'error'); return; }
+        m.remove();
+        renderCourseSummary();
+      });
+    };
+
+    coursePicker?.addEventListener('click', openCoursePicker);
+    renderCourseSummary();
 
     teacherPicker?.addEventListener('click', openTeacherPicker);
     renderTeacherSummary();
@@ -1000,6 +1037,7 @@ const Page = (() => {
         const id = form.dataset.editId;
         const days = [...form.querySelectorAll('[name="day_of_week_multi"]:checked')].map(x => Number(x.value));
         if (!selectedTeacherIds.size) throw Error('Choose at least one teacher');
+        if (!id && !selectedClassIds.size) throw Error('Choose at least one course');
         if (!days.length) throw Error('Select at least one day');
 
         const daySchedules = days.map(day => ({
@@ -1014,11 +1052,13 @@ const Page = (() => {
         if (!id) {
           const payload = formObj(form);
           payload.teacher_ids = [...selectedTeacherIds];
+          payload.class_ids = [...selectedClassIds];
           payload.day_schedules = daySchedules;
           delete payload.teacher_id; delete payload.start_time; delete payload.end_time;
+          delete payload.class_id;
           delete payload.day_of_week_multi; delete payload.day_of_week;
           await Api.post('/teacher-classes', payload);
-          U.toast(`${selectedTeacherIds.size} teacher${selectedTeacherIds.size===1?'':'s'} allocated`);
+          U.toast(`${selectedClassIds.size} course${selectedClassIds.size===1?'':'s'} assigned to ${selectedTeacherIds.size} teacher${selectedTeacherIds.size===1?'':'s'}`);
         } else {
           // Editing remains one recurring allocation at a time.
           const payload = {
@@ -1034,7 +1074,9 @@ const Page = (() => {
           U.toast('Allocation updated');
         }
         selectedTeacherIds = new Set();
+        selectedClassIds = new Set();
         renderTeacherSummary();
+        renderCourseSummary();
         form.reset();
         renderDayTimes();
         await load();
@@ -1048,6 +1090,8 @@ const Page = (() => {
       if (edit) {
         selectedTeacherIds = new Set([Number(e.target.dataset.teacher)]);
         renderTeacherSummary();
+        selectedClassIds = new Set([Number(e.target.dataset.classId)]);
+        renderCourseSummary();
         q('[data-class]').value = e.target.dataset.classId;
         q('[name="day_of_week"]').value = e.target.dataset.day;
         form.querySelectorAll('[name="day_of_week_multi"]').forEach(cb=>cb.checked=Number(cb.value)===Number(e.target.dataset.day));

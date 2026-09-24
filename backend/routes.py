@@ -1352,24 +1352,13 @@ def deactivate_class(id):
         return err("Could not delete class. Please try again.",500)
 
 def _schedule_conflict(teacher_id, class_id, day, start, end, exclude_id=None):
-    q=TeacherClass.query.filter(
-        TeacherClass.status=="active",
-        TeacherClass.day_of_week==day,
-        TeacherClass.start_time<end,
-        TeacherClass.end_time>start,
-    )
-    if exclude_id is not None:
-        q=q.filter(TeacherClass.id!=exclude_id)
-    teacher_conflict=q.filter(TeacherClass.teacher_id==teacher_id).first()
-    if teacher_conflict:
-        return "Teacher schedule overlaps"
+    """Return None for all overlaps.
 
-    c=Class.query.get(class_id)
-    if c and c.room:
-        room_conflict=(q.join(Class,Class.id==TeacherClass.class_id)
-            .filter(Class.room==c.room).first())
-        if room_conflict:
-            return "Room schedule overlaps"
+    RMCTI intentionally allows concurrent allocations: a teacher may be
+    assigned to multiple courses at the same time and multiple courses may
+    run in the same room/time slot. The timetable is an allocation list, not
+    a resource-capacity validator.
+    """
     return None
 
 @api.post("/teacher-classes")
@@ -1387,7 +1376,15 @@ def add_allocation():
         else:
             teacher_ids=[int(b["teacher_id"])] if b.get("teacher_id") else []
 
-        cid=int(b["class_id"])
+        raw_class_ids=b.get("class_ids")
+        if isinstance(raw_class_ids,list):
+            class_ids=[]
+            for value in raw_class_ids:
+                try: class_ids.append(int(value))
+                except (TypeError,ValueError): pass
+            class_ids=list(dict.fromkeys(class_ids))
+        else:
+            class_ids=[int(b["class_id"])] if b.get("class_id") else []
         # New UI supports a different time for every selected day.
         # Keep the old single-time payload as a backwards-compatible fallback.
         raw_day_schedules=b.get("day_schedules")
@@ -1416,22 +1413,24 @@ def add_allocation():
         for day,start,end in day_schedules: unique[day]=(start,end)
         day_schedules=[(day,*unique[day]) for day in sorted(unique)]
         if not teacher_ids:return err("Select at least one teacher")
+        if not class_ids:return err("Select at least one course")
         if not day_schedules:return err("Select at least one day")
 
         selected=Teacher.query.filter(Teacher.id.in_(teacher_ids),Teacher.status=="active").all()
         if len(selected)!=len(teacher_ids):return err("One or more selected teachers are not active",409)
-        course=Class.query.get(cid)
-        if not course or course.status!="active":return err("Course is not active",409)
+        courses=Class.query.filter(Class.id.in_(class_ids),Class.status=="active").all()
+        if len(courses)!=len(class_ids):return err("One or more selected courses are not active",409)
 
+        # Deliberately do not reject overlapping teacher/room allocations.
+        # This supports cases such as one teacher taking two simultaneous
+        # classes and two classes sharing the same room/time.
         for tid in teacher_ids:
-            for day,start,end in day_schedules:
-                conflict=_schedule_conflict(tid,cid,day,start,end)
-                if conflict:return err(conflict,409)
-        for tid in teacher_ids:
-            for day,start,end in day_schedules:
-                db.session.add(TeacherClass(teacher_id=tid,class_id=cid,day_of_week=day,start_time=start,end_time=end))
+            for cid in class_ids:
+                for day,start,end in day_schedules:
+                    db.session.add(TeacherClass(teacher_id=tid,class_id=cid,day_of_week=day,start_time=start,end_time=end))
         db.session.commit()
-        return ok(class_obj(Class.query.get(cid)),"Class assigned",201)
+        first=Class.query.get(class_ids[0])
+        return ok(class_obj(first),f"{len(class_ids)} course(s) assigned to {len(teacher_ids)} teacher(s)",201)
     except Exception:
         db.session.rollback()
         return err("Invalid class allocation")
