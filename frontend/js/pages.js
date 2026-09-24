@@ -298,7 +298,7 @@ const Page = (() => {
 
     const load = async () => {
       students = await Api.get('/students', { q: search?.value || '', status: status?.value || '' });
-      fill(body, students.map((s) => `<tr><td>${U.esc(s.student_id)}</td><td>${U.esc(s.name)}</td><td>${U.esc((s.classes || []).map((c) => c.class_name).join(', ') || '—')}</td><td>${U.esc(s.phone || '—')}</td><td>${U.esc(s.parent?.name || '—')}</td><td>${U.esc(s.parent?.phone || '—')}</td><td><span class="badge ${s.current_month_status === 'PAID' ? 'paid' : s.current_month_status === 'DUE' ? 'due' : 'inactive'}">${U.esc(s.current_month_status || 'N/A')}</span></td><td><button class="btn success small" data-allot="${s.id}">＋ Allot Class</button> <button class="btn secondary small" data-attendance="${s.id}">See Attendance</button> <button class="btn secondary small" data-view="${s.id}">Full Details</button> <button class="btn secondary small" data-idcard="${s.id}">ID Card</button> <button class="btn warning small" data-edit="${s.id}">Edit</button> <button class="btn danger small" data-del="${s.id}">Unregister</button></td></tr>`).join('') || tableEmpty(8));
+      fill(body, students.map((s) => `<tr><td>${U.esc(s.student_id)}</td><td>${U.esc(s.name)}</td><td>${U.esc((s.classes || []).map((c) => c.class_name).join(', ') || '—')}</td><td>${U.esc(s.phone || '—')}</td><td>${U.esc(s.parent?.name || '—')}</td><td>${U.esc(s.parent?.phone || '—')}</td><td><span class="badge ${s.current_month_status === 'PAID' ? 'paid' : s.current_month_status === 'DUE' ? 'due' : 'inactive'}">${U.esc(s.current_month_status || 'N/A')}</span></td><td><button class="btn success small" data-allot="${s.id}">＋ Allot Class</button> <button class="btn secondary small" data-attendance="${s.id}">See Attendance</button> <button class="btn secondary small" data-view="${s.id}">Full Details</button> <button class="btn secondary small" data-idcard="${s.id}">ID Card</button> <button class="btn warning small" data-edit="${s.id}">Edit</button> <button class="btn danger small" data-del="${s.id}">Delete</button></td></tr>`).join('') || tableEmpty(8));
     };
 
     const openAllot = async (studentId) => {
@@ -330,7 +330,7 @@ const Page = (() => {
       const id = e.target.dataset.view || e.target.dataset.edit || e.target.dataset.del || e.target.dataset.allot || e.target.dataset.attendance; if (!id) return;
       if (e.target.dataset.allot) return openAllot(id);
       if (e.target.dataset.attendance) { const st=students.find(x=>String(x.id)===String(id)); if(st) return adminStudentAttendance(st); }
-      if (e.target.dataset.del) return adminVerifiedAction('Confirm student unregistration', 'Enter an administrator ID and password to confirm. The student will become inactive; historical records remain.', async () => { await Api.del(`/students/${id}`); U.toast('Student unregistered'); load(); });
+      if (e.target.dataset.del) return adminVerifiedAction('Delete student permanently', 'This permanently deletes the student, class allotments, fee payments/receipts, attendance and complaints. This action cannot be undone.', async () => { await Api.del(`/students/${id}`); U.toast('Student deleted permanently'); await load(); });
       const st = await Api.get(`/students/${id}`);
       if (e.target.dataset.edit) {
         const m=U.modal('Edit student', `<form id="editStudent" class="form">
@@ -844,22 +844,58 @@ const Page = (() => {
         dayTimeList.innerHTML = '<div class="empty" style="padding:10px">Select at least one day above.</div>';
         return;
       }
-      dayTimeList.innerHTML = checked.map(day => `
-        <div class="card pad allocation-day-time-row" style="display:grid;grid-template-columns:minmax(110px,1fr) minmax(120px,1fr) minmax(120px,1fr);gap:8px;align-items:end">
-          <div><b>${dayNames[day]}</b><div class="muted" style="font-size:11px">Weekly</div></div>
-          <div><label class="label">Start</label><input class="input" type="time" data-day-start="${day}" value="${U.esc(preset[day]?.start || '')}" required></div>
-          <div><label class="label">End</label><input class="input" type="time" data-day-end="${day}" value="${U.esc(preset[day]?.end || '')}" required></div>
-        </div>`).join('');
+      dayTimeList.innerHTML = checked.map(day => {
+        const raw = Array.isArray(preset[day]) ? preset[day] : (preset[day] ? [preset[day]] : [{}]);
+        const slots = raw.length ? raw : [{}];
+        return `<div class="card pad allocation-day-time-group" data-day-group="${day}" style="display:grid;gap:8px">
+          <div class="right" style="justify-content:space-between;align-items:center">
+            <div><b>${dayNames[day]}</b><div class="muted" style="font-size:11px">Add multiple recurring sessions on this day if needed.</div></div>
+            <button type="button" class="btn secondary small" data-add-day-slot="${day}">＋ Add another time</button>
+          </div>
+          <div data-day-slots="${day}" style="display:grid;gap:8px">
+            ${slots.map((slot,i) => `<div class="allocation-slot" data-slot-row="${day}" style="display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px,1fr) auto;gap:8px;align-items:end">
+              <div><label class="label">Start</label><input class="input" type="time" data-day-start="${day}" value="${U.esc(slot?.start || '')}" required></div>
+              <div><label class="label">End</label><input class="input" type="time" data-day-end="${day}" value="${U.esc(slot?.end || '')}" required></div>
+              <button type="button" class="btn danger small" data-remove-day-slot="${day}" ${slots.length===1?'disabled':''}>Remove</button>
+            </div>`).join('')}
+          </div>
+        </div>`;
+      }).join('');
+    };
+
+    const captureDayTimes = () => {
+      const state = {};
+      dayTimeList?.querySelectorAll('[data-day-slots]').forEach(group => {
+        const day = Number(group.dataset.daySlots);
+        state[day] = [...group.querySelectorAll('[data-slot-row]')].map(row => ({
+          start: row.querySelector('[data-day-start]')?.value || '',
+          end: row.querySelector('[data-day-end]')?.value || ''
+        }));
+      });
+      return state;
     };
 
     allocationForm?.querySelectorAll('[name="day_of_week_multi"]').forEach(cb => cb.addEventListener('change', () => {
-      const previous = {};
-      dayTimeList?.querySelectorAll('[data-day-start]').forEach(input => {
-        const day = Number(input.dataset.day);
-        previous[day] = {start: input.value, end: dayTimeList.querySelector(`[data-day-end="${day}"]`)?.value || ''};
-      });
-      renderDayTimes(previous);
+      renderDayTimes(captureDayTimes());
     }));
+
+    dayTimeList?.addEventListener('click', e => {
+      const addDay = e.target.closest('[data-add-day-slot]')?.dataset.addDaySlot;
+      const removeDay = e.target.closest('[data-remove-day-slot]')?.dataset.removeDaySlot;
+      if (addDay !== undefined) {
+        const state = captureDayTimes();
+        state[Number(addDay)] = [...(state[Number(addDay)] || []), {}];
+        renderDayTimes(state);
+        return;
+      }
+      if (removeDay !== undefined) {
+        const state = captureDayTimes();
+        const day = Number(removeDay);
+        if ((state[day] || []).length > 1) state[day].pop();
+        renderDayTimes(state);
+      }
+    });
+
     renderDayTimes();
 
     const courseManager = document.createElement('div');
@@ -1040,13 +1076,21 @@ const Page = (() => {
         if (!id && !selectedClassIds.size) throw Error('Choose at least one course');
         if (!days.length) throw Error('Select at least one day');
 
-        const daySchedules = days.map(day => ({
-          day,
-          start_time: form.querySelector(`[data-day-start="${day}"]`)?.value || '',
-          end_time: form.querySelector(`[data-day-end="${day}"]`)?.value || ''
-        }));
-        if (daySchedules.some(x => !x.start_time || !x.end_time || x.start_time >= x.end_time)) {
-          throw Error('Enter a valid start and end time for every selected day');
+        const daySchedules = [];
+        for (const day of days) {
+          const group = dayTimeList?.querySelector(`[data-day-slots="${day}"]`);
+          const starts = [...(group?.querySelectorAll('[data-day-start]') || [])];
+          const ends = [...(group?.querySelectorAll('[data-day-end]') || [])];
+          starts.forEach((input,i) => {
+            daySchedules.push({
+              day,
+              start_time: input.value || '',
+              end_time: ends[i]?.value || ''
+            });
+          });
+        }
+        if (!daySchedules.length || daySchedules.some(x => !x.start_time || !x.end_time || x.start_time >= x.end_time)) {
+          throw Error('Enter a valid start and end time for every selected session');
         }
 
         if (!id) {

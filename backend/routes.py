@@ -1408,10 +1408,9 @@ def add_allocation():
             if start>=end:return err("End time must be after start time")
             day_schedules=[(day,start,end) for day in days]
 
-        # De-duplicate days so one day cannot accidentally be allocated twice.
-        unique={}
-        for day,start,end in day_schedules: unique[day]=(start,end)
-        day_schedules=[(day,*unique[day]) for day in sorted(unique)]
+        # Keep every slot exactly as submitted. A course may intentionally
+        # have two or more recurring sessions on the same weekday.
+        day_schedules=[(day,start,end) for day,start,end in day_schedules]
         if not teacher_ids:return err("Select at least one teacher")
         if not class_ids:return err("Select at least one course")
         if not day_schedules:return err("Select at least one day")
@@ -1559,11 +1558,35 @@ def edit_student(id):
 @api.delete("/students/<int:id>")
 @roles("admin")
 def remove_student(id):
+    """Permanently delete a student and student-owned records."""
     s=Student.query.get(id)
     if not s:return err("Student not found",404)
-    s.status="inactive";u=User.query.get(s.user_id);u.is_active=False
-    for x in StudentClass.query.filter_by(student_id=id).all():x.status="inactive"
-    db.session.commit();return ok(message="Student unregistered successfully")
+    try:
+        uid=s.user_id
+        # Delete dependent records first because several production databases
+        # were created without ON DELETE CASCADE on these student FKs.
+        payment_ids=[x.id for x in FeePayment.query.filter_by(student_id=id).all()]
+        if payment_ids:
+            Receipt.query.filter(Receipt.fee_payment_id.in_(payment_ids)).delete(synchronize_session=False)
+            FeePayment.query.filter(FeePayment.id.in_(payment_ids)).delete(synchronize_session=False)
+        StudentClass.query.filter_by(student_id=id).delete(synchronize_session=False)
+        Attendance.query.filter_by(student_id=id).delete(synchronize_session=False)
+        Complaint.query.filter_by(student_id=id).delete(synchronize_session=False)
+        NoticeAttachment.query.filter_by(target_student_id=id).update(
+            {NoticeAttachment.target_student_id: None}, synchronize_session=False
+        )
+        # Keep audit history intact; it is an administrative record and does
+        # not own the student's row.
+        audit(current_user().id,"delete","student",id,f"Deleted student {s.student_id} · {s.name}")
+        db.session.delete(s)
+        if uid:
+            u=User.query.get(uid)
+            if u: db.session.delete(u)
+        db.session.commit()
+        return ok(message="Student deleted permanently")
+    except Exception:
+        db.session.rollback()
+        return err("Could not delete student. Please try again.",500)
 
 @api.get("/students/<int:id>/attendance")
 @roles("admin")
@@ -2122,8 +2145,12 @@ def my_classes():
                                              schedule_date=now.date(),teacher_id=t.id).all()
     class_ids.update(x.class_id for x in extras)
     classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1]),Class.status=="active").all()}
-    items={x["id"]:x for x in _class_objs_bulk(classes.values())};out=[]
+    items={x["id"]:x for x in _class_objs_bulk(classes.values())};out=[];seen_class_ids=set()
     for a in allocations:
+        # Multiple TeacherClass rows may represent multiple sessions of the
+        # same course. The teacher portal should show one course card.
+        if a.class_id in seen_class_ids:continue
+        seen_class_ids.add(a.class_id)
         item=items.get(a.class_id)
         if not item:continue
         item=dict(item)
