@@ -216,6 +216,14 @@ const Page = (() => {
 
       const recent=recentClasswork.map((x)=>`<div class="dashboard-list-row"><div><b>${U.esc(x.topic||x.title||'Classwork')}</b><small>${U.esc(x.subject||'')} · ${U.esc(x.class_name||'')} · ${U.date(x.work_date)}</small></div><span class="badge completed">UPDATED</span></div>`).join('');
       setDashboardContent('[data-teacher-recent]', recent, '<div class="empty-card"><b>No recent classwork</b><span>Your latest classwork entries will appear here.</span></div>');
+
+      const upcoming=Array.isArray(d.upcoming_classes)?d.upcoming_classes:[];
+      const upcomingHtml=upcoming.map((c)=>{
+        const dt=new Date(`${c.date}T${c.start_time}:00+05:30`);
+        const label=Number.isNaN(dt.getTime())?c.date:new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',weekday:'short',day:'2-digit',month:'short'}).format(dt);
+        return `<article class="today-class-row teacher-today-row"><span class="today-time">${U.esc(label)}<small>${U.esc(U.time(c.start_time))}–${U.esc(U.time(c.end_time))}</small></span><span class="today-class-copy"><b>${U.esc(c.subject||'Course')}</b><small>${U.esc(c.class_name||'')} · ${U.esc(c.batch||'')}</small><small>${U.esc(c.room||'No room')}</small></span><span class="badge scheduled">UPCOMING</span></article>`;
+      }).join('');
+      setDashboardContent('[data-teacher-upcoming]', upcomingHtml, '<div class="empty-card"><b>No upcoming classes</b><span>No classes are scheduled for tomorrow or the next few days.</span></div>');
     }
 
     if (role === 'student') {
@@ -239,7 +247,7 @@ const Page = (() => {
         const feeStatus=String(d.current_fee?.status||'N/A').toUpperCase();
         const feeClass=feeStatus==='PAID'?'paid':feeStatus==='PARTIAL'?'partial':feeStatus==='DUE'?'due':'inactive';
         fee.classList.remove('loading');
-        fee.innerHTML = `<span class="badge ${feeClass}">${U.esc(feeStatus)}</span><div class="statv">${U.money(d.current_fee?.amount || 0)}</div>`;
+        fee.innerHTML = `<span class="badge ${feeClass}">${U.esc(feeStatus)}</span><div class="statv">${U.money(d.current_fee?.amount || 0)}</div><small class="muted">Total due including fees + fine</small>`;
       }
 
       const next=q('[data-next-class]');

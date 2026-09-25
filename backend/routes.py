@@ -2159,12 +2159,15 @@ def student_for_user():
     return Student.query.filter_by(user_id=current_user().id).first()
 
 def _teacher_current_schedule(t, class_id, now=None):
+    # Dashboard needs the complete schedule for today, not only the class
+    # that is running at this exact minute.  The old implementation filtered
+    # to start_time <= now <= end_time, which made upcoming and completed
+    # classes disappear from the teacher dashboard.
     now=now or datetime.now(ZoneInfo("Asia/Kolkata"))
     c=Class.query.get(class_id)
     if not c or c.status!="active":return None
-    current_min=now.strftime("%H:%M")
     rows=_effective_class_schedule(c,now.date(),1)
-    return next((x for x in rows if x.get("teacher_id")==t.id and x["start_time"]<=current_min<=x["end_time"]),None)
+    return [x for x in rows if x.get("teacher_id")==t.id and x.get("date")==now.date().isoformat()]
 
 @api.get("/teacher/dashboard")
 @roles("teacher")
@@ -2179,13 +2182,35 @@ def teacher_dashboard():
     classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1])).all()}
     class_data={x["id"]:x for x in _class_objs_bulk(classes.values())}
     todays=[]
+    upcoming=[]
     for cid in class_ids:
-        row=_teacher_current_schedule(t,cid)
-        if row and cid in class_data:
-            todays.append(dict(class_data[cid],start_time=row["start_time"],end_time=row["end_time"],schedule_kind=row["kind"]))
-    recent=Classwork.query.filter_by(teacher_id=t.id).order_by(Classwork.work_date.desc()).limit(5).all()
+        rows=_teacher_current_schedule(t,cid) or []
+        if cid not in class_data: continue
+        for row in rows:
+            todays.append(dict(class_data[cid],start_time=row["start_time"],end_time=row["end_time"],schedule_kind=row["kind"],date=row.get("date",today.isoformat()),day=row.get("day")))
+
+        # Include the next 7 days so the dashboard can show tomorrow and
+        # upcoming classes without requiring the teacher to open My Classes.
+        c=classes.get(cid)
+        if c:
+            for row in _effective_class_schedule(c,today,8):
+                if row.get("teacher_id")!=t.id or row.get("date")<=today.isoformat(): continue
+                upcoming.append(dict(class_data[cid],start_time=row["start_time"],end_time=row["end_time"],schedule_kind=row["kind"],date=row["date"],day=row.get("day")))
+
+    # Avoid duplicate rows when a normal allocation and an exception resolve
+    # to the same session.
+    def unique_sessions(rows):
+        seen=set(); out=[]
+        for x in rows:
+            key=(x.get("class_id",x.get("id")),x.get("date"),x.get("start_time"),x.get("end_time"),x.get("teacher_id",t.id))
+            if key in seen: continue
+            seen.add(key); out.append(x)
+        return out
+
+    recent=Classwork.query.filter_by(teacher_id=t.id).order_by(Classwork.work_date.desc(),Classwork.id.desc()).limit(5).all()
     return ok({"teacher":teacher_obj(t),"total_students":len(ids),"total_classes":len(alloc)+len(extras),
-               "todays_classes":sorted(todays,key=lambda x:x["start_time"]),
+               "todays_classes":sorted(unique_sessions(todays),key=lambda x:x["start_time"]),
+               "upcoming_classes":sorted(unique_sessions(upcoming),key=lambda x:(x.get("date",""),x["start_time"]))[:10],
                "pending_homework":Homework.query.filter_by(teacher_id=t.id).filter(Homework.due_date>=today).count(),
                "recent_classwork":_classwork_objs_bulk(recent)})
 @api.get("/teacher/students")
@@ -2449,6 +2474,10 @@ def student_dashboard():
     class_ids=[c["class_id"] for c in x["classes"]]
     hw=[homework_obj(h) for h in Homework.query.filter(Homework.class_id.in_(class_ids or [-1]),Homework.due_date>=today).order_by(Homework.due_date).limit(5).all()]
     paid=FeePayment.query.filter_by(student_id=s.id,fee_month=month).first();fee=applicable_fee(s.id,month)
+    balances=_fee_month_balances(s.id)
+    total_due=sum((x["balance"] for x in balances),Decimal("0.00"))
+    base_due=sum((max(Decimal("0.00"),x["base"]-x["paid"]) for x in balances),Decimal("0.00"))
+    fine_due=max(Decimal("0.00"),total_due-base_due)
     classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1]),Class.status=="active").all()}
     todays=[]
     candidates=[]
@@ -2469,8 +2498,10 @@ def student_dashboard():
         next_item={"class_id":c.id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "",
                    "day":DAYS[row["day_of_week"]],"date":row["date"],"start_time":row["start_time"],"end_time":row["end_time"],
                    "teacher_name":row["teacher_name"],"kind":row["kind"]}
+    fee_status="PAID" if total_due<=0 else ("PARTIAL" if any(x["paid"]>0 for x in balances if x["balance"]>0) else "DUE")
     return ok({"student":x,"todays_classes":sorted(todays,key=lambda z:z["start_time"]),
-               "upcoming_homework":hw,"current_fee":{"amount":float(fee),"status":"PAID" if paid else ("DUE" if fee else "N/A")},
+               "upcoming_homework":hw,"current_fee":{"amount":float(total_due),"base_due":float(base_due),"fine_due":float(fine_due),"status":fee_status,"monthly_fee":float(fee)},
+               "total_fee_due":float(total_due),"total_fee_base_due":float(base_due),"total_fee_fine_due":float(fine_due),
                "next_class":next_item})
 @api.get("/student/routine")
 @roles("student")

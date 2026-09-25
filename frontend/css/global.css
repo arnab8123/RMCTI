@@ -1558,3 +1558,16 @@ body.sidebar-open .menu{position:relative;z-index:90}
     min-height: 96px;
   }
 }
+
+/* Dashboard spacing: keep a small 5px breathing gap around every dashboard box. */
+.dashboard-stat-grid > *, .student-dashboard-stat-grid > *, .dashboard-two-col > *, .dashboard-panel { margin:5px; }
+/* Centered compact confirmation / result dialogs so navigation never covers them. */
+.confirmbg{position:fixed;inset:0;z-index:220;background:rgba(2,6,23,.48);display:grid;place-items:center;padding:16px;}
+.confirmbox{width:min(430px,calc(100vw - 28px));background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.28);padding:20px;display:grid;grid-template-columns:42px minmax(0,1fr);gap:12px;align-items:start;}
+.confirmicon{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--primary) 14%,transparent);color:var(--primary);font-weight:900;font-size:20px;}
+.confirmcopy b{font-size:16px;}.confirmcopy p{margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.45;}
+.confirmactions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:6px;margin-top:4px;}
+.modalbg{z-index:200;}
+.toast{left:50%;right:auto;top:50%;transform:translate(-50%,-50%);z-index:230;width:min(380px,calc(100vw - 28px));}
+.toast-out{animation:rmcti-toast-out-center .18s ease forwards;}
+@keyframes rmcti-toast-out-center{to{transform:translate(-50%,-56%);opacity:0}}
