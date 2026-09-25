@@ -1127,6 +1127,7 @@ def create_schedule_exception():
         if not c or c.status!="active":return err("Course not found",404)
         kind=str(b.get("kind","")).strip().lower()
         if kind not in ("delete","extra","weekly_time"):return err("Invalid schedule action")
+        today=today_ist()
         ws=date.fromisoformat(str(b["week_start"]))
         if ws < _week_start(today_ist()):
             return err("Schedule changes can only be made for the current or a future week")
@@ -1160,8 +1161,8 @@ def create_schedule_exception():
         if kind=="reschedule":
             if _week_start(schedule_date)!=ws:
                 return err("Original date must belong to the selected week")
-        if kind in ("reschedule","weekly_time") and _week_start(target_date)!=ws:
-            return err("New date must belong to the selected week")
+        if kind in ("reschedule","weekly_time") and target_date < today:
+            return err("New date cannot be before today")
         if kind=="extra" and (not schedule_date or _week_start(schedule_date)!=ws):
             return err("Extra class date must belong to the selected week")
         if kind=="extra" and not teacher_id:

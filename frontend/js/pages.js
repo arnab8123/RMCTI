@@ -510,8 +510,9 @@ const Page = (() => {
               <small class="muted">Only classes actually scheduled on the selected week are shown.</small>
             </div>
             <div data-target-date-wrap style="display:none">
-              <label class="label">New date for this week</label>
-              <select class="select" name="target_date" data-target-date required></select>
+              <label class="label">New date</label>
+              <input class="input" type="date" name="target_date" data-target-date required min="${today}">
+              <small class="muted">Choose today or any future date. The date is not restricted to the selected week.</small>
             </div>
             <div data-extra-date-wrap style="display:none">
               <label class="label">Extra class date</label>
@@ -551,10 +552,15 @@ const Page = (() => {
 
         let scheduleRows=[];
 
-        const datesForWeek=ws=>[...Array(7)].map((_,i)=>dateAdd(ws,i));
-        const renderTargetDates=()=>{
-          const dates=datesForWeek(weekStart);
-          target.innerHTML=dates.map(d=>`<option value="${d}">${dayName[new Date(`${d}T00:00:00`).getDay()===0?6:new Date(`${d}T00:00:00`).getDay()-1]} · ${dateLabel(d)}</option>`).join('');
+        const renderTargetDate=()=>{
+          target.min=today;
+          const row=scheduleRows.find(x=>`${x.allocation_id || 'extra'}::${x.date}`===existing.value);
+          if(row){
+            const next=dateAdd(row.date,1);
+            target.value=next>=today ? next : today;
+          }else if(!target.value || target.value<today){
+            target.value=today;
+          }
         };
         const renderExisting=()=>{
           existing.innerHTML=scheduleRows.map((x,i)=>`<option value="${x.allocation_id || 'extra'}::${x.date}" data-row-index="${i}">${dateLabel(x.date)} · ${dayName[x.day_of_week]} · ${U.esc(x.start_time)}–${U.esc(x.end_time)} · ${U.esc(x.teacher_name||'No teacher')}</option>`).join('') || '<option value="">No scheduled class on this week</option>';
@@ -572,7 +578,7 @@ const Page = (() => {
           endInput.value=row.end_time||'';
           const d=new Date(`${row.date}T00:00:00`);
           const next=dateAdd(row.date,1);
-          target.value=next>=weekStart && next<=dateAdd(weekStart,6) ? next : row.date;
+          target.min=today; target.value=next>=today ? next : today;
         };
         const loadSchedule=async()=>{
           weekStart=getMonday(weekInput.value||today);
@@ -580,7 +586,7 @@ const Page = (() => {
           try{
             scheduleRows=await Api.get(`/classes/${classId}/schedule-week`,{week_start:weekStart});
             renderExisting();
-            renderTargetDates();
+            renderTargetDate();
             if(scheduleRows.length)syncSelectedClass();
             await loadChanges();
           }catch(e){
