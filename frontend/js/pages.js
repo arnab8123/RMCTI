@@ -81,8 +81,46 @@ const Page = (() => {
   }
 
   async function dashboard(role) {
-    const d = await Api.get(`/${role}/dashboard`);
-    document.querySelectorAll('[data-stat]').forEach((el) => { el.textContent = d[el.dataset.stat] ?? 0; });
+    // Render a safe value immediately so no dashboard card remains stuck in
+    // the loading state if a field is missing/null in the API response.
+    const setStat = (name, value, fallback = '0') => {
+      const el = document.querySelector(`[data-stat="${name}"]`);
+      if (!el) return;
+      const v = value === undefined || value === null || value === '' ? fallback : value;
+      el.textContent = String(v);
+      el.classList.remove('loading');
+    };
+    const setDashboardContent = (selector, html, fallback = '') => {
+      const el = q(selector);
+      if (!el) return;
+      el.classList.remove('loading');
+      el.innerHTML = html || fallback;
+    };
+
+    let d;
+    try {
+      d = await Api.get(`/${role}/dashboard`) || {};
+    } catch (error) {
+      // Never leave dashboard cards visually loading forever after a failed
+      // request. Show a useful state while preserving the rest of the page.
+      document.querySelectorAll('[data-stat]').forEach((el) => {
+        el.classList.remove('loading');
+        el.textContent = '—';
+      });
+      document.querySelectorAll('[data-today],[data-fee],[data-next-class],[data-homework],[data-today-classes],[data-teacher-recent]').forEach((el) => {
+        el.classList.remove('loading');
+        if (!el.innerHTML.trim() || el.innerHTML.includes('Loading…')) {
+          el.innerHTML = '<div class="empty-card"><b>Data unavailable</b><span>Please refresh the dashboard.</span></div>';
+        }
+      });
+      throw error;
+    }
+
+    document.querySelectorAll('[data-stat]').forEach((el) => {
+      const value = d[el.dataset.stat];
+      el.classList.remove('loading');
+      el.textContent = value === undefined || value === null || value === '' ? '0' : String(value);
+    });
 
     if (role === 'admin') {
       const dateNode=q('[data-dashboard-date]');
@@ -147,32 +185,72 @@ const Page = (() => {
     }
 
     if (role === 'teacher') {
-      document.querySelectorAll('[data-teacher-name]').forEach((el) => { el.textContent = d.teacher?.name || 'Teacher'; });
+      const todaysClasses = Array.isArray(d.todays_classes) ? d.todays_classes : [];
+      const recentClasswork = Array.isArray(d.recent_classwork) ? d.recent_classwork : [];
+
+      // Set every teacher stat explicitly. This avoids one missing API key
+      // preventing a card from displaying its value.
+      setStat('total_students', Number.isFinite(Number(d.total_students)) ? Number(d.total_students) : 0);
+      setStat('total_classes', Number.isFinite(Number(d.total_classes)) ? Number(d.total_classes) : 0);
+      setStat('pending_homework', Number.isFinite(Number(d.pending_homework)) ? Number(d.pending_homework) : 0);
+      setStat('today_classes_count', todaysClasses.length);
+
+      document.querySelectorAll('[data-teacher-name]').forEach((el) => {
+        el.textContent = d.teacher?.name || 'Teacher';
+        el.classList.remove('loading');
+      });
       const dateNode=q('[data-dashboard-date]');
       if(dateNode) dateNode.textContent=U.date(U.today());
-      const todayRows=(d.todays_classes || []).map((c) => {
+
+      const todayRows=todaysClasses.map((c) => {
         const now=new Date();
         const toMinutes=(v)=>{const [h,m]=String(v||'').split(':').map(Number);return (h*60)+(m||0);};
         const mins=now.getHours()*60+now.getMinutes(), st=toMinutes(c.start_time), et=toMinutes(c.end_time);
         const status=mins<st?'UPCOMING':mins<=et?'ONGOING':'COMPLETED';
         const cls=status.toLowerCase();
-        return `<article class="today-class-row teacher-today-row"><span class="today-time">${U.esc(U.time(c.start_time))}<small>${U.esc(U.time(c.end_time))}</small></span><span class="today-class-copy"><b>${U.esc(c.subject||'')}</b><small>${U.esc(c.class_name||'')} · ${U.esc(c.batch||'')}</small><small>${U.esc(c.room||'No room')}</small></span><span class="badge ${cls}">${status}</span></article>`;
+        return `<article class="today-class-row teacher-today-row"><span class="today-time">${U.esc(U.time(c.start_time))}<small>${U.esc(U.time(c.end_time))}</small></span><span class="today-class-copy"><b>${U.esc(c.subject||'Course')}</b><small>${U.esc(c.class_name||'')} · ${U.esc(c.batch||'')}</small><small>${U.esc(c.room||'No room')}</small></span><span class="badge ${cls}">${status}</span></article>`;
       }).join('');
-      fill(q('[data-today-classes]'), todayRows || '<div class="empty-card"><b>No classes today</b><span>There are no scheduled classes for you today.</span></div>');
-      fill(q('[data-today]'), todayRows || '<div class="empty-card"><b>No classes today</b><span>There are no scheduled classes for you today.</span></div>');
-      const recent=(d.recent_classwork||[]).map((x)=>`<div class="dashboard-list-row"><div><b>${U.esc(x.topic||x.title||'Classwork')}</b><small>${U.esc(x.subject||'')} · ${U.esc(x.class_name||'')} · ${U.date(x.work_date)}</small></div><span class="badge completed">UPDATED</span></div>`).join('');
-      fill(q('[data-teacher-recent]'), recent || '<div class="empty-card"><b>No recent classwork</b><span>Your latest classwork entries will appear here.</span></div>');
-      const todayStat=document.querySelector('[data-stat="today_classes_count"]'); if(todayStat) todayStat.textContent=(d.todays_classes||[]).length;
+      const todayFallback='<div class="empty-card"><b>No classes today</b><span>There are no scheduled classes for you today.</span></div>';
+      setDashboardContent('[data-today-classes]', todayRows, todayFallback);
+      setDashboardContent('[data-today]', todayRows, todayFallback);
+
+      const recent=recentClasswork.map((x)=>`<div class="dashboard-list-row"><div><b>${U.esc(x.topic||x.title||'Classwork')}</b><small>${U.esc(x.subject||'')} · ${U.esc(x.class_name||'')} · ${U.date(x.work_date)}</small></div><span class="badge completed">UPDATED</span></div>`).join('');
+      setDashboardContent('[data-teacher-recent]', recent, '<div class="empty-card"><b>No recent classwork</b><span>Your latest classwork entries will appear here.</span></div>');
     }
 
     if (role === 'student') {
-      document.querySelectorAll('[data-student-name]').forEach((el) => { el.textContent = d.student?.name || ''; });
-      document.querySelectorAll('[data-student-id]').forEach((el) => { el.textContent = d.student?.student_id || ''; });
-      fill(q('[data-today]'), (d.todays_classes || []).map((c) => `<div class="item"><b>${U.esc(c.subject)}</b><div>${U.esc(U.time(c.start_time))}–${U.esc(U.time(c.end_time))} · ${U.esc(c.room || '')}</div></div>`).join('') || '<div class="empty">No class today.</div>');
+      const todaysClasses = Array.isArray(d.todays_classes) ? d.todays_classes : [];
+      const homework = Array.isArray(d.upcoming_homework) ? d.upcoming_homework : [];
+
+      document.querySelectorAll('[data-student-name]').forEach((el) => {
+        el.textContent = d.student?.name || 'Student';
+        el.classList.remove('loading');
+      });
+      document.querySelectorAll('[data-student-id]').forEach((el) => {
+        el.textContent = d.student?.student_id || '—';
+        el.classList.remove('loading');
+      });
+
+      const todayHtml=todaysClasses.map((c) => `<div class="item"><b>${U.esc(c.subject||'Class')}</b><div>${U.esc(U.time(c.start_time))}–${U.esc(U.time(c.end_time))} · ${U.esc(c.room || 'Room not assigned')}</div></div>`).join('');
+      setDashboardContent('[data-today]', todayHtml, '<div class="empty">No class today.</div>');
+
       const fee = q('[data-fee]');
-      if (fee) fee.innerHTML = `<span class="badge ${d.current_fee?.status === 'PAID' ? 'paid' : 'due'}">${U.esc(d.current_fee?.status || 'N/A')}</span><div class="statv">${U.money(d.current_fee?.amount || 0)}</div>`;
-      const next=q('[data-next-class]'); if(next){ const n=d.next_class; next.innerHTML=n?`<div class="item"><b>${U.esc(n.subject||'')}</b><div>${U.esc(n.class_name||'')} · ${U.esc(n.batch||'')}</div><div class="muted">${U.esc(n.day||'')} · ${U.esc(U.time(n.start_time))}–${U.esc(U.time(n.end_time))} · ${U.esc(n.teacher_name||'')}</div></div>`:'<div class="empty">No upcoming class.</div>'; }
-      fill(q('[data-homework]'), (d.upcoming_homework || []).map((h) => `<div class="item"><b>${U.esc(h.title)}</b><div class="muted">${U.esc(h.subject)} · due ${U.date(h.due_date)}</div></div>`).join('') || '<div class="empty">No upcoming homework.</div>');
+      if (fee) {
+        const feeStatus=String(d.current_fee?.status||'N/A').toUpperCase();
+        const feeClass=feeStatus==='PAID'?'paid':feeStatus==='PARTIAL'?'partial':feeStatus==='DUE'?'due':'inactive';
+        fee.classList.remove('loading');
+        fee.innerHTML = `<span class="badge ${feeClass}">${U.esc(feeStatus)}</span><div class="statv">${U.money(d.current_fee?.amount || 0)}</div>`;
+      }
+
+      const next=q('[data-next-class]');
+      if(next){
+        next.classList.remove('loading');
+        const n=d.next_class;
+        next.innerHTML=n?`<div class="item"><b>${U.esc(n.subject||'Class')}</b><div>${U.esc(n.class_name||'')} · ${U.esc(n.batch||'')}</div><div class="muted">${U.esc(n.day||'')} · ${U.esc(U.time(n.start_time))}–${U.esc(U.time(n.end_time))} · ${U.esc(n.teacher_name||'Teacher not assigned')}</div></div>`:'<div class="empty">No upcoming class.</div>';
+      }
+
+      const homeworkHtml=homework.map((h) => `<div class="item"><b>${U.esc(h.title||'Homework')}</b><div class="muted">${U.esc(h.subject||'')} · due ${U.date(h.due_date)}</div></div>`).join('');
+      setDashboardContent('[data-homework]', homeworkHtml, '<div class="empty">No upcoming homework.</div>');
     }
   }
 

@@ -1479,3 +1479,82 @@ body.sidebar-open .menu{position:relative;z-index:90}
   .top{position:sticky;z-index:85}
   .content{padding-bottom:94px}
 }
+
+
+/* -------------------------------------------------------------------------
+   Teacher + Student dashboard card reliability / responsive layout
+   ------------------------------------------------------------------------- */
+.teacher-stat-grid,
+.student-dashboard-stat-grid {
+  width: 100%;
+  min-width: 0;
+}
+
+.teacher-stat-grid {
+  gap: 5px;
+}
+
+.teacher-stat-grid .dashboard-stat,
+.student-dashboard-stat-grid .student-dashboard-card {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.teacher-stat-grid .dashboard-stat > *,
+.student-dashboard-stat-grid .student-dashboard-card > * {
+  min-width: 0;
+}
+
+.student-dashboard-stat-grid {
+  gap: 5px;
+}
+
+.student-dashboard-card {
+  display: block;
+  min-height: 116px;
+  overflow: hidden;
+}
+
+.student-dashboard-card > .loading {
+  min-width: 0;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+@media (max-width: 900px) {
+  .teacher-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .student-dashboard-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+}
+
+@media (max-width: 600px) {
+  .teacher-stat-grid,
+  .student-dashboard-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .student-dashboard-card {
+    min-height: 108px;
+    padding: 13px;
+  }
+}
+
+@media (max-width: 430px) {
+  .teacher-stat-grid,
+  .student-dashboard-stat-grid {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .student-dashboard-card {
+    min-height: 96px;
+  }
+}
