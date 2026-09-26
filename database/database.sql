@@ -208,3 +208,14 @@ CREATE TABLE IF NOT EXISTS complaints (
  INDEX idx_complaints_status(status),
  INDEX idx_complaints_class_id(class_id)
 );
+
+-- Performance indexes (included for fresh installations).
+CREATE INDEX idx_teacher_classes_teacher_status ON teacher_classes(teacher_id,status);
+CREATE INDEX idx_teacher_classes_class_status ON teacher_classes(class_id,status);
+CREATE INDEX idx_schedule_exceptions_class_week ON schedule_exceptions(class_id,week_start);
+CREATE INDEX idx_schedule_exceptions_class_target ON schedule_exceptions(class_id,target_date,kind);
+CREATE INDEX idx_student_classes_class_status ON student_classes(class_id,status);
+CREATE INDEX idx_student_classes_student_status ON student_classes(student_id,status);
+CREATE INDEX idx_fee_payments_student_month_date ON fee_payments(student_id,fee_month,payment_date);
+CREATE INDEX idx_fee_payments_month ON fee_payments(fee_month);
+CREATE INDEX idx_attendance_class_date_session ON attendance(class_id,attendance_date,session_start_time,session_end_time);

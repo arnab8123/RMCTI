@@ -252,3 +252,9 @@ Keep `PHOTO_STORAGE=cloudinary` in production and set `CLOUDINARY_URL` in Render
 
 ## Notice Board file migration
 Run `database/add_notice_attachments.sql` once on the hosted MySQL database before using Admin → Attach File. Maximum attachment size is 10 MB.
+
+## Production performance/security notes
+- Do not commit `.env`; use Render environment variables for secrets.
+- Run `database/add_performance_indexes.sql` once on the Aiven/MySQL production database.
+- The fee/dashboard endpoints use bulk balance calculation to avoid per-student N+1 queries.
+- Schedule reschedules are occurrence-based and can target any future date.

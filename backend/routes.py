@@ -196,26 +196,19 @@ def me():
 def notifications():
     u=current_user();out={"role":u.role}
     if u.role=="admin":
-        month=today_ist().replace(day=1)
-        active_students=Student.query.filter_by(status="active").all()
-        student_ids=[s.id for s in active_students]
-        fee_rows=(FeeStructure.query.join(StudentClass,StudentClass.class_id==FeeStructure.class_id)
-            .filter(StudentClass.student_id.in_(student_ids or [-1]),StudentClass.status=="active",FeeStructure.status=="active",FeeStructure.effective_from<=month)
-            .filter((FeeStructure.effective_to.is_(None))|(FeeStructure.effective_to>=month))
-            .order_by(FeeStructure.class_id.asc(),FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all())
-        latest_by_class={}
-        for row in fee_rows: latest_by_class.setdefault(row.class_id,row)
-        class_ids_by_student={sid:set() for sid in student_ids}
-        for sc in StudentClass.query.filter(StudentClass.student_id.in_(student_ids or [-1]),StudentClass.status=="active").all(): class_ids_by_student[sc.student_id].add(sc.class_id)
-        paid_ids={p.student_id for p in FeePayment.query.filter(FeePayment.student_id.in_(student_ids or [-1]),FeePayment.fee_month==month).all()}
-        due_ids=[str(sid) for sid in student_ids if sid not in paid_ids and any(cid in latest_by_class for cid in class_ids_by_student[sid])]
-        due_ids.sort()
+        # The admin dashboard only uses complaint/enquiry notification markers.
+        # Do not rebuild the entire fee-balance dataset every 60 seconds.
         latest_complaint=Complaint.query.order_by(Complaint.created_at.desc(),Complaint.id.desc()).first()
-        out["complaints"]={"latest":iso_ist(latest_complaint.created_at) if latest_complaint else None,"count":Complaint.query.filter(Complaint.status!="resolved").count()}
-        out["fees"]={"count":len(due_ids),"signature":f"{month.isoformat()}:{','.join(due_ids)}"}
+        out["complaints"]={
+            "latest":iso_ist(latest_complaint.created_at) if latest_complaint else None,
+            "count":Complaint.query.filter(Complaint.status!="resolved").count()
+        }
         try:
             latest_enquiry=Enquiry.query.order_by(Enquiry.created_at.desc(),Enquiry.id.desc()).first()
-            out["enquiries"]={"latest":iso_ist(latest_enquiry.created_at) if latest_enquiry else None,"count":Enquiry.query.filter_by(status="new").count()}
+            out["enquiries"]={
+                "latest":iso_ist(latest_enquiry.created_at) if latest_enquiry else None,
+                "count":Enquiry.query.filter_by(status="new").count()
+            }
         except Exception:
             db.session.rollback();out["enquiries"]={"latest":None,"count":0}
     elif u.role=="student":
@@ -378,7 +371,7 @@ def _student_objs_bulk(students, private=True):
         # a payment row exists. This keeps partial payments and carry-forward
         # credits consistent across the student selector and fee screens.
         try:
-            balance_rows=_fee_month_balances(s.id)
+            balance_rows=_fee_month_balances_bulk(ids).get(s.id, [])
             current_row=next((x for x in balance_rows if x["month"]==month),None)
             if current_row and current_row["due"]>Decimal("0.00"):
                 current_month_status=current_row["status"]
@@ -410,58 +403,184 @@ def _schedule_overrides(class_id, week_start):
     return ScheduleException.query.filter_by(class_id=class_id, week_start=week_start).all()
 
 def _effective_class_schedule(c, start_date, days=7):
-    """Return the schedule students and teachers should actually see for a date range.
-
-    - delete: hides one normal occurrence for the selected week.
-    - weekly_time: changes one occurrence for the selected week only.
-    - reschedule: changes the underlying recurring allocation; the new day/time
-      becomes the normal schedule from that point onward.
-    - extra: adds a one-time class.
-    """
-    week=_week_start(start_date)
-    overrides=_schedule_overrides(c.id,week)
+    """Resolve recurring schedules and one-off exceptions across arbitrary weeks."""
+    end_date=start_date+timedelta(days=days)
+    week_starts={_week_start(start_date+timedelta(days=i)) for i in range(days)}
+    overrides=[]
+    for ws in week_starts: overrides.extend(_schedule_overrides(c.id,ws))
+    cross=ScheduleException.query.filter(ScheduleException.class_id==c.id,ScheduleException.kind=="reschedule",ScheduleException.target_date>=start_date,ScheduleException.target_date<end_date).all()
+    seen_ids={x.id for x in overrides}; overrides.extend(x for x in cross if x.id not in seen_ids)
     allocations=TeacherClass.query.filter_by(class_id=c.id,status="active").all()
-    teacher_ids={a.teacher_id for a in allocations}
-    teacher_ids.update(e.teacher_id for e in overrides if e.teacher_id)
+    teacher_ids={a.teacher_id for a in allocations}|{e.teacher_id for e in overrides if e.teacher_id}
     teachers={t.id:t for t in Teacher.query.filter(Teacher.id.in_(teacher_ids or [-1])).all()}
     out=[]
-
     for off in range(days):
         d=start_date+timedelta(days=off)
         for tc in allocations:
-            # A weekly-only override may move this occurrence to another day.
-            weekly=next((e for e in overrides if e.allocation_id==tc.id and e.kind=="weekly_time" and e.schedule_date==d),None)
-            moved_weekly=next((e for e in overrides if e.allocation_id==tc.id and e.kind=="weekly_time" and e.target_date==d),None)
-            delete=next((e for e in overrides if e.allocation_id==tc.id and e.kind=="delete" and e.schedule_date==d),None)
-            # Normal occurrence.
-            if tc.day_of_week==d.weekday() and not delete and not weekly and not moved_weekly:
-                start_time=weekly.start_time if weekly and weekly.start_time else tc.start_time
-                end_time=weekly.end_time if weekly and weekly.end_time else tc.end_time
-                tid=weekly.teacher_id if weekly and weekly.teacher_id else tc.teacher_id
-                t=teachers.get(tid)
-                out.append({"date":d.isoformat(),"allocation_id":tc.id,"teacher_id":t.id if t else None,
-                            "teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,
-                            "start_time":start_time.strftime("%H:%M"),"end_time":end_time.strftime("%H:%M"),
-                            "day_of_week":d.weekday(),"room":c.room,
-                            "kind":"changed-this-week" if weekly else "regular"})
-            # Weekly-only moved occurrence.
-            if moved_weekly:
+            rescheduled=next((e for e in overrides if e.kind=="reschedule" and e.allocation_id==tc.id and e.schedule_date==d),None)
+            moved_to=next((e for e in overrides if e.kind=="reschedule" and e.allocation_id==tc.id and e.target_date==d),None)
+            weekly=next((e for e in overrides if e.kind=="weekly_time" and e.allocation_id==tc.id and e.schedule_date==d),None)
+            moved_weekly=next((e for e in overrides if e.kind=="weekly_time" and e.allocation_id==tc.id and e.target_date==d),None)
+            deleted=next((e for e in overrides if e.kind=="delete" and e.allocation_id==tc.id and e.schedule_date==d),None)
+            if tc.day_of_week==d.weekday() and not rescheduled and not deleted and not weekly and not moved_weekly:
+                t=teachers.get(tc.teacher_id)
+                out.append({"date":d.isoformat(),"allocation_id":tc.id,"teacher_id":t.id if t else None,"teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,"start_time":tc.start_time.strftime("%H:%M"),"end_time":tc.end_time.strftime("%H:%M"),"day_of_week":d.weekday(),"room":c.room,"kind":"regular"})
+            if moved_to:
+                t=teachers.get(moved_to.teacher_id or tc.teacher_id)
+                out.append({"date":d.isoformat(),"allocation_id":tc.id,"teacher_id":t.id if t else None,"teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,"start_time":moved_to.start_time.strftime("%H:%M"),"end_time":moved_to.end_time.strftime("%H:%M"),"day_of_week":d.weekday(),"room":c.room,"kind":"rescheduled"})
+            elif moved_weekly:
                 t=teachers.get(moved_weekly.teacher_id or tc.teacher_id)
-                out.append({"date":d.isoformat(),"allocation_id":tc.id,"teacher_id":t.id if t else None,
-                            "teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,
-                            "start_time":moved_weekly.start_time.strftime("%H:%M"),
-                            "end_time":moved_weekly.end_time.strftime("%H:%M"),
-                            "day_of_week":d.weekday(),"room":c.room,"kind":"changed-this-week"})
-    # One-time extra classes.
+                out.append({"date":d.isoformat(),"allocation_id":tc.id,"teacher_id":t.id if t else None,"teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,"start_time":moved_weekly.start_time.strftime("%H:%M"),"end_time":moved_weekly.end_time.strftime("%H:%M"),"day_of_week":d.weekday(),"room":c.room,"kind":"changed-this-week"})
     for ex in overrides:
-        if ex.kind=="extra" and ex.schedule_date and start_date <= ex.schedule_date < start_date+timedelta(days=days):
+        if ex.kind=="extra" and ex.schedule_date and start_date<=ex.schedule_date<end_date:
             t=teachers.get(ex.teacher_id)
-            out.append({"date":ex.schedule_date.isoformat(),"allocation_id":None,"teacher_id":t.id if t else None,
-                        "teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,
-                        "start_time":ex.start_time.strftime("%H:%M") if ex.start_time else "",
-                        "end_time":ex.end_time.strftime("%H:%M") if ex.end_time else "",
-                        "day_of_week":ex.schedule_date.weekday(),"room":c.room,"kind":"extra"})
-    return sorted(out,key=lambda x:(x["date"],x["start_time"],x["teacher_name"] or ""))
+            out.append({"date":ex.schedule_date.isoformat(),"allocation_id":None,"teacher_id":t.id if t else None,"teacher_code":t.teacher_id if t else None,"teacher_name":t.name if t else None,"start_time":ex.start_time.strftime("%H:%M") if ex.start_time else "","end_time":ex.end_time.strftime("%H:%M") if ex.end_time else "","day_of_week":ex.schedule_date.weekday(),"room":c.room,"kind":"extra"})
+    unique={};
+    for x in out: unique[(x["date"],x["start_time"],x["end_time"],x.get("teacher_id"),x.get("allocation_id"))]=x
+    return sorted(unique.values(),key=lambda x:(x["date"],x["start_time"],x["teacher_name"] or ""))
+
+def _effective_class_schedule_bulk(classes, start_date, days=7):
+    """Resolve schedules for many classes with batched database reads.
+
+    The old per-class resolver performed several SQL queries for every class.
+    Dashboards and routines often need the schedule for many classes at once,
+    so this keeps the same resolution rules while reducing database round trips
+    from O(classes) queries per stage to a small fixed number.
+    """
+    classes = list(classes)
+    if not classes:
+        return {}
+
+    class_ids = [c.id for c in classes]
+    end_date = start_date + timedelta(days=days)
+    week_starts = {_week_start(start_date + timedelta(days=i)) for i in range(days)}
+
+    overrides = (ScheduleException.query
+        .filter(ScheduleException.class_id.in_(class_ids),
+                ScheduleException.week_start.in_(week_starts))
+        .all())
+
+    cross = (ScheduleException.query
+        .filter(ScheduleException.class_id.in_(class_ids),
+                ScheduleException.kind == "reschedule",
+                ScheduleException.target_date >= start_date,
+                ScheduleException.target_date < end_date)
+        .all())
+
+    by_class = {cid: [] for cid in class_ids}
+    seen = set()
+    for ex in overrides:
+        by_class.setdefault(ex.class_id, []).append(ex)
+        seen.add(ex.id)
+    for ex in cross:
+        if ex.id not in seen:
+            by_class.setdefault(ex.class_id, []).append(ex)
+
+    allocations = (TeacherClass.query
+        .filter(TeacherClass.class_id.in_(class_ids),
+                TeacherClass.status == "active")
+        .all())
+    alloc_by_class = {cid: [] for cid in class_ids}
+    teacher_ids = set()
+    for tc in allocations:
+        alloc_by_class.setdefault(tc.class_id, []).append(tc)
+        teacher_ids.add(tc.teacher_id)
+
+    teacher_ids.update(ex.teacher_id for ex in cross if ex.teacher_id)
+    teacher_ids.update(ex.teacher_id for ex in overrides if ex.teacher_id)
+    teachers = ({t.id: t for t in Teacher.query.filter(Teacher.id.in_(teacher_ids)).all()}
+                if teacher_ids else {})
+
+    result = {}
+    for c in classes:
+        class_overrides = by_class.get(c.id, [])
+        class_allocations = alloc_by_class.get(c.id, [])
+        out = []
+
+        for off in range(days):
+            d = start_date + timedelta(days=off)
+            for tc in class_allocations:
+                rescheduled = next(
+                    (e for e in class_overrides
+                     if e.kind == "reschedule" and e.allocation_id == tc.id and e.schedule_date == d),
+                    None)
+                moved_to = next(
+                    (e for e in class_overrides
+                     if e.kind == "reschedule" and e.allocation_id == tc.id and e.target_date == d),
+                    None)
+                weekly = next(
+                    (e for e in class_overrides
+                     if e.kind == "weekly_time" and e.allocation_id == tc.id and e.schedule_date == d),
+                    None)
+                moved_weekly = next(
+                    (e for e in class_overrides
+                     if e.kind == "weekly_time" and e.allocation_id == tc.id and e.target_date == d),
+                    None)
+                deleted = next(
+                    (e for e in class_overrides
+                     if e.kind == "delete" and e.allocation_id == tc.id and e.schedule_date == d),
+                    None)
+
+                if tc.day_of_week == d.weekday() and not rescheduled and not deleted and not weekly and not moved_weekly:
+                    t = teachers.get(tc.teacher_id)
+                    out.append({
+                        "date": d.isoformat(), "allocation_id": tc.id,
+                        "teacher_id": t.id if t else None,
+                        "teacher_code": t.teacher_id if t else None,
+                        "teacher_name": t.name if t else None,
+                        "start_time": tc.start_time.strftime("%H:%M"),
+                        "end_time": tc.end_time.strftime("%H:%M"),
+                        "day_of_week": d.weekday(), "room": c.room, "kind": "regular"
+                    })
+
+                if moved_to:
+                    t = teachers.get(moved_to.teacher_id or tc.teacher_id)
+                    out.append({
+                        "date": d.isoformat(), "allocation_id": tc.id,
+                        "teacher_id": t.id if t else None,
+                        "teacher_code": t.teacher_id if t else None,
+                        "teacher_name": t.name if t else None,
+                        "start_time": moved_to.start_time.strftime("%H:%M"),
+                        "end_time": moved_to.end_time.strftime("%H:%M"),
+                        "day_of_week": d.weekday(), "room": c.room, "kind": "rescheduled"
+                    })
+                elif moved_weekly:
+                    t = teachers.get(moved_weekly.teacher_id or tc.teacher_id)
+                    out.append({
+                        "date": d.isoformat(), "allocation_id": tc.id,
+                        "teacher_id": t.id if t else None,
+                        "teacher_code": t.teacher_id if t else None,
+                        "teacher_name": t.name if t else None,
+                        "start_time": moved_weekly.start_time.strftime("%H:%M"),
+                        "end_time": moved_weekly.end_time.strftime("%H:%M"),
+                        "day_of_week": d.weekday(), "room": c.room, "kind": "changed-this-week"
+                    })
+
+        for ex in class_overrides:
+            if ex.kind == "extra" and ex.schedule_date and start_date <= ex.schedule_date < end_date:
+                t = teachers.get(ex.teacher_id)
+                out.append({
+                    "date": ex.schedule_date.isoformat(), "allocation_id": None,
+                    "teacher_id": t.id if t else None,
+                    "teacher_code": t.teacher_id if t else None,
+                    "teacher_name": t.name if t else None,
+                    "start_time": ex.start_time.strftime("%H:%M") if ex.start_time else "",
+                    "end_time": ex.end_time.strftime("%H:%M") if ex.end_time else "",
+                    "day_of_week": ex.schedule_date.weekday(),
+                    "room": c.room, "kind": "extra"
+                })
+
+        unique = {}
+        for row in out:
+            key = (row["date"], row["start_time"], row["end_time"],
+                   row.get("teacher_id"), row.get("allocation_id"))
+            unique[key] = row
+        result[c.id] = sorted(
+            unique.values(),
+            key=lambda x: (x["date"], x["start_time"], x["teacher_name"] or "")
+        )
+
+    return result
 
 def class_obj(c):
     subjects={s.id:s for s in Subject.query.filter(Subject.id==c.subject_id).all()}
@@ -683,13 +802,14 @@ def admin_dashboard():
     # Fee totals are based on the same balance engine used by the fee collection
     # screens, so partial payments and the 15th-of-month fine stay consistent.
     active_students = Student.query.filter_by(status="active").order_by(Student.name.asc()).all()
+    balances_by_student = _fee_month_balances_bulk([x.id for x in active_students])
     due_count = 0
     pending_amount = Decimal("0.00")
     partial_amount = Decimal("0.00")
     fine_amount = Decimal("0.00")
     pending_students = []
     for student in active_students:
-        balances = _fee_month_balances(student.id)
+        balances = balances_by_student.get(student.id, [])
         current = next((x for x in balances if x["month"] == month), None)
         if not current or current["due"] <= Decimal("0.00"):
             continue
@@ -723,8 +843,9 @@ def admin_dashboard():
     subject_by_id = {s.id: s for s in Subject.query.filter(Subject.id.in_([c.subject_id for c in active_classes] or [-1])).all()}
     today_rows = []
     seen_today = set()
+    schedules_by_class = _effective_class_schedule_bulk(active_classes, today, 1)
     for c in active_classes:
-        for row in _effective_class_schedule(c, today, 1):
+        for row in schedules_by_class.get(c.id, []):
             start = row.get("start_time") or ""
             end = row.get("end_time") or ""
             status = "UPCOMING"
@@ -912,13 +1033,14 @@ def admin_report_summary():
         .filter(FeePayment.fee_month == month).scalar()) or Decimal("0.00")
 
     active_students = Student.query.filter_by(status="active").all()
+    balances_by_student = _fee_month_balances_bulk([x.id for x in active_students])
     pending_amount = Decimal("0.00")
     pending_count = 0
     fine_amount = Decimal("0.00")
     paid_count = 0
     partial_count = 0
     for student in active_students:
-        current = next((x for x in _fee_month_balances(student.id) if x["month"] == month), None)
+        current = next((x for x in balances_by_student.get(student.id, []) if x["month"] == month), None)
         if not current or current["due"] <= Decimal("0.00"):
             continue
         if current["status"] == "PAID":
@@ -975,8 +1097,8 @@ def admin_report_summary():
             "collected": float(collection),
             "pending": float(pending_amount),
             "partial_balance": float(sum(
-                [x["balance"] for s in active_students for x in _fee_month_balances(s.id)
-                 if x["month"] == month and x["status"] == "PARTIAL"],
+                (x["balance"] for rows in balances_by_student.values() for x in rows
+                 if x["month"] == month and x["status"] == "PARTIAL"),
                 Decimal("0.00")
             )),
             "fine": float(fine_amount),
@@ -1009,7 +1131,15 @@ def admin_analytics():
     collection_map = {m: Decimal(str(v or 0)) for m, v in collection_rows}
     collections = [float(collection_map.get(m, Decimal("0.00"))) for m in months]
 
-    student_growth = [Student.query.filter(Student.status == "active", Student.admission_date <= (m + timedelta(days=32)).replace(day=1) - timedelta(days=1)).count() for m in months]
+    growth_rows=(db.session.query(Student.admission_date,func.count(Student.id))
+        .filter(Student.status=="active",Student.admission_date.isnot(None))
+        .group_by(Student.admission_date).all())
+    growth_by_date={d:c for d,c in growth_rows}
+    running=0; student_growth=[]
+    for m in months:
+        month_end=(m+timedelta(days=32)).replace(day=1)-timedelta(days=1)
+        running += sum(c for d,c in growth_by_date.items() if d<=month_end)
+        student_growth.append(running)
 
     month_start = months[0]
     attendance_rows = Attendance.query.filter(Attendance.attendance_date >= month_start).all()
@@ -1180,18 +1310,13 @@ def create_schedule_exception():
             if conflict:return err("This teacher already has another class at the selected time")
 
         if kind=="reschedule":
-            # This is the permanent/recurring option: update the actual allocation.
-            # Remove temporary overrides for this same recurring slot so the new
-            # schedule is the single source of truth for the current and future weeks.
-            ScheduleException.query.filter_by(class_id=cid,allocation_id=allocation_id,week_start=ws).delete(synchronize_session=False)
-            tc.day_of_week=target_date.weekday()
-            tc.start_time=start_time
-            tc.end_time=end_time
-            audit(current_user().id,"reschedule","teacher_class",tc.id,
-                  f"{c.class_name}: recurring schedule changed to {DAYS[tc.day_of_week]} {start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}")
+            # Move one occurrence only; this works across week/month boundaries.
+            ScheduleException.query.filter_by(class_id=cid,allocation_id=allocation_id,schedule_date=schedule_date,kind="reschedule").delete(synchronize_session=False)
+            ex=ScheduleException(class_id=cid,allocation_id=allocation_id,week_start=ws,schedule_date=schedule_date,target_date=target_date,start_time=start_time,end_time=end_time,teacher_id=teacher_id or tc.teacher_id,created_by=current_user().id,kind="reschedule")
+            db.session.add(ex)
+            audit(current_user().id,"reschedule","teacher_class",tc.id,f"{c.class_name}: occurrence moved from {schedule_date.isoformat()} to {target_date.isoformat()}")
             db.session.commit()
-            return ok({"id":tc.id,"kind":"reschedule","permanent":True},
-                      "Recurring schedule changed. Students and teachers will now see the new schedule.",200)
+            return ok({"id":ex.id,"kind":"reschedule","permanent":False},"Class occurrence rescheduled",200)
 
         if kind=="weekly_time":
             # This week only. The next week automatically falls back to TeacherClass.
@@ -1202,7 +1327,7 @@ def create_schedule_exception():
                 db.session.delete(x)
             ex=ScheduleException(class_id=cid,allocation_id=allocation_id,week_start=ws,
                 schedule_date=schedule_date,target_date=target_date,start_time=start_time,end_time=end_time,
-                teacher_id=tc.teacher_id,created_by=current_user().id)
+                teacher_id=tc.teacher_id,created_by=current_user().id,kind="weekly_time")
             db.session.add(ex)
             audit(current_user().id,"schedule_change","schedule_exception",None,
                   f"Weekly-only change for {c.class_name} on {schedule_date.isoformat()} -> {target_date.isoformat()}")
@@ -1934,74 +2059,70 @@ def _fee_for_month_from_rows(rows, month):
     return base + Decimal("50.00") * Decimal(max(0,penalty_cycles))
 
 
-def _fee_month_balances(sid):
-    """Return chronological fee balances with fines based on actual payment timing.
-
-    A ₹50 fine is added on each 15th only when that month's fee was still
-    outstanding immediately after that 15th. This means a month paid in full
-    before its first fine date does not later acquire a fine, while a partial
-    or late payment keeps the applicable accumulated fines.
-    """
-    student=Student.query.get(sid)
-    if not student:return []
-    rows=_fee_rows_for_student(sid)
-    if not rows:return []
-    today=today_ist()
-    today_month=today.replace(day=1)
-    starts=[today_month]
-    if student.admission_date: starts.append(student.admission_date.replace(day=1))
-    starts.extend(r.effective_from.replace(day=1) for r in rows if r.effective_from)
-    start=min(starts) if starts else today_month
-    payments=(FeePayment.query.filter_by(student_id=sid)
-              .order_by(FeePayment.payment_date.asc(),FeePayment.id.asc()).all())
-    paid_by_month={}
-    payments_by_month={}
-    for p in payments:
-        m=p.fee_month.replace(day=1)
-        amount=Decimal(str(p.amount))
-        paid_by_month[m]=paid_by_month.get(m,Decimal("0.00"))+amount
-        payments_by_month.setdefault(m,[]).append(p)
-
-    def payment_ist_date(payment):
-        value=payment.payment_date
-        if not value:return None
-        if value.tzinfo is None:value=value.replace(tzinfo=__import__('datetime').timezone.utc)
-        return value.astimezone(ZoneInfo("Asia/Kolkata")).date()
-
-    months=[]
-    m=start
-    while m<=today_month:
-        base=_fee_base_for_month(rows,m)
-        due=base
-        # Fine dates are the 15th of this month and every following month up
-        # to today. A fine is created only if the month was still outstanding
-        # at that date.
-        if base>Decimal("0.00") and m<=today_month:
+def _fee_month_balances_bulk(student_ids):
+    ids=list({int(x) for x in student_ids if x})
+    if not ids:return {}
+    students={x.id:x for x in Student.query.filter(Student.id.in_(ids)).all()}
+    sc_rows=StudentClass.query.filter(StudentClass.student_id.in_(ids),StudentClass.status=="active").all()
+    class_by_student={sid:set() for sid in ids}; class_ids=set()
+    for sc in sc_rows: class_by_student[sc.student_id].add(sc.class_id); class_ids.add(sc.class_id)
+    fee_rows=FeeStructure.query.filter(FeeStructure.class_id.in_(class_ids or [-1]),FeeStructure.status=="active").order_by(FeeStructure.class_id,FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all()
+    fee_by_class={}
+    for r in fee_rows: fee_by_class.setdefault(r.class_id,[]).append(r)
+    payments=FeePayment.query.filter(FeePayment.student_id.in_(ids)).order_by(FeePayment.student_id,FeePayment.payment_date,FeePayment.id).all()
+    payments_by_student={sid:[] for sid in ids}
+    for pay in payments: payments_by_student[pay.student_id].append(pay)
+    today=today_ist(); today_month=today.replace(day=1); result={}
+    for sid in ids:
+        student=students.get(sid)
+        rows=[r for cid in class_by_student.get(sid,set()) for r in fee_by_class.get(cid,[])]
+        if not student or not rows: result[sid]=[]; continue
+        start=min([today_month]+(([student.admission_date.replace(day=1)] if student.admission_date else []))+[r.effective_from.replace(day=1) for r in rows if r.effective_from])
+        p_by_month={}
+        for pay in payments_by_student[sid]: p_by_month.setdefault(pay.fee_month.replace(day=1),[]).append(pay)
+        months=[]; m=start; running_credit=Decimal("0.00")
+        all_payments=payments_by_student[sid]
+        def paid_through(day):
+            total=Decimal("0.00")
+            for pay in all_payments:
+                v=pay.payment_date
+                if v and v.tzinfo is None:v=v.replace(tzinfo=__import__('datetime').timezone.utc)
+                if v and v.astimezone(ZoneInfo("Asia/Kolkata")).date()<=day: total+=Decimal(str(pay.amount))
+            return total
+        # Process months chronologically. Carry-forward credit is included in
+        # each 15th test only when the underlying overpayment existed by then.
+        allocated_before=Decimal("0.00")
+        while m<=today_month:
+            base=_fee_base_for_month(rows,m); due=base
             cycle=m.replace(day=15)
-            month_payments=payments_by_month.get(m,[])
-            while cycle<=today:
-                paid_by_cycle=sum((Decimal(str(p.amount)) for p in month_payments
-                                   if payment_ist_date(p) and payment_ist_date(p)<=cycle),Decimal("0.00"))
-                if due>paid_by_cycle:
-                    due += Decimal("50.00")
-                cycle=(cycle+timedelta(days=32)).replace(day=15)
-        months.append({"month":m,"base":base,"due":due,"paid":Decimal("0.00"),"credit":Decimal("0.00")})
-        m=(m+timedelta(days=32)).replace(day=1)
+            month_payments=p_by_month.get(m,[])
+            if base>0:
+                while cycle<=today:
+                    # Payments tagged to earlier months may create credit that
+                    # can cover this month's fee before its fine date.
+                    earlier_due=Decimal("0.00")
+                    for prior in months:
+                        if prior["month"]>=m: continue
+                        earlier_due += prior["due"]
+                    payments_to_date=paid_through(cycle)
+                    # Payments already consumed by prior months at this date.
+                    prior_paid_need=sum((prior["base"] for prior in months if prior["month"]<m),Decimal("0.00"))
+                    available_for_current=max(Decimal("0.00"),payments_to_date-prior_paid_need)
+                    if running_credit>0: available_for_current+=running_credit
+                    if due>available_for_current: due+=Decimal("50.00")
+                    cycle=(cycle+timedelta(days=32)).replace(day=15)
+            months.append({"month":m,"base":base,"due":due,"paid":Decimal("0.00"),"credit":Decimal("0.00")})
+            incoming=sum((Decimal(str(p.amount)) for p in month_payments),Decimal("0.00"))+running_credit
+            months[-1]["paid"]=min(incoming,due); running_credit=max(Decimal("0.00"),incoming-due)
+            m=(m+timedelta(days=32)).replace(day=1)
+        for item in months:
+            item["balance"]=max(Decimal("0.00"),item["due"]-item["paid"]); item["status"]="PAID" if item["due"]>0 and item["balance"]<=0 else ("PARTIAL" if item["paid"]>0 else ("DUE" if item["due"]>0 else "N/A"))
+        if running_credit > 0 and months: months[-1]["credit"]=running_credit
+        result[sid]=months
+    return result
 
-    # Payments are allocated chronologically to their fee month; any historical
-    # overpayment remains a credit and can carry into later months. Normal fee
-    # collection never permits overpaying the oldest balance.
-    credit=Decimal("0.00")
-    for item in months:
-        incoming=paid_by_month.get(item["month"],Decimal("0.00"))+credit
-        item["paid"]=min(incoming,item["due"])
-        credit=max(Decimal("0.00"),incoming-item["due"])
-    for item in months:
-        item["balance"]=max(Decimal("0.00"),item["due"]-item["paid"])
-        item["status"]="PAID" if item["due"]>0 and item["balance"]<=0 else ("PARTIAL" if item["paid"]>0 else ("DUE" if item["due"]>0 else "N/A"))
-    if credit and months: months[-1]["credit"]=credit
-    return months
-
+def _fee_month_balances(sid):
+    return _fee_month_balances_bulk([sid]).get(sid,[])
 
 def oldest_due_month(sid):
     for x in _fee_month_balances(sid):
@@ -2048,12 +2169,17 @@ def fees():
     for f in fee_rows:latest_by_class.setdefault(f.class_id,f)
     class_ids={sid:set() for sid in ids}
     for sc in sc_rows:class_ids[sc.student_id].add(sc.class_id)
+    balances_by_student=_fee_month_balances_bulk(ids)
+    payments=(FeePayment.query.filter(FeePayment.student_id.in_(ids or [-1]),FeePayment.fee_month==m)
+              .order_by(FeePayment.payment_date.desc(),FeePayment.id.desc()).all())
+    latest_by_student={}
+    for pay in payments: latest_by_student.setdefault(pay.student_id,pay)
     out=[]
     for s in students:
+        balance_rows=balances_by_student.get(s.id,[])
+        current=next((x for x in balance_rows if x["month"]==m),None)
         rows_for_student=[latest_by_class[cid] for cid in class_ids[s.id] if cid in latest_by_class]
         due=_fee_for_month_from_rows(rows_for_student,m)
-        balance_rows=_fee_month_balances(s.id)
-        current=next((x for x in balance_rows if x["month"]==m),None)
         if current:
             due=current["due"]
             month_paid=current["paid"]
@@ -2063,7 +2189,7 @@ def fees():
             month_paid=Decimal("0.00")
             remaining=max(Decimal("0.00"),due)
             status="DUE" if due>Decimal("0.00") else "N/A"
-        latest=FeePayment.query.filter_by(student_id=s.id,fee_month=m).order_by(FeePayment.payment_date.desc(),FeePayment.id.desc()).first()
+        latest=latest_by_student.get(s.id)
         if st and st!=status:continue
         out.append({"student_id":s.id,"student_code":s.student_id,"student_name":s.name,"fee_month":m.strftime("%Y-%m"),
                     "amount":float(due),"paid_amount":float(month_paid),"remaining":float(remaining),"status":status,
@@ -2184,19 +2310,17 @@ def teacher_dashboard():
     class_data={x["id"]:x for x in _class_objs_bulk(classes.values())}
     todays=[]
     upcoming=[]
+    schedules_by_class = _effective_class_schedule_bulk(classes.values(), today, 8)
     for cid in class_ids:
-        rows=_teacher_current_schedule(t,cid) or []
         if cid not in class_data: continue
-        for row in rows:
-            todays.append(dict(class_data[cid],start_time=row["start_time"],end_time=row["end_time"],schedule_kind=row["kind"],date=row.get("date",today.isoformat()),day=row.get("day")))
-
-        # Include the next 7 days so the dashboard can show tomorrow and
-        # upcoming classes without requiring the teacher to open My Classes.
         c=classes.get(cid)
-        if c:
-            for row in _effective_class_schedule(c,today,8):
-                if row.get("teacher_id")!=t.id or row.get("date")<=today.isoformat(): continue
-                upcoming.append(dict(class_data[cid],start_time=row["start_time"],end_time=row["end_time"],schedule_kind=row["kind"],date=row["date"],day=row.get("day")))
+        if not c: continue
+        rows=schedules_by_class.get(cid, [])
+        for row in rows:
+            if row.get("teacher_id")!=t.id: continue
+            payload=dict(class_data[cid],start_time=row["start_time"],end_time=row["end_time"],schedule_kind=row["kind"],date=row.get("date",today.isoformat()),day=row.get("day"))
+            if row.get("date")==today.isoformat(): todays.append(payload)
+            elif row.get("date")>today.isoformat(): upcoming.append(payload)
 
     # Avoid duplicate rows when a normal allocation and an exception resolve
     # to the same session.
@@ -2209,7 +2333,7 @@ def teacher_dashboard():
         return out
 
     recent=Classwork.query.filter_by(teacher_id=t.id).order_by(Classwork.work_date.desc(),Classwork.id.desc()).limit(5).all()
-    return ok({"teacher":teacher_obj(t),"total_students":len(ids),"total_classes":len(alloc)+len(extras),
+    return ok({"teacher":teacher_obj(t),"total_students":len(ids),"total_classes":len(class_ids),
                "todays_classes":sorted(unique_sessions(todays),key=lambda x:x["start_time"]),
                "upcoming_classes":sorted(unique_sessions(upcoming),key=lambda x:(x.get("date",""),x["start_time"]))[:10],
                "pending_homework":Homework.query.filter_by(teacher_id=t.id).filter(Homework.due_date>=today).count(),
@@ -2236,20 +2360,38 @@ def my_classes():
     class_ids.update(x.class_id for x in extras)
     classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1]),Class.status=="active").all()}
     items={x["id"]:x for x in _class_objs_bulk(classes.values())};out=[];seen_class_ids=set()
+    schedules_by_class = _effective_class_schedule_bulk(classes.values(), now.date(), 1)
+    student_counts = dict(db.session.query(
+        StudentClass.class_id, func.count(StudentClass.id)
+    ).filter(
+        StudentClass.class_id.in_(class_ids or [-1]),
+        StudentClass.status=="active"
+    ).group_by(StudentClass.class_id).all())
+    attendance_rows = Attendance.query.filter(
+        Attendance.class_id.in_(class_ids or [-1]),
+        Attendance.attendance_date==now.date()
+    ).all()
+    attendance_counts = {}
+    for ar in attendance_rows:
+        key=(ar.class_id, ar.session_start_time, ar.session_end_time)
+        attendance_counts[key]=attendance_counts.get(key,0)+1
+
     for a in allocations:
         if a.class_id in seen_class_ids:continue
         seen_class_ids.add(a.class_id)
         item=items.get(a.class_id)
         if not item:continue
         item=dict(item)
-        todays=[x for x in _effective_class_schedule(classes[a.class_id],now.date(),1)
+        todays=[x for x in schedules_by_class.get(a.class_id, [])
                 if x.get("teacher_id")==t.id and x.get("date")==now.date().isoformat()]
         sessions=[]
-        total_students=StudentClass.query.filter_by(class_id=a.class_id,status="active").count()
+        total_students=int(student_counts.get(a.class_id,0))
         for row in todays:
-            marked=Attendance.query.filter_by(class_id=a.class_id,attendance_date=now.date(),
-                                               session_start_time=datetime.strptime(row["start_time"],"%H:%M").time(),
-                                               session_end_time=datetime.strptime(row["end_time"],"%H:%M").time()).count()
+            marked=attendance_counts.get((
+                a.class_id,
+                datetime.strptime(row["start_time"],"%H:%M").time(),
+                datetime.strptime(row["end_time"],"%H:%M").time()
+            ),0)
             sh,sm=map(int,row["start_time"].split(":")); eh,em=map(int,row["end_time"].split(":"))
             st=now.replace(hour=sh,minute=sm,second=0,microsecond=0)
             et=now.replace(hour=eh,minute=em,second=0,microsecond=0)
@@ -2270,11 +2412,10 @@ def my_classes():
         if not item:continue
         if any(x["id"]==item["id"] for x in out):continue
         item=dict(item)
-        total_students=StudentClass.query.filter_by(class_id=ex.class_id,status="active").count()
+        total_students=int(student_counts.get(ex.class_id,0))
         st=ex.start_time; et=ex.end_time
         now_t=now.time().replace(second=0,microsecond=0)
-        marked=Attendance.query.filter_by(class_id=ex.class_id,attendance_date=now.date(),
-                                           session_start_time=st,session_end_time=et).count()
+        marked=attendance_counts.get((ex.class_id,st,et),0)
         session={"date":now.date().isoformat(),"allocation_id":None,"teacher_id":t.id,
                  "teacher_name":t.name,"start_time":st.strftime("%H:%M"),"end_time":et.strftime("%H:%M"),
                  "day_of_week":now.weekday(),"room":item.get("room"),"kind":"extra",
@@ -2336,11 +2477,13 @@ def save_attendance(class_id):
             seen.add(student_id)
         missing=allowed-seen
         if missing:return err("Please mark attendance for every student before submitting")
+        student_ids=[int(item["student_id"]) for item in attendance_rows]
+        existing=Attendance.query.filter(Attendance.class_id==class_id,Attendance.attendance_date==now.date(),Attendance.session_start_time==st,Attendance.session_end_time==et,Attendance.student_id.in_(student_ids or [-1])).all()
+        existing_by_student={x.student_id:x for x in existing}
         for item in attendance_rows:
-            student_id=int(item["student_id"]);status=str(item["status"]).lower()
-            rec=Attendance.query.filter_by(student_id=student_id,class_id=class_id,attendance_date=now.date(),session_start_time=st,session_end_time=et).first()
-            if rec:rec.status=status;rec.marked_by=current_user().id
-            else:db.session.add(Attendance(student_id=student_id,class_id=class_id,attendance_date=now.date(),session_start_time=st,session_end_time=et,status=status,marked_by=current_user().id))
+            student_id=int(item["student_id"]);status=str(item["status"]).lower(); rec=existing_by_student.get(student_id)
+            if rec: rec.status=status; rec.marked_by=current_user().id
+            else: db.session.add(Attendance(student_id=student_id,class_id=class_id,attendance_date=now.date(),session_start_time=st,session_end_time=et,status=status,marked_by=current_user().id))
         db.session.commit();return ok({"date":now.date().isoformat(),"start_time":effective["start_time"],"end_time":effective["end_time"],"count":len(attendance_rows)},"Attendance submitted successfully")
     except Exception:
         db.session.rollback();return err("Could not submit attendance")
@@ -2482,8 +2625,9 @@ def student_dashboard():
     classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1]),Class.status=="active").all()}
     todays=[]
     candidates=[]
+    schedules_by_class = _effective_class_schedule_bulk(classes.values(), today, 8)
     for c in classes.values():
-        for row in _effective_class_schedule(c,today,8):
+        for row in schedules_by_class.get(c.id, []):
             if row["date"]==today.isoformat():
                 sub=Subject.query.get(c.subject_id)
                 item={"class_id":c.id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "",
@@ -2513,9 +2657,10 @@ def student_routine():
     subjects={x.id:x for x in Subject.query.filter(Subject.id.in_([c.subject_id for c in classes.values()] or [-1])).all()}
     start=_week_start(today_ist())
     out=[]
+    schedules_by_class = _effective_class_schedule_bulk(classes.values(), start, 7)
     for c in classes.values():
         sub=subjects.get(c.subject_id)
-        for x in _effective_class_schedule(c,start,7):
+        for x in schedules_by_class.get(c.id, []):
             out.append({"class_id":c.id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "","room":c.room,"day":DAYS[x["day_of_week"]],"day_of_week":x["day_of_week"],"date":x["date"],"start_time":x["start_time"],"end_time":x["end_time"],"teacher_name":x["teacher_name"],"teacher_id":x["teacher_code"],"kind":x["kind"]})
     return ok(sorted(out,key=lambda x:(x["date"],x["start_time"],x["subject"])))
 @api.get("/student/homework")

@@ -214,6 +214,10 @@ def ensure_performance_indexes():
             ("idx_teacher_classes_teacher_status", "teacher_id,status"),
             ("idx_teacher_classes_class_status", "class_id,status"),
         ],
+        "schedule_exceptions": [
+            ("idx_schedule_exceptions_week_kind_date_teacher", "week_start,kind,schedule_date,teacher_id"),
+            ("idx_schedule_exceptions_date_kind", "schedule_date,kind"),
+        ],
         "student_classes": [
             ("idx_student_classes_student_status", "student_id,status"),
             ("idx_student_classes_class_status", "class_id,status"),

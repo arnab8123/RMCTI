@@ -25,7 +25,7 @@ class Subject(db.Model):
 class Class(db.Model):
     __tablename__="classes"; id=db.Column(db.BigInteger,primary_key=True); class_name=db.Column(db.String(100),nullable=False); batch=db.Column(db.String(100),nullable=False); subject_id=db.Column(db.BigInteger,db.ForeignKey("subjects.id"),nullable=False); room=db.Column(db.String(100)); max_students=db.Column(db.Integer,default=30); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
 class TeacherClass(db.Model):
-    __tablename__="teacher_classes"; id=db.Column(db.BigInteger,primary_key=True); teacher_id=db.Column(db.BigInteger,db.ForeignKey("teachers.id"),nullable=False); class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False); day_of_week=db.Column(db.Integer,nullable=False); start_time=db.Column(db.Time,nullable=False); end_time=db.Column(db.Time,nullable=False); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
+    __tablename__="teacher_classes"; id=db.Column(db.BigInteger,primary_key=True); teacher_id=db.Column(db.BigInteger,db.ForeignKey("teachers.id"),nullable=False); class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False); day_of_week=db.Column(db.Integer,nullable=False); start_time=db.Column(db.Time,nullable=False); end_time=db.Column(db.Time,nullable=False); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow); __table_args__=(db.Index("idx_teacher_classes_teacher_status","teacher_id","status"),db.Index("idx_teacher_classes_class_status","class_id","status"))
 
 class ScheduleException(db.Model):
     __tablename__="schedule_exceptions"
@@ -41,13 +41,19 @@ class ScheduleException(db.Model):
     teacher_id=db.Column(db.BigInteger,db.ForeignKey("teachers.id"),nullable=True)
     created_by=db.Column(db.BigInteger,db.ForeignKey("users.id"),nullable=False)
     created_at=db.Column(db.DateTime,default=datetime.utcnow)
+    __table_args__=(
+        db.Index("idx_schedule_exceptions_class_week","class_id","week_start"),
+        db.Index("idx_schedule_exceptions_class_target","class_id","target_date","kind"),
+        db.Index("idx_schedule_exceptions_week_kind_date_teacher","week_start","kind","schedule_date","teacher_id"),
+        db.Index("idx_schedule_exceptions_date_kind","schedule_date","kind")
+    )
 
 class StudentClass(db.Model):
-    __tablename__="student_classes"; id=db.Column(db.BigInteger,primary_key=True); student_id=db.Column(db.BigInteger,db.ForeignKey("students.id"),nullable=False); class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False); assigned_at=db.Column(db.DateTime,default=datetime.utcnow); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False)
+    __tablename__="student_classes"; id=db.Column(db.BigInteger,primary_key=True); student_id=db.Column(db.BigInteger,db.ForeignKey("students.id"),nullable=False); class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False); assigned_at=db.Column(db.DateTime,default=datetime.utcnow); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); __table_args__=(db.Index("idx_student_classes_class_status","class_id","status"),db.Index("idx_student_classes_student_status","student_id","status"))
 class FeeStructure(db.Model):
     __tablename__="fee_structures"; id=db.Column(db.BigInteger,primary_key=True); class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False); monthly_fee=db.Column(db.Numeric(10,2),nullable=False); effective_from=db.Column(db.Date,nullable=False); effective_to=db.Column(db.Date); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); created_by=db.Column(db.BigInteger,db.ForeignKey("users.id")); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
 class FeePayment(db.Model):
-    __tablename__="fee_payments"; id=db.Column(db.BigInteger,primary_key=True); student_id=db.Column(db.BigInteger,db.ForeignKey("students.id"),nullable=False); fee_month=db.Column(db.Date,nullable=False); amount=db.Column(db.Numeric(10,2),nullable=False); payment_date=db.Column(db.DateTime,default=datetime.utcnow); payment_method=db.Column(db.Enum("cash","upi","bank_transfer","other"),nullable=False); collected_by=db.Column(db.BigInteger,db.ForeignKey("users.id"),nullable=False); receipt_number=db.Column(db.String(50),unique=True,nullable=False); notes=db.Column(db.Text)
+    __tablename__="fee_payments"; id=db.Column(db.BigInteger,primary_key=True); student_id=db.Column(db.BigInteger,db.ForeignKey("students.id"),nullable=False); fee_month=db.Column(db.Date,nullable=False); amount=db.Column(db.Numeric(10,2),nullable=False); payment_date=db.Column(db.DateTime,default=datetime.utcnow); payment_method=db.Column(db.Enum("cash","upi","bank_transfer","other"),nullable=False); collected_by=db.Column(db.BigInteger,db.ForeignKey("users.id"),nullable=False); receipt_number=db.Column(db.String(50),unique=True,nullable=False); notes=db.Column(db.Text); __table_args__=(db.Index("idx_fee_payments_student_month_date","student_id","fee_month","payment_date"),db.Index("idx_fee_payments_month","fee_month"))
 class Receipt(db.Model):
     __tablename__="receipts"; id=db.Column(db.BigInteger,primary_key=True); fee_payment_id=db.Column(db.BigInteger,db.ForeignKey("fee_payments.id"),unique=True,nullable=False); receipt_number=db.Column(db.String(50),unique=True,nullable=False); generated_at=db.Column(db.DateTime,default=datetime.utcnow)
 class Homework(db.Model):
@@ -66,7 +72,7 @@ class Attendance(db.Model):
     marked_by=db.Column(db.BigInteger,db.ForeignKey("users.id"),nullable=False)
     created_at=db.Column(db.DateTime,default=datetime.utcnow)
     updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
-    __table_args__=(db.UniqueConstraint("student_id","class_id","attendance_date","session_start_time","session_end_time",name="uq_attendance_student_class_session"),)
+    __table_args__=(db.UniqueConstraint("student_id","class_id","attendance_date","session_start_time","session_end_time",name="uq_attendance_student_class_session"),db.Index("idx_attendance_class_date_session","class_id","attendance_date","session_start_time","session_end_time"))
 
 class Complaint(db.Model):
     __tablename__="complaints"

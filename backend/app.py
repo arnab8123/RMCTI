@@ -80,7 +80,7 @@ def create_app():
             response = send_file(target)
             # Long cache only for versioned/static assets. HTML remains revalidated.
             if path.lower().endswith((".css", ".js", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".ico", ".woff", ".woff2")):
-                response.headers["Cache-Control"] = "public, max-age=3600, stale-while-revalidate=86400"
+                response.headers["Cache-Control"] = "public, max-age=31536000, stale-while-revalidate=604800"
             return response
         return jsonify(success=False, message="Resource not found"), 404
 
