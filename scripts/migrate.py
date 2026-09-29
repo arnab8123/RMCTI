@@ -266,37 +266,6 @@ def ensure_performance_indexes():
                 db.session.rollback()
 
 
-
-def ensure_ultra_schema():
-    """Create Ultra feature tables and upgrade fee adjustment enum safely."""
-    db.create_all()
-    inspector=inspect(db.engine)
-    if "fee_adjustments" in inspector.get_table_names():
-        try:
-            db.session.execute(text("""ALTER TABLE fee_adjustments MODIFY kind
-              ENUM('discount','scholarship','installment','custom_fee','admission_fee','exam_fee','registration_fee','material_fee','refund','advance','carry_forward','fine') NOT NULL"""))
-        except Exception:
-            db.session.rollback()
-    # Additional high-traffic indexes for the new modules.
-    wanted={
-      "tests":[("idx_tests_class_status","class_id,status"),("idx_tests_teacher_created","teacher_id,created_at")],
-      "test_questions":[("idx_test_questions_test_position","test_id,position")],
-      "test_attempts":[("idx_test_attempt_student_status","student_id,status")],
-      "study_materials":[("idx_material_subject_chapter_type","subject_id,chapter,material_type"),("idx_material_class_created","class_id,created_at")],
-      "fee_adjustments":[("idx_fee_adjustments_student_month","student_id,fee_month")],
-      "notices":[("idx_notices_target_expiry","target_type,target_id,expires_at"),("idx_notices_created","created_at")],
-      "notice_reads":[("uq_notice_read_user","notice_id,user_id")],
-      "login_history":[("idx_login_history_user_created","user_id,created_at"),("idx_login_history_success_created","success,created_at")],
-    }
-    for table,items in wanted.items():
-        if table not in inspect(db.engine).get_table_names(): continue
-        existing={x.get("name") for x in inspect(db.engine).get_indexes(table)}
-        for name,cols in items:
-            if name in existing: continue
-            try: db.session.execute(text(f"CREATE INDEX {name} ON {table} ({cols})"))
-            except Exception: db.session.rollback()
-
-
 with app.app_context():
     db.create_all()
     ensure_token_blocklist()
@@ -308,6 +277,5 @@ with app.app_context():
     ensure_personal_fields()
     ensure_attachment_targets()
     ensure_performance_indexes()
-    ensure_ultra_schema()
     db.session.commit()
     print("RMCTI database schema is ready. Schedule controls, Aadhaar fields, targeted attachments, attendance marker, and performance indexes are ready. Existing data is preserved.")

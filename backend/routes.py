@@ -1,12 +1,12 @@
 from flask import Blueprint,request,current_app
 from flask_jwt_extended import create_access_token,jwt_required,get_jwt
-from sqlalchemy import or_,func,and_
+from sqlalchemy import or_,func
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import IntegrityError
 from datetime import date,datetime,timedelta,time
 from decimal import Decimal
 from zoneinfo import ZoneInfo
-import os,uuid,json,math,re
+import os,uuid
 from werkzeug.utils import secure_filename
 from PIL import Image, ImageOps, UnidentifiedImageError
 import io
@@ -161,14 +161,7 @@ def login():
     username=str(b.get("username","")).strip()
     password=str(b.get("password",""))
     u=User.query.filter_by(username=username).first()
-    valid=bool(u and u.is_active and cp(password,u.password_hash))
-    try:
-        db.session.add(LoginHistory(user_id=u.id if u else 0, ip_address=request.headers.get("X-Forwarded-For", request.remote_addr), user_agent=(request.user_agent.string or "")[:500], success=valid))
-        if u: db.session.commit()
-        else: db.session.rollback()
-    except Exception:
-        db.session.rollback()
-    if not valid:
+    if not u or not u.is_active or not cp(password,u.password_hash):
         return err("Invalid username or password",401)
     # Keep authorization state in the database. The JWT contains identity only.
     token=create_access_token(identity=str(u.id))
@@ -806,35 +799,39 @@ def admin_dashboard():
         .filter(Class.status == "active", TeacherClass.status == "active", Teacher.status == "active")
         .distinct().count())
 
-    # Fast dashboard fee summary: use bounded current-month SQL aggregation.
-    # Detailed historical balances remain available in the fee collection page.
-    active_student_ids=[x.id for x in Student.query.with_entities(Student.id).filter_by(status="active").all()]
-    current_payments=(db.session.query(FeePayment.student_id,func.coalesce(func.sum(FeePayment.amount),0))
-        .filter(FeePayment.fee_month==month,FeePayment.student_id.in_(active_student_ids or [-1]))
-        .group_by(FeePayment.student_id).all())
-    paid_map={sid:Decimal(str(v or 0)) for sid,v in current_payments}
-    class_rows=(db.session.query(StudentClass.student_id,StudentClass.class_id,FeeStructure.monthly_fee)
-        .join(FeeStructure,FeeStructure.class_id==StudentClass.class_id)
-        .filter(StudentClass.student_id.in_(active_student_ids or [-1]),StudentClass.status=="active",
-                FeeStructure.status=="active",FeeStructure.effective_from<=month,
-                or_(FeeStructure.effective_to==None,FeeStructure.effective_to>=month))
-        .order_by(StudentClass.student_id,FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all())
-    base_map={}
-    seen_fee_classes=set()
-    for sid,class_id,fee in class_rows:
-        key=(sid,class_id)
-        if key in seen_fee_classes: continue
-        seen_fee_classes.add(key)
-        base_map[sid]=base_map.get(sid,Decimal("0"))+Decimal(str(fee))
-    due_count=0;pending_amount=Decimal("0");partial_amount=Decimal("0");fine_amount=Decimal("0");pending_students=[]
-    student_lookup={s.id:s for s in Student.query.filter(Student.id.in_(active_student_ids or [-1])).all()}
-    for sid,base in base_map.items():
-        paid=paid_map.get(sid,Decimal("0")); fine=Decimal("50") if today.day>=15 and paid<base and base>0 else Decimal("0")
-        due=base+fine; balance=max(Decimal("0"),due-paid)
-        if balance>0:
-            due_count+=1;pending_amount+=balance;fine_amount+=fine
-            pending_students.append({"student_id":student_lookup[sid].student_id,"name":student_lookup[sid].name,"amount":float(balance),"status":"PARTIAL" if paid>0 else "DUE"})
-            if paid>0:partial_amount+=balance
+    # Fee totals are based on the same balance engine used by the fee collection
+    # screens, so partial payments and the 15th-of-month fine stay consistent.
+    active_students = Student.query.filter_by(status="active").order_by(Student.name.asc()).all()
+    balances_by_student = _fee_month_balances_bulk([x.id for x in active_students])
+    due_count = 0
+    pending_amount = Decimal("0.00")
+    partial_amount = Decimal("0.00")
+    fine_amount = Decimal("0.00")
+    pending_students = []
+    for student in active_students:
+        balances = balances_by_student.get(student.id, [])
+        current = next((x for x in balances if x["month"] == month), None)
+        if not current or current["due"] <= Decimal("0.00"):
+            continue
+        if current["balance"] > Decimal("0.00"):
+            due_count += 1
+            pending_amount += current["balance"]
+            fine_amount += max(Decimal("0.00"), current["due"] - current["base"])
+            if current["status"] == "PARTIAL":
+                partial_amount += current["balance"]
+                pending_students.append({
+                    "student_id": student.student_id,
+                    "name": student.name,
+                    "amount": float(current["balance"]),
+                    "status": current["status"],
+                })
+            else:
+                pending_students.append({
+                    "student_id": student.student_id,
+                    "name": student.name,
+                    "amount": float(current["balance"]),
+                    "status": current["status"],
+                })
 
     collection = (db.session.query(func.coalesce(func.sum(FeePayment.amount), 0))
         .filter(FeePayment.fee_month == month).scalar()) or Decimal("0.00")
@@ -2454,7 +2451,7 @@ def receipt(id):
     balances=_fee_month_balances(p.student_id)
     month_balance=next((x for x in balances if x["month"]==p.fee_month.replace(day=1)), None)
     remaining=month_balance["balance"] if month_balance else Decimal("0.00")
-    return ok({"id":r.id,"receipt_id":r.id,"receipt_number":r.receipt_number,"student":s.name if s else "","student_id":s.student_id if s else "","class":first.get("class_name", ""),"teacher":first.get("teacher_name", ""),"fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),remaining))})
+    return ok({"receipt_number":r.receipt_number,"student":s.name if s else "","student_id":s.student_id if s else "","class":first.get("class_name", ""),"teacher":first.get("teacher_name", ""),"fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),remaining))})
 
 def teacher_for_user():
     return Teacher.query.filter_by(user_id=current_user().id).first()
@@ -2859,433 +2856,3 @@ def student_teacher():
 @api.get("/audit-logs")
 @roles("admin")
 def audits():return ok([{"id":x.id,"action":x.action,"entity_type":x.entity_type,"entity_id":x.entity_id,"description":x.description,"created_at":iso_ist(x.created_at)} for x in AuditLog.query.order_by(AuditLog.created_at.desc()).limit(_bounded_limit(200,1000)).all()])
-
-
-
-@api.get("/receipts/<int:id>/pdf")
-@roles("admin")
-def receipt_pdf(id):
-    r=Receipt.query.get(id)
-    if not r:return err("Receipt not found",404)
-    p=FeePayment.query.get(r.fee_payment_id);s=Student.query.get(p.student_id) if p else None
-    if not p or not s:return err("Payment not found",404)
-    try:
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.units import mm
-        buf=io.BytesIO(); c=canvas.Canvas(buf,pagesize=A4);w,h=A4
-        c.setTitle(f"RMCTI Receipt {r.receipt_number}")
-        c.setFont("Helvetica-Bold",20);c.drawString(25*mm,h-30*mm,"RMCTI")
-        c.setFont("Helvetica",10);c.drawString(25*mm,h-37*mm,"Fee Payment Receipt")
-        y=h-55*mm
-        data=[("Receipt Number",r.receipt_number),("Student",s.name),("Student ID",s.student_id),
-              ("Fee Month",p.fee_month.strftime("%B %Y")),("Amount Paid",f"Rs. {float(p.amount):,.2f}"),
-              ("Payment Method",p.payment_method.replace("_"," ").title()),("Payment Date",iso_ist(p.payment_date))]
-        a=Admin.query.filter_by(user_id=p.collected_by).first();data.append(("Collected By",a.name if a else "Admin"))
-        c.setFont("Helvetica",11)
-        for k,v in data:
-            c.setFont("Helvetica-Bold",10);c.drawString(30*mm,y,k)
-            c.setFont("Helvetica",11);c.drawString(85*mm,y,str(v));y-=10*mm
-        c.line(25*mm,y+5*mm,185*mm,y+5*mm)
-        c.setFont("Helvetica",9);c.drawString(25*mm,y,"System generated receipt · RMCTI")
-        c.showPage();c.save();buf.seek(0)
-        return send_file(buf,mimetype="application/pdf",as_attachment=True,download_name=f"{r.receipt_number}.pdf")
-    except ImportError:return err("PDF support is not installed",500)
-
-# ===================== RMCTI ULTRA FEATURES =====================
-
-def _teacher_owned_class(teacher_id, class_id):
-    return db.session.query(TeacherClass.id).filter_by(teacher_id=teacher_id,class_id=class_id,status="active").first() is not None
-
-def _test_question_payload(q, include_answer=False):
-    out={"id":q.id,"question_text":q.question_text,"question_type":q.question_type,
-         "marks":float(q.marks),"position":q.position}
-    try: out["options"]=json.loads(q.options_json) if q.options_json else []
-    except Exception: out["options"]=[]
-    if include_answer:
-        try: out["answer"]=json.loads(q.answer_json) if q.answer_json else None
-        except Exception: out["answer"]=q.answer_json
-        out["explanation"]=q.explanation
-    return out
-
-@api.get("/teacher/tests")
-@roles("teacher")
-def teacher_tests():
-    t=teacher_for_user()
-    rows=Test.query.filter_by(teacher_id=t.id).order_by(Test.created_at.desc()).limit(_bounded_limit(100,300)).all()
-    return ok([{"id":x.id,"title":x.title,"class_id":x.class_id,"subject_id":x.subject_id,
-               "duration_minutes":x.duration_minutes,"total_marks":float(x.total_marks),
-               "status":x.status,"created_at":iso_ist(x.created_at)} for x in rows])
-
-@api.post("/teacher/tests")
-@roles("teacher")
-def create_test():
-    t=teacher_for_user(); b=request.get_json(silent=True) or {}
-    try:
-        class_id=int(b["class_id"]); subject_id=int(b["subject_id"])
-        title=str(b.get("title","")).strip(); duration=max(1,min(int(b.get("duration_minutes",30)),240))
-        questions=b.get("questions") or []
-        if not title or not questions:return err("Test title and at least one question are required")
-        if not _teacher_owned_class(t.id,class_id):return err("You can only create tests for your assigned classes",403)
-        c=Class.query.get(class_id)
-        if not c or c.subject_id!=subject_id:return err("Select the subject assigned to this class")
-        total=Decimal("0")
-        test=Test(title=title[:255],class_id=class_id,subject_id=subject_id,teacher_id=t.id,duration_minutes=duration,status="draft")
-        db.session.add(test);db.session.flush()
-        allowed={"mcq","true_false","short_answer","numerical","multiple_choice"}
-        for pos,item in enumerate(questions):
-            qt=str(item.get("question_type","mcq")).strip()
-            if qt not in allowed:raise ValueError("Invalid question type")
-            textq=str(item.get("question_text","")).strip()
-            if not textq:raise ValueError("Every question needs question text")
-            marks=Decimal(str(item.get("marks",1)))
-            if marks<=0:raise ValueError("Question marks must be positive")
-            opts=item.get("options") or []
-            ans=item.get("answer")
-            if qt in ("mcq","multiple_choice") and not opts:raise ValueError("MCQ needs options")
-            if qt=="true_false":opts=["True","False"]
-            q=TestQuestion(test_id=test.id,question_text=textq,question_type=qt,marks=marks,
-                           options_json=json.dumps(opts),answer_json=json.dumps(ans),explanation=str(item.get("explanation","")).strip() or None,position=pos)
-            db.session.add(q);total+=marks
-        test.total_marks=total;db.session.commit()
-        return ok({"id":test.id,"total_marks":float(total)},"Test created",201)
-    except Exception as e:
-        db.session.rollback();return err(str(e) if isinstance(e,ValueError) else "Could not create test")
-
-@api.post("/teacher/tests/<int:id>/publish")
-@roles("teacher")
-def publish_test(id):
-    t=teacher_for_user(); test=Test.query.get(id)
-    if not test or test.teacher_id!=t.id:return err("Test not found",404)
-    if not TestQuestion.query.filter_by(test_id=id).count():return err("Add at least one question first")
-    test.status="published";db.session.commit()
-    return ok(message="Test published")
-
-@api.get("/tests/<int:id>")
-@roles("teacher","student")
-def get_test(id):
-    test=Test.query.get(id);u=current_user()
-    if not test:return err("Test not found",404)
-    if u.role=="teacher":
-        t=teacher_for_user()
-        if test.teacher_id!=t.id:return err("Unauthorized",403)
-        include=True
-    else:
-        s=student_for_user()
-        if not s or test.status!="published" or not StudentClass.query.filter_by(student_id=s.id,class_id=test.class_id,status="active").first():return err("Test is not available",403)
-        include=False
-    qs=TestQuestion.query.filter_by(test_id=id).order_by(TestQuestion.position).all()
-    return ok({"id":test.id,"title":test.title,"duration_minutes":test.duration_minutes,"total_marks":float(test.total_marks),"status":test.status,"questions":[_test_question_payload(q,include) for q in qs]})
-
-@api.get("/student/tests")
-@roles("student")
-def student_tests():
-    s=student_for_user()
-    class_ids=[x.class_id for x in StudentClass.query.filter_by(student_id=s.id,status="active").all()]
-    rows=Test.query.filter(Test.class_id.in_(class_ids or [-1]),Test.status=="published").order_by(Test.created_at.desc()).limit(_bounded_limit(100,300)).all()
-    attempts={a.test_id:a for a in TestAttempt.query.filter(TestAttempt.student_id==s.id,TestAttempt.test_id.in_([x.id for x in rows] or [-1])).all()}
-    return ok([{"id":x.id,"title":x.title,"duration_minutes":x.duration_minutes,"total_marks":float(x.total_marks),
-               "class_id":x.class_id,"subject_id":x.subject_id,"attempted":x.id in attempts,
-               "result":({"score":float(attempts[x.id].score or 0),"percentage":float(attempts[x.id].percentage or 0)} if x.id in attempts and attempts[x.id].status!="in_progress" else None)} for x in rows])
-
-@api.post("/student/tests/<int:id>/start")
-@roles("student")
-def start_test(id):
-    s=student_for_user();test=Test.query.get(id)
-    if not test or test.status!="published":return err("Test is not available",404)
-    if not StudentClass.query.filter_by(student_id=s.id,class_id=test.class_id,status="active").first():return err("Unauthorized",403)
-    a=TestAttempt.query.filter_by(test_id=id,student_id=s.id).first()
-    if a:
-        if a.status=="in_progress":
-            deadline=a.started_at+timedelta(minutes=test.duration_minutes)
-            if datetime.utcnow()>deadline:
-                a.status="expired";db.session.commit();return err("Test time has expired",409)
-        return ok({"attempt_id":a.id,"started_at":a.started_at.isoformat(),"status":a.status})
-    a=TestAttempt(test_id=id,student_id=s.id,status="in_progress");db.session.add(a);db.session.commit()
-    return ok({"attempt_id":a.id,"started_at":a.started_at.isoformat(),"duration_minutes":test.duration_minutes},"Test started",201)
-
-def _answer_correct(q, submitted):
-    try: answer=json.loads(q.answer_json) if q.answer_json else None
-    except Exception: answer=q.answer_json
-    if q.question_type=="multiple_choice":
-        return sorted(map(str,answer or []))==sorted(map(str,submitted or []))
-    if q.question_type=="numerical":
-        try:return math.isclose(float(answer),float(submitted),rel_tol=1e-5,abs_tol=1e-5)
-        except:return False
-    if q.question_type=="true_false":
-        return str(answer).strip().lower()==str(submitted).strip().lower()
-    return re.sub(r"\s+"," ",str(answer or "").strip().lower())==re.sub(r"\s+"," ",str(submitted or "").strip().lower())
-
-@api.post("/student/tests/<int:id>/submit")
-@roles("student")
-def submit_test(id):
-    s=student_for_user();test=Test.query.get(id);a=TestAttempt.query.filter_by(test_id=id,student_id=s.id).first()
-    if not test or not a:return err("Test attempt not found",404)
-    if a.status!="in_progress":return ok({"score":float(a.score or 0),"percentage":float(a.percentage or 0),"status":a.status})
-    now=datetime.utcnow();elapsed=max(0,int((now-a.started_at).total_seconds()))
-    answers=(request.get_json(silent=True) or {}).get("answers") or {}
-    qs=TestQuestion.query.filter_by(test_id=id).order_by(TestQuestion.position).all()
-    score=Decimal("0");correct=wrong=0
-    for q in qs:
-        submitted=answers.get(str(q.id),answers.get(q.id))
-        if _answer_correct(q,submitted):score+=Decimal(str(q.marks));correct+=1
-        else:wrong+=1
-    pct=(score/Decimal(str(test.total_marks))*Decimal("100")) if test.total_marks else Decimal("0")
-    a.submitted_at=now;a.time_taken_seconds=min(elapsed,test.duration_minutes*60);a.score=score;a.percentage=pct
-    a.correct_answers=correct;a.wrong_answers=wrong;a.status="submitted";a.answers_json=json.dumps(answers)
-    db.session.commit()
-    return ok({"score":float(score),"percentage":round(float(pct),2),"correct_answers":correct,"wrong_answers":wrong,
-               "time_taken_seconds":a.time_taken_seconds},"Test submitted")
-
-@api.get("/student/tests/<int:id>/result")
-@roles("student")
-def test_result(id):
-    s=student_for_user();a=TestAttempt.query.filter_by(test_id=id,student_id=s.id).first()
-    if not a or a.status=="in_progress":return err("Result is not available",404)
-    test=Test.query.get(id);return ok({"test":test.title,"score":float(a.score or 0),"total_marks":float(test.total_marks),
-        "percentage":float(a.percentage or 0),"correct_answers":a.correct_answers,"wrong_answers":a.wrong_answers,
-        "time_taken_seconds":a.time_taken_seconds,"submitted_at":iso_ist(a.submitted_at)})
-
-@api.get("/teacher/study-materials")
-@roles("teacher")
-def teacher_materials():
-    t=teacher_for_user()
-    class_ids=[x.class_id for x in TeacherClass.query.filter_by(teacher_id=t.id,status="active").all()]
-    rows=StudyMaterial.query.filter(StudyMaterial.class_id.in_(class_ids or [-1])).order_by(StudyMaterial.created_at.desc()).limit(_bounded_limit(200,500)).all()
-    return ok([{"id":x.id,"title":x.title,"class_id":x.class_id,"subject_id":x.subject_id,"chapter":x.chapter,"material_type":x.material_type,
-               "file_url":x.file_url,"original_filename":x.original_filename,"file_size":x.file_size,"created_at":iso_ist(x.created_at)} for x in rows])
-
-@api.post("/teacher/study-materials")
-@roles("teacher")
-def upload_study_material():
-    t=teacher_for_user();f=request.files.get("file")
-    if not f or not f.filename:return err("File is required")
-    try: class_id=int(request.form.get("class_id"));subject_id=int(request.form.get("subject_id"))
-    except:return err("Class and subject are required")
-    if not _teacher_owned_class(t.id,class_id):return err("Unauthorized",403)
-    c=Class.query.get(class_id)
-    if not c or c.subject_id!=subject_id:return err("Invalid subject for class")
-    title=str(request.form.get("title") or secure_filename(f.filename)).strip()[:255]
-    chapter=str(request.form.get("chapter") or "").strip()[:150] or None
-    mt=str(request.form.get("material_type") or "notes").strip()
-    allowed={"pdf","notes","image","question_paper","syllabus","previous_year","important_questions","reference"}
-    if mt not in allowed:return err("Invalid material type")
-    f.seek(0,2);size=f.tell();f.seek(0)
-    if size>15*1024*1024:return err("Study material must be 15 MB or smaller")
-    raw=f.read();name=secure_filename(f.filename) or "material"
-    try:
-        import cloudinary,cloudinary.uploader
-        cu=os.getenv("CLOUDINARY_URL","").strip()
-        if not cu: raise RuntimeError("CLOUDINARY_URL is missing")
-        cloudinary.config(cloudinary_url=cu,secure=True)
-        resource="image" if (f.mimetype or "").startswith("image/") else "raw"
-        result=cloudinary.uploader.upload(raw,folder=os.getenv("CLOUDINARY_MATERIAL_FOLDER","rmcti/materials"),
-            resource_type=resource,use_filename=False,unique_filename=True)
-        url=result["secure_url"]
-    except Exception as exc:
-        current_app.logger.exception("Study material upload failed: %s",exc)
-        return err("Study material storage is not configured. Set CLOUDINARY_URL on Render.",500)
-    row=StudyMaterial(title=title,class_id=class_id,subject_id=subject_id,chapter=chapter,material_type=mt,
-                      file_url=url,original_filename=name,file_size=size,uploaded_by=current_user().id)
-    db.session.add(row);db.session.commit()
-    return ok({"id":row.id,"file_url":url},"Study material uploaded",201)
-
-@api.get("/student/study-materials")
-@roles("student")
-def student_materials():
-    s=student_for_user();class_ids=[x.class_id for x in StudentClass.query.filter_by(student_id=s.id,status="active").all()]
-    subject=request.args.get("subject_id",type=int);chapter=request.args.get("chapter","").strip();mt=request.args.get("material_type","").strip()
-    q=StudyMaterial.query.filter(StudyMaterial.class_id.in_(class_ids or [-1]))
-    if subject:q=q.filter_by(subject_id=subject)
-    if chapter:q=q.filter(StudyMaterial.chapter==chapter)
-    if mt:q=q.filter(StudyMaterial.material_type==mt)
-    rows=q.order_by(StudyMaterial.created_at.desc()).limit(_bounded_limit(200,500)).all()
-    return ok([{"id":x.id,"title":x.title,"class_id":x.class_id,"subject_id":x.subject_id,"chapter":x.chapter,"material_type":x.material_type,
-               "file_url":x.file_url,"original_filename":x.original_filename,"file_size":x.file_size,"created_at":iso_ist(x.created_at)} for x in rows])
-
-@api.get("/admin/fee-dashboard")
-@roles("admin")
-def fee_dashboard():
-    first=today_ist().replace(day=1); next_month=(first.replace(day=28)+timedelta(days=4)).replace(day=1)
-    payments=FeePayment.query.filter(FeePayment.fee_month>=first,FeePayment.fee_month<next_month).all()
-    collected=sum((Decimal(str(x.amount)) for x in payments),Decimal("0"))
-    fine=sum((Decimal(str(x.amount)) for x in FeeAdjustment.query.filter(FeeAdjustment.fee_month==first,FeeAdjustment.kind=="fine").all()),Decimal("0"))
-    active=Student.query.filter_by(status="active").all()
-    expected=Decimal("0")
-    for s in active:
-        expected+=Decimal(str(_fee_base_for_month(_fee_rows_for_student(s.id),first)))
-    pending=max(Decimal("0"),expected-collected)
-    return ok({"expected":float(expected),"collected":float(collected),"pending":float(pending),"fine":float(fine),
-               "payment_count":len(payments)})
-
-@api.post("/admin/fee-adjustments")
-@roles("admin")
-def fee_adjustment():
-    b=request.get_json(silent=True) or {}
-    try:
-        sid=int(b["student_id"]);m=date.fromisoformat(str(b.get("fee_month"))+"-01")
-        kind=str(b["kind"]);amount=Decimal(str(b["amount"]))
-        if kind not in {"discount","scholarship","installment","custom_fee","admission_fee","exam_fee","registration_fee","material_fee","refund","advance","carry_forward","fine"}:return err("Invalid adjustment type")
-        if amount==0:return err("Amount cannot be zero")
-        s=Student.query.get(sid)
-        if not s:return err("Student not found",404)
-        row=FeeAdjustment(student_id=sid,fee_month=m,kind=kind,amount=amount,note=str(b.get("note",""))[:500] or None,created_by=current_user().id)
-        db.session.add(row);db.session.commit();return ok({"id":row.id},"Fee adjustment saved",201)
-    except Exception:
-        db.session.rollback();return err("Invalid fee adjustment")
-
-@api.get("/admin/attendance-analytics")
-@roles("admin")
-def attendance_analytics():
-    start=date.today()-timedelta(days=29)
-    rows=Attendance.query.filter(Attendance.attendance_date>=start).all()
-    present=sum(1 for x in rows if x.status=="present");total=len(rows);pct=round(present*100/total,2) if total else 0
-    students=Student.query.filter_by(status="active").all();low=[]
-    for s in students:
-        r=Attendance.query.filter(Attendance.student_id==s.id,Attendance.attendance_date>=start).all()
-        if r:
-            p=sum(x.status=="present" for x in r)*100/len(r)
-            if p<75:low.append({"student_id":s.student_id,"name":s.name,"percentage":round(p,2)})
-    low.sort(key=lambda x:x["percentage"])
-    return ok({"today":None,"this_week":pct,"this_month":pct,"present":present,"absent":total-present,"low_attendance":low[:50]})
-
-@api.get("/teacher/performance")
-@roles("teacher")
-def teacher_performance():
-    t=teacher_for_user();class_ids=[x.class_id for x in TeacherClass.query.filter_by(teacher_id=t.id,status="active").all()]
-    students=StudentClass.query.filter(StudentClass.class_id.in_(class_ids or [-1]),StudentClass.status=="active").count()
-    week_start=today_ist()-timedelta(days=today_ist().weekday())
-    classes=TeacherClass.query.filter_by(teacher_id=t.id,status="active").all()
-    hw=Homework.query.filter(Homework.teacher_id==t.id,Homework.created_at>=datetime.combine(week_start,time.min)).count()
-    tests=Test.query.filter_by(teacher_id=t.id).count()
-    att=Attendance.query.filter(Attendance.marked_by==t.user_id,Attendance.attendance_date>=week_start).count()
-    return ok({"my_classes":len(classes),"students":students,"classes_this_week":len(classes)*6,"attendance_marked":att,
-               "homework_given":hw,"tests_conducted":tests})
-
-@api.post("/admin/notices")
-@roles("admin")
-def create_notice():
-    b=request.get_json(silent=True) or {}
-    title=str(b.get("title","")).strip();body=str(b.get("body","")).strip()
-    if not title or not body:return err("Title and body are required")
-    target=str(b.get("target_type","all"));nt=str(b.get("notice_type","general"));priority=str(b.get("priority","normal"))
-    if target not in {"all","course","class","student","teachers"} or nt not in {"holiday","exam","fee","schedule","important","general"} or priority not in {"low","normal","high","urgent"}:return err("Invalid notice settings")
-    expires=None
-    if b.get("expires_at"):
-        try:expires=datetime.fromisoformat(str(b["expires_at"]).replace("Z",""))
-        except:return err("Invalid expiry date")
-    n=Notice(title=title[:255],body=body,notice_type=nt,target_type=target,target_id=b.get("target_id"),priority=priority,attachment_url=b.get("attachment_url"),expires_at=expires,created_by=current_user().id)
-    db.session.add(n);db.session.commit();return ok({"id":n.id},"Notice published",201)
-
-@api.get("/notices")
-@roles("admin","teacher","student")
-def list_notices():
-    u=current_user();now=datetime.utcnow();q=Notice.query.filter(or_(Notice.expires_at==None,Notice.expires_at>now))
-    if u.role=="teacher":q=q.filter(Notice.target_type.in_(["all","teachers"]))
-    elif u.role=="student":
-        s=student_for_user();cids=[x.class_id for x in StudentClass.query.filter_by(student_id=s.id,status="active").all()]
-        q=q.filter(or_(Notice.target_type=="all",and_(Notice.target_type=="student",Notice.target_id==s.id),
-                       and_(Notice.target_type=="class",Notice.target_id.in_(cids or [-1]))))
-    rows=q.order_by(Notice.created_at.desc()).limit(_bounded_limit(100,300)).all()
-    read_ids={x.notice_id for x in NoticeRead.query.filter_by(user_id=u.id).all()}
-    return ok([{"id":n.id,"title":n.title,"body":n.body,"notice_type":n.notice_type,"target_type":n.target_type,
-               "priority":n.priority,"attachment_url":n.attachment_url,"expires_at":iso_ist(n.expires_at) if n.expires_at else None,
-               "created_at":iso_ist(n.created_at),"read":n.id in read_ids} for n in rows])
-
-@api.post("/notices/<int:id>/read")
-@roles("admin","teacher","student")
-def mark_notice_read(id):
-    if not Notice.query.get(id):return err("Notice not found",404)
-    if not NoticeRead.query.filter_by(notice_id=id,user_id=current_user().id).first():
-        db.session.add(NoticeRead(notice_id=id,user_id=current_user().id));db.session.commit()
-    return ok(message="Marked as read")
-
-@api.get("/admin/security")
-@roles("admin")
-def security_dashboard():
-    users=User.query.order_by(User.updated_at.desc()).limit(100).all()
-    failed=LoginHistory.query.filter_by(success=False).order_by(LoginHistory.created_at.desc()).limit(50).all()
-    history=LoginHistory.query.order_by(LoginHistory.created_at.desc()).limit(100).all()
-    return ok({"recent_logins_30m":LoginHistory.query.filter(LoginHistory.success==True,LoginHistory.created_at>=datetime.utcnow()-timedelta(minutes=30)).count(),"users":[{"id":u.id,"username":u.username,"role":u.role,"active":u.is_active,"updated_at":iso_ist(u.updated_at)} for u in users],
-               "failed_logins":[{"user_id":x.user_id,"ip":x.ip_address,"user_agent":x.user_agent,"created_at":iso_ist(x.created_at)} for x in failed],
-               "login_history":[{"user_id":x.user_id,"ip":x.ip_address,"user_agent":x.user_agent,"success":x.success,"created_at":iso_ist(x.created_at)} for x in history]})
-
-@api.post("/admin/security/users/<int:id>/disable")
-@roles("admin")
-def disable_user(id):
-    u=User.query.get(id)
-    if not u:return err("User not found",404)
-    if u.id==current_user().id:return err("You cannot disable your own account")
-    u.is_active=False;db.session.commit();return ok(message="Account disabled")
-
-@api.post("/admin/security/users/<int:id>/enable")
-@roles("admin")
-def enable_user(id):
-    u=User.query.get(id)
-    if not u:return err("User not found",404)
-    u.is_active=True;db.session.commit();return ok(message="Account enabled")
-
-@api.post("/admin/security/logout-all")
-@roles("admin")
-def logout_all():
-    # Revoke currently active JWTs cannot be done without a token registry.
-    # Rotating the server-side JWT secret is intentionally avoided because it
-    # would invalidate every user and require a deployment restart.
-    return err("Use account disable/enable for emergency access control; active JWTs expire automatically.",409)
-
-@api.post("/assistant")
-@roles("admin","teacher","student")
-def assistant():
-    b=request.get_json(silent=True) or {};question=str(b.get("question","")).strip().lower();u=current_user()
-    if not question:return err("Ask a question")
-    if "fee" in question and ("collect" in question or "collection" in question or "month" in question):
-        first=today_ist().replace(day=1);n=(first.replace(day=28)+timedelta(days=4)).replace(day=1)
-        if u.role=="admin":
-            payments=FeePayment.query.filter(FeePayment.fee_month>=first,FeePayment.fee_month<n).all()
-            total=sum((Decimal(str(x.amount)) for x in payments),Decimal("0"));count=len(payments)
-            return ok({"answer":f"₹{total:,.2f} has been collected this month from {count} payments.","source":"database"})
-        if u.role=="student":
-            s=student_for_user();payments=FeePayment.query.filter(FeePayment.student_id==s.id,FeePayment.fee_month>=first,FeePayment.fee_month<n).all()
-            total=sum((Decimal(str(x.amount)) for x in payments),Decimal("0"))
-            return ok({"answer":f"You have paid ₹{total:,.2f} this month.","source":"database"})
-        return ok({"answer":"Fee collection totals are available to administrators. I can help you with your teaching data.","source":"database"})
-    if "attendance" in question and "75" in question:
-        allowed_student_ids=None
-        if u.role=="teacher":
-            tchr=teacher_for_user();cids=[x.class_id for x in TeacherClass.query.filter_by(teacher_id=tchr.id,status="active").all()]
-            allowed_student_ids={x.student_id for x in StudentClass.query.filter(StudentClass.class_id.in_(cids or [-1]),StudentClass.status=="active").all()}
-        rows=Attendance.query.filter(Attendance.student_id.in_(allowed_student_ids or [-1]) if allowed_student_ids is not None else True).all();by={}
-        for r in rows:by.setdefault(r.student_id,[]).append(r)
-        out=[]
-        for sid,rs in by.items():
-            pct=sum(x.status=="present" for x in rs)*100/len(rs)
-            if pct<75:
-                s=Student.query.get(sid);out.append({"name":s.name if s else str(sid),"percentage":round(pct,2)})
-        return ok({"answer":f"{len(out)} student(s) are below 75% attendance.","students":sorted(out,key=lambda x:x["percentage"]),"source":"database"})
-    if u.role=="student" and "homework" in question:
-        s=student_for_user();cids=[x.class_id for x in StudentClass.query.filter_by(student_id=s.id,status="active").all()]
-        rows=Homework.query.filter(Homework.class_id.in_(cids or [-1]),Homework.due_date>=today_ist()).order_by(Homework.due_date).limit(20).all()
-        return ok({"answer":f"You have {len(rows)} upcoming homework item(s).","homework":[{"title":x.title,"due_date":x.due_date.isoformat()} for x in rows],"source":"database"})
-    return ok({"answer":"I can answer database-backed fee, attendance and homework questions. Try: 'How much fee was collected this month?' or 'Show students with attendance below 75%'.","source":"database"})
-
-@api.get("/admin/student-risk")
-@roles("admin")
-def student_risk():
-    students=Student.query.filter_by(status="active").all();out=[]
-    first=today_ist().replace(day=1)
-    for s in students:
-        att=Attendance.query.filter_by(student_id=s.id).all()
-        att_pct=(sum(x.status=="present" for x in att)*100/len(att)) if att else 100
-        attempts=(TestAttempt.query.filter_by(student_id=s.id,status="submitted").order_by(TestAttempt.submitted_at.desc()).limit(6).all())
-        marks_down=False;mark_change=0
-        if len(attempts)>=2:
-            recent=float(attempts[0].percentage or 0);older=float(attempts[-1].percentage or 0);mark_change=round(recent-older,2);marks_down=mark_change<=-10
-        base=Decimal(str(_fee_base_for_month(_fee_rows_for_student(s.id),first)))
-        paid=sum((Decimal(str(x.amount)) for x in FeePayment.query.filter_by(student_id=s.id,fee_month=first).all()),Decimal("0"))
-        overdue=base>0 and paid<base and today_ist().day>15
-        signals=(att_pct<75)+marks_down+overdue
-        if signals>=2:
-            out.append({"student_id":s.student_id,"name":s.name,"attendance":round(att_pct,2),"marks_change":mark_change,
-                        "fee_overdue":overdue,"signals":signals,"severity":"high" if signals==3 else "attention"})
-    out.sort(key=lambda x:(-x["signals"],x["attendance"]))
-    return ok(out[:100])
