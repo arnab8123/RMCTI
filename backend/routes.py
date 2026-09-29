@@ -2060,65 +2060,238 @@ def _fee_for_month_from_rows(rows, month):
 
 
 def _fee_month_balances_bulk(student_ids):
-    ids=list({int(x) for x in student_ids if x})
-    if not ids:return {}
-    students={x.id:x for x in Student.query.filter(Student.id.in_(ids)).all()}
-    sc_rows=StudentClass.query.filter(StudentClass.student_id.in_(ids),StudentClass.status=="active").all()
-    class_by_student={sid:set() for sid in ids}; class_ids=set()
-    for sc in sc_rows: class_by_student[sc.student_id].add(sc.class_id); class_ids.add(sc.class_id)
-    fee_rows=FeeStructure.query.filter(FeeStructure.class_id.in_(class_ids or [-1]),FeeStructure.status=="active").order_by(FeeStructure.class_id,FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all()
-    fee_by_class={}
-    for r in fee_rows: fee_by_class.setdefault(r.class_id,[]).append(r)
-    payments=FeePayment.query.filter(FeePayment.student_id.in_(ids)).order_by(FeePayment.student_id,FeePayment.payment_date,FeePayment.id).all()
-    payments_by_student={sid:[] for sid in ids}
-    for pay in payments: payments_by_student[pay.student_id].append(pay)
-    today=today_ist(); today_month=today.replace(day=1); result={}
+    """Calculate fee balances for many students with bounded DB work and linear
+    payment processing.
+
+    The previous implementation repeatedly scanned every historical payment
+    for every month/fine cycle. With a growing student/payment history that
+    turned the admin dashboard into an O(students * months * payments) Python
+    workload. This version keeps the same fee/fine rules but precomputes
+    cumulative payments by date and monthly fee bases.
+    """
+    from bisect import bisect_right
+    from datetime import timezone
+
+    ids = list({int(x) for x in student_ids if x})
+    if not ids:
+        return {}
+
+    students = {
+        x.id: x
+        for x in Student.query.filter(Student.id.in_(ids)).all()
+    }
+
+    sc_rows = (
+        StudentClass.query
+        .filter(
+            StudentClass.student_id.in_(ids),
+            StudentClass.status == "active",
+        )
+        .all()
+    )
+
+    class_by_student = {sid: set() for sid in ids}
+    class_ids = set()
+    for sc in sc_rows:
+        class_by_student.setdefault(sc.student_id, set()).add(sc.class_id)
+        class_ids.add(sc.class_id)
+
+    if not class_ids:
+        return {sid: [] for sid in ids}
+
+    fee_rows = (
+        FeeStructure.query
+        .filter(
+            FeeStructure.class_id.in_(class_ids),
+            FeeStructure.status == "active",
+        )
+        .order_by(
+            FeeStructure.class_id.asc(),
+            FeeStructure.effective_from.desc(),
+            FeeStructure.id.desc(),
+        )
+        .all()
+    )
+
+    fee_by_class = {}
+    for row in fee_rows:
+        fee_by_class.setdefault(row.class_id, []).append(row)
+
+    # Load payments once. Convert payment dates once and build cumulative
+    # totals so every "paid by the 15th" lookup is O(log n), not O(payments).
+    payments = (
+        FeePayment.query
+        .filter(FeePayment.student_id.in_(ids))
+        .order_by(FeePayment.student_id, FeePayment.payment_date, FeePayment.id)
+        .all()
+    )
+    payments_by_student = {sid: [] for sid in ids}
+    for pay in payments:
+        payments_by_student.setdefault(pay.student_id, []).append(pay)
+
+    today = today_ist()
+    today_month = today.replace(day=1)
+
+    # Fee base is determined by class/month, so calculate it once per class
+    # and month instead of once for every student assigned to that class.
+    fee_base_cache = {}
+
+    def class_fee_base(class_id, month):
+        key = (class_id, month)
+        cached = fee_base_cache.get(key)
+        if cached is not None:
+            return cached
+
+        base = Decimal("0.00")
+        for row in fee_by_class.get(class_id, ()):
+            if (
+                row.effective_from <= month
+                and (row.effective_to is None or row.effective_to >= month)
+            ):
+                base += Decimal(str(row.monthly_fee))
+                # A class should contribute only its latest effective row.
+                break
+
+        fee_base_cache[key] = base
+        return base
+
+    result = {}
+
     for sid in ids:
-        student=students.get(sid)
-        rows=[r for cid in class_by_student.get(sid,set()) for r in fee_by_class.get(cid,[])]
-        if not student or not rows: result[sid]=[]; continue
-        start=min([today_month]+(([student.admission_date.replace(day=1)] if student.admission_date else []))+[r.effective_from.replace(day=1) for r in rows if r.effective_from])
-        p_by_month={}
-        for pay in payments_by_student[sid]: p_by_month.setdefault(pay.fee_month.replace(day=1),[]).append(pay)
-        months=[]; m=start; running_credit=Decimal("0.00")
-        all_payments=payments_by_student[sid]
+        student = students.get(sid)
+        assigned_classes = class_by_student.get(sid, set())
+        if not student or not assigned_classes:
+            result[sid] = []
+            continue
+
+        rows = [
+            row
+            for class_id in assigned_classes
+            for row in fee_by_class.get(class_id, ())
+        ]
+        if not rows:
+            result[sid] = []
+            continue
+
+        effective_dates = [
+            row.effective_from.replace(day=1)
+            for row in rows
+            if row.effective_from
+        ]
+        start_candidates = [today_month]
+        if student.admission_date:
+            start_candidates.append(student.admission_date.replace(day=1))
+        start_candidates.extend(effective_dates)
+        start = min(start_candidates)
+
+        # Payments are already ordered by payment date. Precompute cumulative
+        # amount and the corresponding IST calendar date once.
+        student_payments = payments_by_student.get(sid, [])
+        payment_dates = []
+        cumulative_paid = []
+        running_total = Decimal("0.00")
+        for pay in student_payments:
+            value = pay.payment_date
+            if value and value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            paid_date = (
+                value.astimezone(ZoneInfo("Asia/Kolkata")).date()
+                if value
+                else None
+            )
+            if paid_date is None:
+                continue
+            running_total += Decimal(str(pay.amount))
+            payment_dates.append(paid_date)
+            cumulative_paid.append(running_total)
+
         def paid_through(day):
-            total=Decimal("0.00")
-            for pay in all_payments:
-                v=pay.payment_date
-                if v and v.tzinfo is None:v=v.replace(tzinfo=__import__('datetime').timezone.utc)
-                if v and v.astimezone(ZoneInfo("Asia/Kolkata")).date()<=day: total+=Decimal(str(pay.amount))
-            return total
-        # Process months chronologically. Carry-forward credit is included in
-        # each 15th test only when the underlying overpayment existed by then.
-        allocated_before=Decimal("0.00")
-        while m<=today_month:
-            base=_fee_base_for_month(rows,m); due=base
-            cycle=m.replace(day=15)
-            month_payments=p_by_month.get(m,[])
-            if base>0:
-                while cycle<=today:
-                    # Payments tagged to earlier months may create credit that
-                    # can cover this month's fee before its fine date.
-                    earlier_due=Decimal("0.00")
-                    for prior in months:
-                        if prior["month"]>=m: continue
-                        earlier_due += prior["due"]
-                    payments_to_date=paid_through(cycle)
-                    # Payments already consumed by prior months at this date.
-                    prior_paid_need=sum((prior["base"] for prior in months if prior["month"]<m),Decimal("0.00"))
-                    available_for_current=max(Decimal("0.00"),payments_to_date-prior_paid_need)
-                    if running_credit>0: available_for_current+=running_credit
-                    if due>available_for_current: due+=Decimal("50.00")
-                    cycle=(cycle+timedelta(days=32)).replace(day=15)
-            months.append({"month":m,"base":base,"due":due,"paid":Decimal("0.00"),"credit":Decimal("0.00")})
-            incoming=sum((Decimal(str(p.amount)) for p in month_payments),Decimal("0.00"))+running_credit
-            months[-1]["paid"]=min(incoming,due); running_credit=max(Decimal("0.00"),incoming-due)
-            m=(m+timedelta(days=32)).replace(day=1)
+            if not payment_dates:
+                return Decimal("0.00")
+            idx = bisect_right(payment_dates, day) - 1
+            return cumulative_paid[idx] if idx >= 0 else Decimal("0.00")
+
+        # Payments are tagged to months for normal allocation/credit handling.
+        p_by_month = {}
+        for pay in student_payments:
+            month_key = pay.fee_month.replace(day=1)
+            p_by_month.setdefault(month_key, []).append(pay)
+
+        months = []
+        running_credit = Decimal("0.00")
+        prior_base_sum = Decimal("0.00")
+        m = start
+
+        while m <= today_month:
+            base = sum(
+                (
+                    class_fee_base(class_id, m)
+                    for class_id in assigned_classes
+                ),
+                Decimal("0.00"),
+            )
+            due = base
+
+            # Preserve the existing rule: ₹50 is added on each applicable
+            # 15th while the month remains outstanding. The available amount
+            # at each cycle includes payments received by that date, less the
+            # base fees already allocated to prior months, plus carried credit.
+            if base > 0:
+                cycle = m.replace(day=15)
+                while cycle <= today:
+                    payments_to_date = paid_through(cycle)
+                    available_for_current = max(
+                        Decimal("0.00"),
+                        payments_to_date - prior_base_sum,
+                    )
+                    if running_credit > 0:
+                        available_for_current += running_credit
+
+                    if due > available_for_current:
+                        due += Decimal("50.00")
+
+                    cycle = (cycle + timedelta(days=32)).replace(day=15)
+
+            month_payments = p_by_month.get(m, ())
+            incoming = sum(
+                (Decimal(str(p.amount)) for p in month_payments),
+                Decimal("0.00"),
+            ) + running_credit
+
+            paid = min(incoming, due)
+            running_credit = max(Decimal("0.00"), incoming - due)
+
+            months.append({
+                "month": m,
+                "base": base,
+                "due": due,
+                "paid": paid,
+                "credit": Decimal("0.00"),
+            })
+
+            prior_base_sum += base
+            m = (m + timedelta(days=32)).replace(day=1)
+
         for item in months:
-            item["balance"]=max(Decimal("0.00"),item["due"]-item["paid"]); item["status"]="PAID" if item["due"]>0 and item["balance"]<=0 else ("PARTIAL" if item["paid"]>0 else ("DUE" if item["due"]>0 else "N/A"))
-        if running_credit > 0 and months: months[-1]["credit"]=running_credit
-        result[sid]=months
+            item["balance"] = max(
+                Decimal("0.00"),
+                item["due"] - item["paid"],
+            )
+            item["status"] = (
+                "PAID"
+                if item["due"] > 0 and item["balance"] <= 0
+                else (
+                    "PARTIAL"
+                    if item["paid"] > 0
+                    else ("DUE" if item["due"] > 0 else "N/A")
+                )
+            )
+
+        if running_credit > 0 and months:
+            months[-1]["credit"] = running_credit
+
+        result[sid] = months
+
     return result
 
 def _fee_month_balances(sid):

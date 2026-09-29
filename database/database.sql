@@ -80,6 +80,7 @@ CREATE TABLE classes (
  subject_id BIGINT UNSIGNED NOT NULL, room VARCHAR(100), max_students INT NOT NULL DEFAULT 30,
  status ENUM('active','inactive') NOT NULL DEFAULT 'active',
  created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+ INDEX idx_classes_status(status),
  FOREIGN KEY(subject_id) REFERENCES subjects(id)
 ) ENGINE=InnoDB;
 CREATE TABLE teacher_classes (
@@ -130,6 +131,7 @@ CREATE TABLE fee_payments (
  payment_method ENUM('cash','upi','bank_transfer','other') NOT NULL, collected_by BIGINT UNSIGNED NOT NULL,
  receipt_number VARCHAR(50) NOT NULL UNIQUE, notes TEXT,
  INDEX idx_fee_payments_student_month_payment(student_id,fee_month,payment_date,id),
+ INDEX idx_fee_payments_student_payment_date(student_id,payment_date,id),
  FOREIGN KEY(student_id) REFERENCES students(id), FOREIGN KEY(collected_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 CREATE TABLE receipts (

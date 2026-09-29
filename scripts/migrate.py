@@ -224,6 +224,7 @@ def ensure_performance_indexes():
         ],
         "fee_payments": [
             ("idx_fee_payments_student_month", "student_id,fee_month"),
+            ("idx_fee_payments_student_payment_date", "student_id,payment_date,id"),
         ],
         "fee_structures": [
             ("idx_fee_structures_class_status_effective", "class_id,status,effective_from"),
@@ -247,6 +248,9 @@ def ensure_performance_indexes():
         ],
         "teachers": [
             ("idx_teachers_status_name", "status,name"),
+        ],
+        "classes": [
+            ("idx_classes_status", "status"),
         ],
     }
     for table, indexes in wanted.items():
