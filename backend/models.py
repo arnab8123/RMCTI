@@ -126,3 +126,110 @@ class PhotoAsset(db.Model):
     mime_type = db.Column(db.String(50), nullable=False)
     data = db.Column(MEDIUMBLOB, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class Test(db.Model):
+    __tablename__="tests"
+    id=db.Column(db.BigInteger,primary_key=True)
+    title=db.Column(db.String(255),nullable=False)
+    class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False)
+    subject_id=db.Column(db.BigInteger,db.ForeignKey("subjects.id"),nullable=False)
+    teacher_id=db.Column(db.BigInteger,db.ForeignKey("teachers.id"),nullable=False)
+    duration_minutes=db.Column(db.Integer,nullable=False,default=30)
+    total_marks=db.Column(db.Numeric(10,2),nullable=False,default=0)
+    status=db.Column(db.Enum("draft","published","closed"),nullable=False,default="draft")
+    starts_at=db.Column(db.DateTime,nullable=True)
+    ends_at=db.Column(db.DateTime,nullable=True)
+    created_at=db.Column(db.DateTime,default=datetime.utcnow)
+    updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
+    __table_args__=(db.Index("idx_tests_class_status","class_id","status"),db.Index("idx_tests_teacher_created","teacher_id","created_at"))
+
+class TestQuestion(db.Model):
+    __tablename__="test_questions"
+    id=db.Column(db.BigInteger,primary_key=True)
+    test_id=db.Column(db.BigInteger,db.ForeignKey("tests.id",ondelete="CASCADE"),nullable=False)
+    question_text=db.Column(db.Text,nullable=False)
+    question_type=db.Column(db.Enum("mcq","true_false","short_answer","numerical","multiple_choice"),nullable=False)
+    marks=db.Column(db.Numeric(8,2),nullable=False,default=1)
+    options_json=db.Column(db.Text,nullable=True)
+    answer_json=db.Column(db.Text,nullable=True)
+    explanation=db.Column(db.Text,nullable=True)
+    position=db.Column(db.Integer,nullable=False,default=0)
+    __table_args__=(db.Index("idx_test_questions_test_position","test_id","position"),)
+
+class TestAttempt(db.Model):
+    __tablename__="test_attempts"
+    id=db.Column(db.BigInteger,primary_key=True)
+    test_id=db.Column(db.BigInteger,db.ForeignKey("tests.id",ondelete="CASCADE"),nullable=False)
+    student_id=db.Column(db.BigInteger,db.ForeignKey("students.id",ondelete="CASCADE"),nullable=False)
+    started_at=db.Column(db.DateTime,default=datetime.utcnow,nullable=False)
+    submitted_at=db.Column(db.DateTime,nullable=True)
+    time_taken_seconds=db.Column(db.Integer,nullable=True)
+    score=db.Column(db.Numeric(10,2),nullable=True)
+    percentage=db.Column(db.Numeric(6,2),nullable=True)
+    correct_answers=db.Column(db.Integer,default=0,nullable=False)
+    wrong_answers=db.Column(db.Integer,default=0,nullable=False)
+    status=db.Column(db.Enum("in_progress","submitted","expired"),nullable=False,default="in_progress")
+    answers_json=db.Column(db.Text,nullable=True)
+    __table_args__=(db.UniqueConstraint("test_id","student_id",name="uq_test_attempt_student"),db.Index("idx_test_attempt_student_status","student_id","status"),)
+
+class StudyMaterial(db.Model):
+    __tablename__="study_materials"
+    id=db.Column(db.BigInteger,primary_key=True)
+    title=db.Column(db.String(255),nullable=False)
+    class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=True)
+    subject_id=db.Column(db.BigInteger,db.ForeignKey("subjects.id"),nullable=False)
+    chapter=db.Column(db.String(150),nullable=True)
+    material_type=db.Column(db.Enum("pdf","notes","image","question_paper","syllabus","previous_year","important_questions","reference"),nullable=False)
+    file_url=db.Column(db.String(1000),nullable=False)
+    original_filename=db.Column(db.String(255),nullable=False)
+    file_size=db.Column(db.BigInteger,nullable=False,default=0)
+    uploaded_by=db.Column(db.BigInteger,db.ForeignKey("users.id"),nullable=False)
+    created_at=db.Column(db.DateTime,default=datetime.utcnow,nullable=False)
+    __table_args__=(db.Index("idx_material_subject_chapter_type","subject_id","chapter","material_type"),db.Index("idx_material_class_created","class_id","created_at"))
+
+class FeeAdjustment(db.Model):
+    __tablename__="fee_adjustments"
+    id=db.Column(db.BigInteger,primary_key=True)
+    student_id=db.Column(db.BigInteger,db.ForeignKey("students.id",ondelete="CASCADE"),nullable=False)
+    fee_month=db.Column(db.Date,nullable=False)
+    kind=db.Column(db.Enum("discount","scholarship","installment","custom_fee","admission_fee","exam_fee","registration_fee","material_fee","refund","advance","carry_forward","fine"),nullable=False)
+    amount=db.Column(db.Numeric(10,2),nullable=False)
+    note=db.Column(db.String(500),nullable=True)
+    created_by=db.Column(db.BigInteger,db.ForeignKey("users.id"),nullable=False)
+    created_at=db.Column(db.DateTime,default=datetime.utcnow,nullable=False)
+    __table_args__=(db.Index("idx_fee_adjustments_student_month","student_id","fee_month"),)
+
+class NoticeRead(db.Model):
+    __tablename__="notice_reads"
+    id=db.Column(db.BigInteger,primary_key=True)
+    notice_id=db.Column(db.BigInteger,nullable=False)
+    user_id=db.Column(db.BigInteger,db.ForeignKey("users.id",ondelete="CASCADE"),nullable=False)
+    read_at=db.Column(db.DateTime,default=datetime.utcnow,nullable=False)
+    __table_args__=(db.UniqueConstraint("notice_id","user_id",name="uq_notice_read_user"),)
+
+
+class LoginHistory(db.Model):
+    __tablename__="login_history"
+    id=db.Column(db.BigInteger,primary_key=True)
+    user_id=db.Column(db.BigInteger,db.ForeignKey("users.id",ondelete="CASCADE"),nullable=False)
+    ip_address=db.Column(db.String(64),nullable=True)
+    user_agent=db.Column(db.String(500),nullable=True)
+    success=db.Column(db.Boolean,nullable=False,default=True)
+    created_at=db.Column(db.DateTime,default=datetime.utcnow,nullable=False)
+    __table_args__=(db.Index("idx_login_history_user_created","user_id","created_at"),db.Index("idx_login_history_success_created","success","created_at"))
+
+class Notice(db.Model):
+    __tablename__="notices"
+    id=db.Column(db.BigInteger,primary_key=True)
+    title=db.Column(db.String(255),nullable=False)
+    body=db.Column(db.Text,nullable=False)
+    notice_type=db.Column(db.Enum("holiday","exam","fee","schedule","important","general"),nullable=False,default="general")
+    target_type=db.Column(db.Enum("all","course","class","student","teachers"),nullable=False,default="all")
+    target_id=db.Column(db.BigInteger,nullable=True)
+    priority=db.Column(db.Enum("low","normal","high","urgent"),nullable=False,default="normal")
+    attachment_url=db.Column(db.String(1000),nullable=True)
+    expires_at=db.Column(db.DateTime,nullable=True)
+    created_by=db.Column(db.BigInteger,db.ForeignKey("users.id"),nullable=False)
+    created_at=db.Column(db.DateTime,default=datetime.utcnow,nullable=False)
+    __table_args__=(db.Index("idx_notices_target_expiry","target_type","target_id","expires_at"),db.Index("idx_notices_created","created_at"),)

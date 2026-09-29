@@ -24,3 +24,21 @@
 ## Verification
 - Python syntax compilation passed for backend and migration scripts.
 - JavaScript syntax checks passed for all frontend JS files.
+
+
+## RMCTI Ultra feature update · 2026-09-29
+
+Added:
+- Teacher online tests: MCQ, true/false, short answer, numerical, multiple choice; timed attempts and server-side scoring.
+- Student online-test result summary with score, percentage, correct/wrong answers and time taken.
+- Teacher/student Study Material Library with subject/chapter/type filters and Cloudinary-backed uploads.
+- Advanced fee dashboard and fee adjustments for discounts, scholarships, installments, custom/admission/exam/registration/material fees, refunds, advances, carry-forward and fines.
+- Attendance analytics with automatic <75% attention flags.
+- Teacher performance dashboard.
+- Notice Board 2.0 with targeting, priority, expiry and read tracking.
+- Security dashboard with login history and failed-login visibility plus account enable/disable.
+- Database-backed RMCTI Assistant for fee, attendance and homework questions.
+- Professional receipt PDF endpoint and WhatsApp sharing action.
+- Admin dashboard fee summary changed from full historical fee recalculation to bounded current-month SQL aggregation, while detailed fee history remains unchanged.
+- New Ultra tables are created automatically by `scripts/migrate.py` during the Render build.
+- Increased default request limit to 20 MB for study-material uploads.

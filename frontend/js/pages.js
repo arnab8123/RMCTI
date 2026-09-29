@@ -1537,10 +1537,12 @@ const Page = (() => {
   }
 
   async function showReceipt(r, openPrint=false) {
-    const m=U.modal('Fee Receipt', `<div class="receipt-preview-wrap">${receiptMarkup(r)}</div><div class="right" style="justify-content:flex-end;margin-top:14px"><button type="button" class="btn secondary" data-download-receipt>Download JPEG</button><button type="button" class="btn primary" data-print-receipt>Print</button></div>`);
+    const m=U.modal('Fee Receipt', `<div class="receipt-preview-wrap">${receiptMarkup(r)}</div><div class="right" style="justify-content:flex-end;margin-top:14px"><button type="button" class="btn secondary" data-download-receipt>Download JPEG</button><button type="button" class="btn secondary" data-download-pdf>PDF</button><button type="button" class="btn secondary" data-whatsapp-receipt>WhatsApp</button><button type="button" class="btn primary" data-print-receipt>Print</button></div>`);
     const capture=m.querySelector('[data-receipt-capture]');
     m.querySelector('[data-download-receipt]')?.addEventListener('click',async ev=>{try{ev.currentTarget.disabled=true;await U.downloadElementAsJpeg(capture,`${r.receipt_number}.jpg`);U.toast('Receipt JPEG downloaded')}catch(e){console.error(e);U.toast('Could not create receipt JPEG','error')}finally{ev.currentTarget.disabled=false;}});
     m.querySelector('[data-print-receipt]')?.addEventListener('click',()=>U.openPrintWindow(`RMCTI Receipt ${r.receipt_number}`,receiptMarkup(r)));
+    const pdf=m.querySelector('[data-download-pdf']); if(pdf) pdf.addEventListener('click',async()=>{try{pdf.disabled=true;const blob=await Api.blob(`/receipts/${r.id||r.receipt_id}/pdf`);const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${r.receipt_number}.pdf`;a.click();URL.revokeObjectURL(a.href)}catch(e){U.toast(e.message,'error')}finally{pdf.disabled=false}});
+    m.querySelector('[data-whatsapp-receipt]')?.addEventListener('click',()=>{const msg=`RMCTI Fee Receipt ${r.receipt_number}\nStudent: ${r.student}\nAmount: ${U.money(r.amount)}\nMonth: ${r.fee_month}`;window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank','noopener')});
     if(openPrint) m.querySelector('[data-print-receipt]')?.click();
     return m;
   }
@@ -1644,7 +1646,7 @@ const Page = (() => {
     const download=q('[data-download-receipt-jpeg]');
     download?.addEventListener('click',async()=>{try{download.disabled=true;await U.downloadElementAsJpeg(q('[data-receipt-capture]'),`${r.receipt_number}.jpg`);U.toast('Receipt JPEG downloaded')}catch(e){U.toast('Could not create receipt JPEG','error')}finally{download.disabled=false;}});
     const print=q('[data-print-receipt]');
-    print?.addEventListener('click',()=>U.openPrintWindow(`RMCTI Receipt ${r.receipt_number}`,receiptMarkup(r)));
+    print?.addEventListener('click',()=>U.openPrintWindow(`RMCTI Receipt ${r.receipt_number}`,receiptMarkup(r)));\n    const pdf=q('[data-download-receipt-pdf]'); pdf?.addEventListener('click',async()=>{try{pdf.disabled=true;const blob=await Api.blob(`/receipts/${r.id||id}/pdf`);const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${r.receipt_number}.pdf`;a.click();URL.revokeObjectURL(a.href)}catch(e){U.toast(e.message,'error')}finally{pdf.disabled=false;}});
   }
 
   async function teacherStudents() {

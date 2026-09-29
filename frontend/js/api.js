@@ -23,6 +23,25 @@ const Api = {
     return this.req(p + (s.toString() ? "?" + s : ""));
   },
   post(p, b) { return this.req(p, {method:"POST", body:JSON.stringify(b)}); },
+  async blob(p) {
+    const h = {}, t = sessionStorage.getItem("token");
+    if (t) h.Authorization = "Bearer " + t;
+    const r = await fetch(API + p, {headers:h});
+    if (r.status === 401) { sessionStorage.clear(); location.href = "../login.html"; throw Error("Session expired"); }
+    if (!r.ok) throw Error("Download failed");
+    return r.blob();
+  },
+  uploadFormData(p, fd) {
+    const h = {}, t = sessionStorage.getItem("token");
+    if (t) h.Authorization = "Bearer " + t;
+    return fetch(API + p, {method:"POST", headers:h, body:fd}).then(async r => {
+      let d = {};
+      try { d = await r.json(); } catch {}
+      if (r.status === 401) { sessionStorage.clear(); location.href = "../login.html"; throw Error("Session expired"); }
+      if (!r.ok || d.success === false) throw Error(d.message || "Upload failed");
+      return d.data;
+    });
+  },
   upload(p, file, field="photo") {
     const h = {}, t = sessionStorage.getItem("token");
     if (t) h.Authorization = "Bearer " + t;
