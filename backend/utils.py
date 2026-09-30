@@ -75,7 +75,8 @@ def applicable_fee(student_id,month):
     m=month.replace(day=1)
     rows=(FeeStructure.query
           .join(StudentClass,StudentClass.class_id==FeeStructure.class_id)
-          .filter(StudentClass.student_id==student_id,StudentClass.status=="active",FeeStructure.status=="active",FeeStructure.effective_from<=m)
+          .join(Class,Class.id==FeeStructure.class_id)
+          .filter(StudentClass.student_id==student_id,StudentClass.status=="active",Class.course_type=="paid",FeeStructure.status=="active",FeeStructure.effective_from<=m)
           .filter((FeeStructure.effective_to.is_(None))|(FeeStructure.effective_to>=m))
           .order_by(FeeStructure.class_id.asc(),FeeStructure.effective_from.desc(),FeeStructure.id.desc())
           .all())

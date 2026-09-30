@@ -40,6 +40,18 @@ const Api = {
       return d.data;
     });
   },
+  uploadFields(p, fields = {}) {
+    const h = {}, t = sessionStorage.getItem("token");
+    if (t) h.Authorization = "Bearer " + t;
+    const fd = new FormData();
+    Object.entries(fields).forEach(([k,v]) => { if (v !== undefined && v !== null) fd.append(k,v); });
+    return fetch(API + p, {method:"POST", headers:h, body:fd}).then(async r => {
+      let d = {}; try { d = await r.json(); } catch {}
+      if (r.status === 401) { sessionStorage.clear(); location.href = "../login.html"; throw Error("Session expired"); }
+      if (!r.ok || d.success === false) throw Error(d.message || "Upload failed");
+      return d.data;
+    });
+  },
   put(p, b) { return this.req(p, {method:"PUT", body:JSON.stringify(b)}); },
   del(p) { return this.req(p, {method:"DELETE"}); }
 };

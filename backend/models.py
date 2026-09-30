@@ -23,7 +23,7 @@ class Student(db.Model):
 class Subject(db.Model):
     __tablename__="subjects"; id=db.Column(db.BigInteger,primary_key=True); name=db.Column(db.String(100),unique=True,nullable=False); is_active=db.Column(db.Boolean,default=True)
 class Class(db.Model):
-    __tablename__="classes"; id=db.Column(db.BigInteger,primary_key=True); class_name=db.Column(db.String(100),nullable=False); batch=db.Column(db.String(100),nullable=False); subject_id=db.Column(db.BigInteger,db.ForeignKey("subjects.id"),nullable=False); room=db.Column(db.String(100)); max_students=db.Column(db.Integer,default=30); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
+    __tablename__="classes"; id=db.Column(db.BigInteger,primary_key=True); class_name=db.Column(db.String(100),nullable=False); batch=db.Column(db.String(100),nullable=False); subject_id=db.Column(db.BigInteger,db.ForeignKey("subjects.id"),nullable=False); room=db.Column(db.String(100)); max_students=db.Column(db.Integer,default=30); course_type=db.Column(db.Enum("paid","free"),default="paid",nullable=False); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
 class TeacherClass(db.Model):
     __tablename__="teacher_classes"; id=db.Column(db.BigInteger,primary_key=True); teacher_id=db.Column(db.BigInteger,db.ForeignKey("teachers.id"),nullable=False); class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False); day_of_week=db.Column(db.Integer,nullable=False); start_time=db.Column(db.Time,nullable=False); end_time=db.Column(db.Time,nullable=False); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow); __table_args__=(db.Index("idx_teacher_classes_teacher_status","teacher_id","status"),db.Index("idx_teacher_classes_class_status","class_id","status"))
 
@@ -60,6 +60,16 @@ class Homework(db.Model):
     __tablename__="homework"; id=db.Column(db.BigInteger,primary_key=True); class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False); teacher_id=db.Column(db.BigInteger,db.ForeignKey("teachers.id"),nullable=False); subject_id=db.Column(db.BigInteger,db.ForeignKey("subjects.id"),nullable=False); homework_date=db.Column(db.Date,nullable=False); due_date=db.Column(db.Date,nullable=False); title=db.Column(db.String(255),nullable=False); description=db.Column(db.Text,nullable=False); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
 class Classwork(db.Model):
     __tablename__="classwork"; id=db.Column(db.BigInteger,primary_key=True); class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False); teacher_id=db.Column(db.BigInteger,db.ForeignKey("teachers.id"),nullable=False); subject_id=db.Column(db.BigInteger,db.ForeignKey("subjects.id"),nullable=False); work_date=db.Column(db.Date,nullable=False); topic=db.Column(db.String(255),nullable=False); description=db.Column(db.Text,nullable=False); notes=db.Column(db.Text); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
+class ClassworkAttachment(db.Model):
+    __tablename__="classwork_attachments"
+    id=db.Column(db.BigInteger,primary_key=True)
+    classwork_id=db.Column(db.BigInteger,db.ForeignKey("classwork.id",ondelete="CASCADE"),nullable=False)
+    original_filename=db.Column(db.String(255),nullable=False)
+    mime_type=db.Column(db.String(255),nullable=False,default="application/octet-stream")
+    file_size=db.Column(db.BigInteger,nullable=False)
+    data=db.Column(MEDIUMBLOB,nullable=False)
+    uploaded_at=db.Column(db.DateTime,default=datetime.utcnow,nullable=False)
+    __table_args__=(db.Index("idx_classwork_attachments_work","classwork_id"),)
 class Attendance(db.Model):
     __tablename__="attendance"
     id=db.Column(db.BigInteger,primary_key=True)

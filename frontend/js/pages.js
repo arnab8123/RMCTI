@@ -393,7 +393,7 @@ const Page = (() => {
         const [classRows, feeRows, freshStudent] = await Promise.all([Api.get('/classes',{status:'active'}),Api.get('/fee-structures'),Api.get(`/students/${studentId}`)]);
         const modal = U.modal(`Allot Class · ${freshStudent.name}`, `<form id="allotStudentForm" class="form">
           <div class="full"><label class="label">Student</label><div class="card pad"><b>${U.esc(freshStudent.name)}</b><div class="muted">${U.esc(freshStudent.student_id)} · This student is fixed for this allotment.</div></div></div>
-          <div class="full"><label class="label">Course *</label><select class="select" name="class_id" data-allot-class required><option value="">Select course</option>${classRows.map((c) => { const f=applicableFee(feeRows,c.id); const current=feeIsCurrent(f); return `<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}${f ? ` · ₹${Number(f.monthly_fee).toFixed(2)}/month${current?'':' · configured fee'}` : ' · Fee structure not set'}</option>`; }).join('')}</select></div>
+          <div class="full"><label class="label">Course *</label><select class="select" name="class_id" data-allot-class required><option value="">Select course</option>${classRows.map((c) => { const f=applicableFee(feeRows,c.id); const current=feeIsCurrent(f); return `<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}${c.course_type==='free'?' · FREE':' · PAID'}${f ? ` · ₹${Number(f.monthly_fee).toFixed(2)}/month${current?'':' · configured fee'}` : ' · Fee structure not set'}</option>`; }).join('')}</select></div>
           <div class="full" data-class-preview><div class="empty">Select a course to see its complete details and applicable fee.</div></div>
           <div class="full right" style="justify-content:flex-end"><button type="button" class="btn secondary" data-close>Cancel</button><button class="btn primary" type="submit">Allot Class</button></div>
         </form>`);
@@ -720,7 +720,7 @@ const Page = (() => {
     generator?.addEventListener('click',()=>{ if(passwordInput){ passwordInput.value=makePassword(); passwordInput.focus(); } });
     if(kind==='student'){
       const classes=await Api.get('/classes',{status:'active'});
-      fill(q('[data-class-list]'),classes.map((c)=>`<label class="card pad"><input type="checkbox" name="class_ids" value="${c.id}"> ${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}</label>`).join('')||'<div class="empty">Create a course first.</div>');
+      fill(q('[data-class-list]'),classes.map((c)=>`<label class="card pad"><input type="checkbox" name="class_ids" value="${c.id}"> ${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}${c.course_type==='free'?' · FREE':' · PAID'}</label>`).join('')||'<div class="empty">Create a course first.</div>');
     }
     form.addEventListener('submit',async(e)=>{
       e.preventDefault();
@@ -755,7 +755,7 @@ const Page = (() => {
     const renderClassOptions=(selected='')=>{
       fill(classSelect,
         '<option value="">Select course / class</option>'+
-        classes.map(c=>`<option value="${c.id}" ${String(c.id)===String(selected)?'selected':''}>${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}</option>`).join('')
+        classes.map(c=>`<option value="${c.id}" ${String(c.id)===String(selected)?'selected':''}>${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}${c.course_type==='free'?' · FREE':' · PAID'}</option>`).join('')
       );
     };
 
@@ -774,7 +774,7 @@ const Page = (() => {
     };
 
     try{
-      classes=await Api.get('/classes',{status:'active'});
+      classes=(await Api.get('/classes',{status:'active'})).filter(c=>c.course_type!=='free');
       renderClassOptions();
     }catch(e){
       fill(classSelect,'<option value="">Could not load courses</option>');
@@ -821,7 +821,7 @@ const Page = (() => {
       }
       try{
         const f=await Api.get(`/fee-structures/${id}`);
-        const options=classes.map(c=>`<option value="${c.id}" ${String(c.id)===String(f.class_id)?'selected':''}>${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}</option>`).join('');
+        const options=classes.map(c=>`<option value="${c.id}" ${String(c.id)===String(f.class_id)?'selected':''}>${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}${c.course_type==='free'?' · FREE':' · PAID'}</option>`).join('');
         const m=U.modal('Edit / Assign Fee Structure',`<form id="editFee" class="form">
           <div class="full"><label class="label">Course / Class *</label><select class="select" name="class_id" required><option value="">Select course / class</option>${options}</select><small class="muted">Changing this moves the fee structure to the selected course/class.</small></div>
           <div><label class="label">Monthly Fee *</label><input class="input" type="number" step="0.01" min="0.01" name="monthly_fee" value="${U.esc(f.monthly_fee)}" required></div>
@@ -1175,13 +1175,13 @@ const Page = (() => {
         <div><label class="label">Batch</label><input class="input" name="batch" value="${U.esc(c.batch)}" required></div>
         <div><label class="label">Subject Name</label><input class="input" name="subject_name" value="${U.esc(c.subject)}" required></div>
         <div><label class="label">Room</label><input class="input" name="room" value="${U.esc(c.room||'')}"></div>
-        <div><label class="label">Max Students</label><input class="input" type="number" min="1" name="max_students" value="${U.esc(c.max_students)}" required></div>
+        <div><label class="label">Max Students</label><input class="input" type="number" min="1" name="max_students" value="${U.esc(c.max_students)}" required></div><div><label class="label">Course Type</label><select class="select" name="course_type"><option value="paid" ${c.course_type!=='free'?'selected':''}>Paid Course</option><option value="free" ${c.course_type==='free'?'selected':''}>Free Course</option></select></div>
         <div class="full right"><button type="button" class="btn secondary" data-close>Cancel</button><button class="btn primary" type="submit">Save Course</button></div>
       </form>`);
       m.querySelector('#editCourseForm').onsubmit=async ev=>{ev.preventDefault();const btn=ev.currentTarget.querySelector('button[type="submit"]');btn.disabled=true;try{await Api.put(`/classes/${edit}`,formObj(ev.currentTarget));m.remove();U.toast('Course updated');location.reload();}catch(x){U.toast(x.message||'Could not update course','error');btn.disabled=false;}};
     });
 
-    fill(q('[data-class]'), classes.map((c) => `<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}</option>`).join(''));
+    fill(q('[data-class]'), classes.map((c) => `<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}${c.course_type==='free'?' · FREE':' · PAID'}</option>`).join(''));
     const classForm = q('form[data-class-form]');
     classForm?.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -1885,17 +1885,26 @@ const Page = (() => {
     setInterval(refresh, 60000);
   }
 
+  async function openClassworkAttachment(id) {
+    try {
+      const token=sessionStorage.getItem('token');
+      const r=await fetch(`${API}/classwork/attachments/${id}/download`,{headers:{Authorization:`Bearer ${token}`}});
+      if(!r.ok) throw Error('Could not open attachment');
+      const blob=await r.blob(); const url=URL.createObjectURL(blob); window.open(url,'_blank','noopener'); setTimeout(()=>URL.revokeObjectURL(url),60000);
+    } catch(e) { U.toast(e.message||'Could not open attachment','error'); }
+  }
+
   async function workPage(kind) {
     const [classes, subjects] = await Promise.all([Api.get('/teacher/classes'), Api.get('/subjects')]);
-    fill(q('[data-class]'), classes.map((c) => `<option value="${c.id}" data-subject-id="${c.subject_id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}</option>`).join(''));
+    fill(q('[data-class]'), classes.map((c) => `<option value="${c.id}" data-subject-id="${c.subject_id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}${c.course_type==='free'?' · FREE':' · PAID'}</option>`).join(''));
     fill(q('[data-subject]'), subjects.map((s) => `<option value="${s.id}">${U.esc(s.name)}</option>`).join(''));
     const body = q('[data-body]');
     let records = [];
-    const load = async () => { records = await Api.get(`/${kind}`); fill(body, records.map((x) => kind === 'homework' ? `<tr><td>${U.date(x.homework_date)}</td><td>${U.esc(x.class_name)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.title)}</td><td>${U.date(x.due_date)}</td><td><button class="btn warning small" data-edit="${x.id}">Edit</button> <button class="btn danger small" data-del="${x.id}">Delete</button></td></tr>` : `<tr><td>${U.date(x.work_date)}</td><td>${U.esc(x.class_name)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.topic)}</td><td><button class="btn warning small" data-edit="${x.id}">Edit</button> <button class="btn danger small" data-del="${x.id}">Delete</button></td></tr>`).join('') || tableEmpty(kind === 'homework' ? 6 : 5)); };
+    const load = async () => { records = await Api.get(`/${kind}`); fill(body, records.map((x) => kind === 'homework' ? `<tr><td>${U.date(x.homework_date)}</td><td>${U.esc(x.class_name)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.title)}</td><td>${U.date(x.due_date)}</td><td><button class="btn warning small" data-edit="${x.id}">Edit</button> <button class="btn danger small" data-del="${x.id}">Delete</button></td></tr>` : `<tr><td>${U.date(x.work_date)}</td><td>${U.esc(x.class_name)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.topic)}</td><td>${(x.attachments||[]).map(a=>`<button type="button" class="btn secondary small" data-download-classwork="${a.id}">📎 ${U.esc(a.filename)}</button>`).join(' ')||'<span class="muted">No files</span>'}</td><td><button class="btn warning small" data-edit="${x.id}">Edit</button> <button class="btn danger small" data-del="${x.id}">Delete</button></td></tr>`).join('') || tableEmpty(kind === 'homework' ? 6 : 6)); };
     q('[data-class]')?.addEventListener('change', (e) => { const opt = e.target.selectedOptions[0]; if (opt?.dataset.subjectId) q('[data-subject]').value = opt.dataset.subjectId; });
     const form = q('form[data-work-form]');
-    form?.addEventListener('submit', async (e) => { e.preventDefault(); try { const id = form.dataset.editId; const payload = formObj(form); if (id) { await Api.put(`/${kind}/${id}`, payload); delete form.dataset.editId; form.querySelector('button[type="submit"]').textContent = kind === 'homework' ? 'Add homework' : 'Add classwork'; U.toast('Updated successfully'); } else { await Api.post(`/${kind}`, payload); U.toast('Saved successfully'); } form.reset(); load(); } catch (x) { U.toast(x.message, 'error'); } });
-    body?.addEventListener('click', async (e) => { const id = e.target.dataset.del || e.target.dataset.edit; if (!id) return; if (e.target.dataset.del) { await Api.del(`/${kind}/${id}`); U.toast('Deleted'); load(); return; } const row = records.find((x) => String(x.id) === String(id)); if (!row) return; Object.entries(row).forEach(([k, v]) => { const input = form.querySelector(`[name="${k}"]`); if (input && v != null) input.value = v; }); form.dataset.editId = id; form.querySelector('button[type="submit"]').textContent = kind === 'homework' ? 'Update homework' : 'Update classwork'; window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    form?.addEventListener('submit', async (e) => { e.preventDefault(); try { const id = form.dataset.editId; const payload = formObj(form); const files = kind==='classwork' ? [...(form.querySelector('[name="attachments"]')?.files||[])] : []; delete payload.attachments; if (id) { await Api.put(`/${kind}/${id}`, payload); if(kind==='classwork' && files.length){ for(const file of files){ await Api.uploadFields(`/classwork/${id}/attachments`,{file}); } } } else { const created=await Api.post(`/${kind}`, payload); if(kind==='classwork' && files.length){ for(const file of files){ await Api.uploadFields(`/classwork/${created.id}/attachments`,{file}); } } } delete form.dataset.editId; form.querySelector('button[type="submit"]').textContent = kind === 'homework' ? 'Add homework' : 'Add classwork'; U.toast(files.length?`Saved with ${files.length} attachment${files.length===1?'':'s'}`:'Saved successfully'); form.reset(); load(); } catch (x) { U.toast(x.message, 'error'); } });
+    body?.addEventListener('click', async (e) => { const attachment=e.target.closest('[data-download-classwork]')?.dataset.downloadClasswork; if(attachment){ await openClassworkAttachment(attachment); return; } const id = e.target.dataset.del || e.target.dataset.edit; if (!id) return; if (e.target.dataset.del) { await Api.del(`/${kind}/${id}`); U.toast('Deleted'); load(); return; } const row = records.find((x) => String(x.id) === String(id)); if (!row) return; Object.entries(row).forEach(([k, v]) => { const input = form.querySelector(`[name="${k}"]`); if (input && v != null) input.value = v; }); form.dataset.editId = id; form.querySelector('button[type="submit"]').textContent = kind === 'homework' ? 'Update homework' : 'Update classwork'; window.scrollTo({ top: 0, behavior: 'smooth' }); });
     await load();
   }
 
@@ -1904,7 +1913,8 @@ const Page = (() => {
     const rows = await Api.get(path);
     if (kind === 'routine') { const by = {}; rows.forEach((x) => (by[x.day] ??= []).push(x)); fill(q('[data-calendar]'), days.map((day) => `<div class="day"><b>${day}</b>${(by[day] || []).map((x) => `<div class="item"><b>${U.esc(x.subject)}</b><div>${U.esc(x.start_time)}–${U.esc(x.end_time)}${x.kind && x.kind!=='regular' ? ` · <span class="badge active">${U.esc(x.kind)}</span>` : ''}</div><div class="muted">${U.esc(x.class_name || '')} · ${U.esc(x.teacher_name || '')} · ${U.esc(x.room || '')}</div></div>`).join('') || '<div class="empty">No scheduled class.</div>'}</div>`).join('')); }
     if (kind === 'homework') fill(q('[data-body]'), rows.map((x) => `<tr><td>${U.date(x.homework_date)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.teacher_name)}</td><td>${U.esc(x.title)}</td><td>${U.date(x.due_date)}</td><td>${U.esc(x.description)}</td></tr>`).join('') || tableEmpty(6));
-    if (kind === 'classwork') fill(q('[data-body]'), rows.map((x) => `<tr><td>${U.date(x.work_date)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.topic)}</td><td>${U.esc(x.description)}</td><td>${U.esc(x.teacher_name)}</td></tr>`).join('') || tableEmpty(5));
+    if (kind === 'classwork') fill(q('[data-body]'), rows.map((x) => `<tr><td>${U.date(x.work_date)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.topic)}</td><td>${U.esc(x.description)}</td><td>${U.esc(x.teacher_name)}</td><td>${(x.attachments||[]).map(a=>`<button type="button" class="btn secondary small" data-download-classwork="${a.id}">📎 ${U.esc(a.filename)}</button>`).join(' ')||'<span class="muted">No files</span>'}</td></tr>`).join('') || tableEmpty(6));
+    q('[data-body]')?.addEventListener('click', async (e) => { const id=e.target.closest('[data-download-classwork]')?.dataset.downloadClasswork; if(id) await openClassworkAttachment(id); });
     if (kind === 'teacher') fill(q('[data-teachers]'), rows.map((t) => `<article class="card pad teacher-card"><div class="teacher-card-main"><div class="teacher-card-info"><h3 style="margin:0">${U.esc(t.name)}</h3><div class="muted">${U.esc(t.subject || '')} · ${U.esc(t.qualification || '')}</div><p>Phone: ${U.esc(t.phone || '—')}</p><p>Email: ${U.esc(t.email || '—')}</p></div><img src="${U.photoUrl(t.photo)}" alt="${U.esc(t.name)} photo" class="passport-photo teacher-passport" loading="lazy" onerror="this.onerror=null;this.src='${U.photoUrl('')}';"></div><div class="teacher-card-class">Class: ${U.esc(t.class_name || '')} · ${U.esc(t.batch || '')}</div></article>`).join('') || '<div class="empty">No teacher assigned.</div>');
   }
 
@@ -1983,7 +1993,7 @@ const Page = (() => {
       try{
         const [students,classes]=await Promise.all([Api.get('/students',{status:'active'}),Api.get('/classes',{status:'active'})]);
         fill(studentSelect,'<option value="">Select student</option>'+students.map(s=>`<option value="${s.id}">${U.esc(s.name)} · ${U.esc(s.student_id)}</option>`).join(''));
-        fill(classSelect,'<option value="">Select class</option>'+classes.map(c=>`<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}</option>`).join(''));
+        fill(classSelect,'<option value="">Select class</option>'+classes.map(c=>`<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}${c.course_type==='free'?' · FREE':' · PAID'}</option>`).join(''));
       }catch(e){U.toast(e.message||'Could not load recipients','error');}
     };
     const syncTarget=()=>{

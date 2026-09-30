@@ -77,7 +77,7 @@ CREATE TABLE subjects (
 ) ENGINE=InnoDB;
 CREATE TABLE classes (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, class_name VARCHAR(100) NOT NULL, batch VARCHAR(100) NOT NULL,
- subject_id BIGINT UNSIGNED NOT NULL, room VARCHAR(100), max_students INT NOT NULL DEFAULT 30,
+ subject_id BIGINT UNSIGNED NOT NULL, room VARCHAR(100), max_students INT NOT NULL DEFAULT 30, course_type ENUM('paid','free') NOT NULL DEFAULT 'paid',
  status ENUM('active','inactive') NOT NULL DEFAULT 'active',
  created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
  INDEX idx_classes_status(status),
@@ -152,6 +152,17 @@ CREATE TABLE classwork (
  description TEXT NOT NULL, notes TEXT,
  created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
  FOREIGN KEY(class_id) REFERENCES classes(id), FOREIGN KEY(teacher_id) REFERENCES teachers(id), FOREIGN KEY(subject_id) REFERENCES subjects(id)
+) ENGINE=InnoDB;
+CREATE TABLE classwork_attachments (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ classwork_id BIGINT UNSIGNED NOT NULL,
+ original_filename VARCHAR(255) NOT NULL,
+ mime_type VARCHAR(255) NOT NULL DEFAULT 'application/octet-stream',
+ file_size BIGINT UNSIGNED NOT NULL,
+ data MEDIUMBLOB NOT NULL,
+ uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ INDEX idx_classwork_attachments_work(classwork_id),
+ FOREIGN KEY(classwork_id) REFERENCES classwork(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 CREATE TABLE audit_logs (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, actor_user_id BIGINT UNSIGNED NULL, action VARCHAR(100) NOT NULL,

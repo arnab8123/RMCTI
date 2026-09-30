@@ -347,7 +347,8 @@ def _student_objs_bulk(students, private=True):
     # One query for all applicable fee structures instead of one query per student.
     fee_rows=(FeeStructure.query
         .join(StudentClass,StudentClass.class_id==FeeStructure.class_id)
-        .filter(StudentClass.student_id.in_(ids),StudentClass.status=="active",FeeStructure.status=="active",FeeStructure.effective_from<=month)
+        .join(Class,Class.id==FeeStructure.class_id)
+        .filter(StudentClass.student_id.in_(ids),StudentClass.status=="active",Class.course_type=="paid",FeeStructure.status=="active",FeeStructure.effective_from<=month)
         .filter((FeeStructure.effective_to.is_(None))|(FeeStructure.effective_to>=month))
         .order_by(FeeStructure.class_id.asc(),FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all())
     fee_by_student={sid:Decimal("0.00") for sid in ids}
@@ -588,7 +589,7 @@ def class_obj(c):
     tids={x.teacher_id for x in alloc_rows}
     teachers={t.id:t for t in Teacher.query.filter(Teacher.id.in_(tids)).all()} if tids else {}
     s=subjects.get(c.subject_id)
-    return {"id":c.id,"class_name":c.class_name,"batch":c.batch,"subject_id":c.subject_id,"subject":s.name if s else "","room":c.room,"max_students":c.max_students,"status":c.status,"student_count":StudentClass.query.filter_by(class_id=c.id,status="active").count(),"allocations":[{"allocation_id":tc.id,"teacher_pk":tc.teacher_id,"teacher_id":teachers.get(tc.teacher_id).teacher_id if teachers.get(tc.teacher_id) else None,"teacher_name":teachers.get(tc.teacher_id).name if teachers.get(tc.teacher_id) else None,"day":DAYS[tc.day_of_week],"day_of_week":tc.day_of_week,"start_time":tc.start_time.strftime("%H:%M"),"end_time":tc.end_time.strftime("%H:%M"),"room":c.room} for tc in alloc_rows]}
+    return {"id":c.id,"class_name":c.class_name,"batch":c.batch,"subject_id":c.subject_id,"subject":s.name if s else "","room":c.room,"max_students":c.max_students,"course_type":c.course_type,"status":c.status,"student_count":StudentClass.query.filter_by(class_id=c.id,status="active").count(),"allocations":[{"allocation_id":tc.id,"teacher_pk":tc.teacher_id,"teacher_id":teachers.get(tc.teacher_id).teacher_id if teachers.get(tc.teacher_id) else None,"teacher_name":teachers.get(tc.teacher_id).name if teachers.get(tc.teacher_id) else None,"day":DAYS[tc.day_of_week],"day_of_week":tc.day_of_week,"start_time":tc.start_time.strftime("%H:%M"),"end_time":tc.end_time.strftime("%H:%M"),"room":c.room} for tc in alloc_rows]}
 
 
 def _class_objs_bulk(classes):
@@ -605,7 +606,7 @@ def _class_objs_bulk(classes):
     out=[]
     for c in classes:
         sub=subjects.get(c.subject_id)
-        out.append({"id":c.id,"class_name":c.class_name,"batch":c.batch,"subject_id":c.subject_id,"subject":sub.name if sub else "","room":c.room,"max_students":c.max_students,"status":c.status,"student_count":int(counts.get(c.id,0)),"allocations":[{"allocation_id":tc.id,"teacher_pk":tc.teacher_id,"teacher_id":teachers.get(tc.teacher_id).teacher_id if teachers.get(tc.teacher_id) else None,"teacher_name":teachers.get(tc.teacher_id).name if teachers.get(tc.teacher_id) else None,"day":DAYS[tc.day_of_week],"day_of_week":tc.day_of_week,"start_time":tc.start_time.strftime("%H:%M"),"end_time":tc.end_time.strftime("%H:%M"),"room":c.room} for tc in alloc_by_class.get(c.id,[])]})
+        out.append({"id":c.id,"class_name":c.class_name,"batch":c.batch,"subject_id":c.subject_id,"subject":sub.name if sub else "","room":c.room,"max_students":c.max_students,"course_type":c.course_type,"status":c.status,"student_count":int(counts.get(c.id,0)),"allocations":[{"allocation_id":tc.id,"teacher_pk":tc.teacher_id,"teacher_id":teachers.get(tc.teacher_id).teacher_id if teachers.get(tc.teacher_id) else None,"teacher_name":teachers.get(tc.teacher_id).name if teachers.get(tc.teacher_id) else None,"day":DAYS[tc.day_of_week],"day_of_week":tc.day_of_week,"start_time":tc.start_time.strftime("%H:%M"),"end_time":tc.end_time.strftime("%H:%M"),"room":c.room} for tc in alloc_by_class.get(c.id,[])]})
     return out
 
 
@@ -651,11 +652,14 @@ def homework_obj(h): return _homework_objs_bulk([h])[0]
 def _classwork_objs_bulk(rows):
     rows=list(rows)
     if not rows:return []
-    cids={x.class_id for x in rows}; sids={x.subject_id for x in rows}; tids={x.teacher_id for x in rows}
+    cids={x.class_id for x in rows}; sids={x.subject_id for x in rows}; tids={x.teacher_id for x in rows}; wids={x.id for x in rows}
     classes={x.id:x for x in Class.query.filter(Class.id.in_(cids)).all()} if cids else {}
     subjects={x.id:x for x in Subject.query.filter(Subject.id.in_(sids)).all()} if sids else {}
     teachers={x.id:x for x in Teacher.query.filter(Teacher.id.in_(tids)).all()} if tids else {}
-    return [{"id":w.id,"class_id":w.class_id,"class_name":classes[w.class_id].class_name if w.class_id in classes else "","batch":classes[w.class_id].batch if w.class_id in classes else "","teacher_name":teachers[w.teacher_id].name if w.teacher_id in teachers else "","subject_id":w.subject_id,"subject":subjects[w.subject_id].name if w.subject_id in subjects else "","work_date":w.work_date.isoformat(),"topic":w.topic,"description":w.description,"notes":w.notes} for w in rows]
+    attachments_by_work={wid:[] for wid in wids}
+    for a in ClassworkAttachment.query.filter(ClassworkAttachment.classwork_id.in_(wids)).order_by(ClassworkAttachment.id.asc()).all():
+        attachments_by_work.setdefault(a.classwork_id,[]).append({"id":a.id,"filename":a.original_filename,"mime_type":a.mime_type,"file_size":a.file_size,"download_url":f"/api/classwork/attachments/{a.id}/download"})
+    return [{"id":w.id,"class_id":w.class_id,"class_name":classes[w.class_id].class_name if w.class_id in classes else "","batch":classes[w.class_id].batch if w.class_id in classes else "","teacher_name":teachers[w.teacher_id].name if w.teacher_id in teachers else "","subject_id":w.subject_id,"subject":subjects[w.subject_id].name if w.subject_id in subjects else "","work_date":w.work_date.isoformat(),"topic":w.topic,"description":w.description,"notes":w.notes,"attachments":attachments_by_work.get(w.id,[])} for w in rows]
 
 
 def classwork_obj(w): return _classwork_objs_bulk([w])[0]
@@ -1427,7 +1431,11 @@ def remove_student_from_class(class_id,student_id):
 @roles("admin")
 def add_class():
     b=request.get_json() or {}
-    try:c=Class(class_name=str(b["class_name"]).strip(),batch=str(b["batch"]).strip(),subject_id=int(b["subject_id"]),room=b.get("room"),max_students=int(b.get("max_students",30)));db.session.add(c);db.session.flush();audit(current_user().id,"create","class",c.id,c.class_name);db.session.commit();return ok(class_obj(c),"Class created",201)
+    try:
+        course_type=str(b.get("course_type") or "paid").strip().lower()
+        if course_type not in ("paid","free"): return err("Course type must be paid or free")
+        c=Class(class_name=str(b["class_name"]).strip(),batch=str(b["batch"]).strip(),subject_id=int(b["subject_id"]),room=b.get("room"),max_students=int(b.get("max_students",30)),course_type=course_type)
+        db.session.add(c);db.session.flush();audit(current_user().id,"create","class",c.id,f"{c.class_name} ({course_type})");db.session.commit();return ok(class_obj(c),"Class created",201)
     except Exception:db.session.rollback();return err("Invalid class data")
 def _permanently_delete_class(c):
     """Remove a class and every class-owned record so it cannot surface anywhere."""
@@ -1461,6 +1469,12 @@ def edit_class(id):
             return err("Could not delete class. Please try again.",500)
     for k in ("class_name","batch","room"):
         if k in b:setattr(c,k,str(b[k]).strip())
+    if "course_type" in b:
+        course_type=str(b.get("course_type") or "").strip().lower()
+        if course_type not in ("paid","free"): return err("Course type must be paid or free")
+        c.course_type=course_type
+        if course_type=="free":
+            FeeStructure.query.filter_by(class_id=c.id).update({FeeStructure.status:"inactive"},synchronize_session=False)
     if "subject_name" in b:
         n=str(b.get("subject_name") or "").strip()
         if not n:return err("Subject name is required")
@@ -1929,6 +1943,8 @@ def add_fee_structure():
         c=Class.query.get(class_id)
         if not c or c.status!="active":
             return err("Please select an active course/class",404)
+        if c.course_type=="free":
+            return err("Free courses do not use a fee structure",409)
         if effective_to and effective_to<effective_from:
             return err("Effective To cannot be before Effective From")
 
@@ -1980,6 +1996,8 @@ def edit_fee_structure(id):
         c=Class.query.get(class_id)
         if not c:
             return err("Selected course/class was not found",404)
+        if c.course_type=="free":
+            return err("Free courses do not use a fee structure",409)
         if status not in ("active","inactive"):
             return err("Invalid fee structure status")
         if effective_to and effective_to<effective_from:
@@ -2035,7 +2053,8 @@ def _fee_rows_for_student(sid):
     if not assigned_ids:
         return []
     return (FeeStructure.query
-        .filter(FeeStructure.class_id.in_(assigned_ids),FeeStructure.status=="active")
+        .join(Class,Class.id==FeeStructure.class_id)
+        .filter(FeeStructure.class_id.in_(assigned_ids),Class.course_type=="paid",FeeStructure.status=="active")
         .order_by(FeeStructure.class_id.asc(),FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all())
 
 
@@ -2101,8 +2120,10 @@ def _fee_month_balances_bulk(student_ids):
 
     fee_rows = (
         FeeStructure.query
+        .join(Class,Class.id==FeeStructure.class_id)
         .filter(
             FeeStructure.class_id.in_(class_ids),
+            Class.course_type == "paid",
             FeeStructure.status == "active",
         )
         .order_by(
@@ -2337,7 +2358,7 @@ def fees():
     students=student_query.order_by(Student.name).limit(_bounded_limit(500,1000)).all()
     ids=[s.id for s in students]
     sc_rows=StudentClass.query.filter(StudentClass.student_id.in_(ids or [-1]),StudentClass.status=="active").all()
-    fee_rows=(FeeStructure.query.join(StudentClass,StudentClass.class_id==FeeStructure.class_id).filter(StudentClass.student_id.in_(ids or [-1]),StudentClass.status=="active",FeeStructure.status=="active",FeeStructure.effective_from<=m).filter((FeeStructure.effective_to.is_(None))|(FeeStructure.effective_to>=m)).order_by(FeeStructure.class_id.asc(),FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all())
+    fee_rows=(FeeStructure.query.join(StudentClass,StudentClass.class_id==FeeStructure.class_id).join(Class,Class.id==FeeStructure.class_id).filter(StudentClass.student_id.in_(ids or [-1]),StudentClass.status=="active",Class.course_type=="paid",FeeStructure.status=="active",FeeStructure.effective_from<=m).filter((FeeStructure.effective_to.is_(None))|(FeeStructure.effective_to>=m)).order_by(FeeStructure.class_id.asc(),FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all())
     latest_by_class={}
     for f in fee_rows:latest_by_class.setdefault(f.class_id,f)
     class_ids={sid:set() for sid in ids}
@@ -2393,6 +2414,10 @@ def pay_fee():
     try:
         sid=int(b.get("student_id")); s=Student.query.get(sid)
         if not s or s.status!="active": return err("Active student not found",404)
+        assigned_class_ids=[x.class_id for x in StudentClass.query.filter_by(student_id=sid,status="active").all()]
+        paid_course_exists=Class.query.filter(Class.id.in_(assigned_class_ids or [-1]),Class.course_type=="paid",Class.status=="active").first()
+        if not paid_course_exists:
+            return err("This student is enrolled only in free courses. No fee payment is required.",409)
         oldest_month,oldest_balance=oldest_due_month(sid)
         requested_month=str(b.get("month") or "").strip()
         m=date.fromisoformat(requested_month+"-01")
@@ -2757,7 +2782,13 @@ def get_classwork():
     u=current_user();q=Classwork.query
     if u.role=="teacher":q=q.filter_by(teacher_id=teacher_for_user().id)
     if u.role=="student":q=q.filter(Classwork.class_id.in_([x.class_id for x in StudentClass.query.filter_by(student_id=student_for_user().id,status="active").all()] or [-1]))
-    return ok(_classwork_objs_bulk(q.order_by(Classwork.work_date.desc()).limit(_bounded_limit()).all()))
+    return ok(_classwork_objs_bulk(q.order_by(Classwork.work_date.desc(),Classwork.id.desc()).limit(_bounded_limit()).all()))
+
+def _classwork_for_teacher(id):
+    t=teacher_for_user();w=Classwork.query.get(id)
+    if not w or w.teacher_id!=t.id:return None
+    return w
+
 @api.post("/classwork")
 @roles("teacher")
 def add_classwork():
@@ -2777,6 +2808,50 @@ def edit_classwork(id):
         db.session.commit();return ok(classwork_obj(w),"Classwork updated")
     except Exception:
         db.session.rollback();return err("Invalid classwork data")
+
+@api.post("/classwork/<int:id>/attachments")
+@roles("teacher")
+def add_classwork_attachment(id):
+    w=_classwork_for_teacher(id)
+    if not w:return err("Not found",404)
+    f=request.files.get("file")
+    if not f or not f.filename:return err("Please select a file")
+    data=f.read()
+    if not data:return err("The selected file is empty")
+    if len(data)>15*1024*1024:return err("File is too large. Maximum size is 15 MB")
+    name=secure_filename(f.filename) or f"classwork-{uuid.uuid4().hex}"
+    mime=(f.mimetype or "application/octet-stream").lower()[:255]
+    try:
+        a=ClassworkAttachment(classwork_id=w.id,original_filename=name,mime_type=mime,file_size=len(data),data=data)
+        db.session.add(a);db.session.commit()
+        return ok({"id":a.id,"filename":a.original_filename,"mime_type":a.mime_type,"file_size":a.file_size,"download_url":f"/api/classwork/attachments/{a.id}/download"},"File attached",201)
+    except Exception:
+        db.session.rollback();return err("Could not attach the file")
+
+@api.delete("/classwork/attachments/<int:id>")
+@roles("teacher")
+def delete_classwork_attachment(id):
+    a=ClassworkAttachment.query.get(id);t=teacher_for_user()
+    w=Classwork.query.get(a.classwork_id) if a else None
+    if not a or not w or w.teacher_id!=t.id:return err("Not found",404)
+    db.session.delete(a);db.session.commit();return ok(message="Attachment deleted")
+
+@api.get("/classwork/attachments/<int:id>/download")
+@roles("admin","teacher","student")
+def download_classwork_attachment(id):
+    a=ClassworkAttachment.query.get(id)
+    if not a:return err("Attachment not found",404)
+    w=Classwork.query.get(a.classwork_id)
+    if not w:return err("Classwork not found",404)
+    u=current_user()
+    allowed=False
+    if u.role=="admin": allowed=True
+    elif u.role=="teacher": allowed=bool(w.teacher_id==teacher_for_user().id)
+    else:
+        s=student_for_user();allowed=bool(StudentClass.query.filter_by(student_id=s.id,class_id=w.class_id,status="active").first())
+    if not allowed:return err("You do not have access to this file",403)
+    return send_file(io.BytesIO(bytes(a.data)),mimetype=a.mime_type,as_attachment=True,download_name=a.original_filename,max_age=300)
+
 @api.delete("/classwork/<int:id>")
 @roles("teacher")
 def del_classwork(id):

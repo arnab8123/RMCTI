@@ -172,6 +172,27 @@ def ensure_schedule_exceptions():
         ) ENGINE=InnoDB"""))
         return
 
+
+def ensure_course_type_and_classwork_attachments():
+    inspector=inspect(db.engine)
+    if "classes" in inspector.get_table_names():
+        existing={c["name"] for c in inspector.get_columns("classes")}
+        if "course_type" not in existing:
+            db.session.execute(text("ALTER TABLE classes ADD COLUMN course_type ENUM('paid','free') NOT NULL DEFAULT 'paid' AFTER max_students"))
+    if "classwork_attachments" not in inspector.get_table_names():
+        db.session.execute(text("""CREATE TABLE classwork_attachments (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            classwork_id BIGINT UNSIGNED NOT NULL,
+            original_filename VARCHAR(255) NOT NULL,
+            mime_type VARCHAR(255) NOT NULL DEFAULT 'application/octet-stream',
+            file_size BIGINT UNSIGNED NOT NULL,
+            data MEDIUMBLOB NOT NULL,
+            uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_classwork_attachments_work(classwork_id),
+            CONSTRAINT fk_classwork_attachments_work FOREIGN KEY (classwork_id) REFERENCES classwork(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB"""))
+
+
 def ensure_personal_fields():
     """Add admin-only personal detail fields without disturbing existing data."""
     inspector=inspect(db.engine)
@@ -268,6 +289,7 @@ def ensure_performance_indexes():
 
 with app.app_context():
     db.create_all()
+    ensure_course_type_and_classwork_attachments()
     ensure_token_blocklist()
     ensure_enquiries()
     ensure_attendance_marker()
