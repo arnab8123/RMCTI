@@ -8,12 +8,12 @@ ALTER TABLE teachers ADD COLUMN aadhaar_number VARCHAR(20) NULL;
 ALTER TABLE students ADD COLUMN aadhaar_number VARCHAR(20) NULL;
 
 ALTER TABLE notice_attachments
-  ADD COLUMN target_type ENUM('all','student','class') NOT NULL DEFAULT 'all',
-  ADD COLUMN target_student_id BIGINT UNSIGNED NULL,
-  ADD COLUMN target_class_id BIGINT UNSIGNED NULL;
+  ADD COLUMN IF NOT EXISTS target_type ENUM('all','student','class') NOT NULL DEFAULT 'all',
+  ADD COLUMN IF NOT EXISTS target_student_id BIGINT UNSIGNED NULL,
+  ADD COLUMN IF NOT EXISTS target_class_id BIGINT UNSIGNED NULL;
 
-CREATE INDEX idx_notice_attachments_target_student ON notice_attachments(target_student_id);
-CREATE INDEX idx_notice_attachments_target_class ON notice_attachments(target_class_id);
+CREATE INDEX IF NOT EXISTS idx_notice_attachments_target_student ON notice_attachments(target_student_id);
+CREATE INDEX IF NOT EXISTS idx_notice_attachments_target_class ON notice_attachments(target_class_id);
 
 CREATE TABLE IF NOT EXISTS schedule_exceptions (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

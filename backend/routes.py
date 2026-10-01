@@ -2813,20 +2813,50 @@ def edit_classwork(id):
 @roles("teacher")
 def add_classwork_attachment(id):
     w=_classwork_for_teacher(id)
-    if not w:return err("Not found",404)
-    f=request.files.get("file")
-    if not f or not f.filename:return err("Please select a file")
-    data=f.read()
-    if not data:return err("The selected file is empty")
-    if len(data)>15*1024*1024:return err("File is too large. Maximum size is 15 MB")
-    name=secure_filename(f.filename) or f"classwork-{uuid.uuid4().hex}"
-    mime=(f.mimetype or "application/octet-stream").lower()[:255]
+    if not w:
+        return err("Classwork not found or you are not assigned to this classwork",404)
+
+    files=[f for f in request.files.getlist("file") if f and f.filename]
+    if not files:
+        return err("Please select at least one file")
+
+    max_size=15*1024*1024
+    created=[]
     try:
-        a=ClassworkAttachment(classwork_id=w.id,original_filename=name,mime_type=mime,file_size=len(data),data=data)
-        db.session.add(a);db.session.commit()
-        return ok({"id":a.id,"filename":a.original_filename,"mime_type":a.mime_type,"file_size":a.file_size,"download_url":f"/api/classwork/attachments/{a.id}/download"},"File attached",201)
+        for f in files:
+            data=f.read()
+            if not data:
+                raise ValueError(f"The selected file is empty: {f.filename}")
+            if len(data)>max_size:
+                raise ValueError(f"{f.filename} is too large. Maximum size is 15 MB per file")
+
+            name=secure_filename(f.filename) or f"classwork-{uuid.uuid4().hex}"
+            mime=(f.mimetype or "application/octet-stream").lower()[:255]
+            a=ClassworkAttachment(
+                classwork_id=w.id,
+                original_filename=name,
+                mime_type=mime,
+                file_size=len(data),
+                data=data,
+            )
+            db.session.add(a)
+            created.append(a)
+
+        db.session.commit()
+        result=[{
+            "id":a.id,
+            "filename":a.original_filename,
+            "mime_type":a.mime_type,
+            "file_size":a.file_size,
+            "download_url":f"/api/classwork/attachments/{a.id}/download",
+        } for a in created]
+        return ok(result, f"{len(result)} file{'s' if len(result)!=1 else ''} attached",201)
+    except ValueError as e:
+        db.session.rollback()
+        return err(str(e))
     except Exception:
-        db.session.rollback();return err("Could not attach the file")
+        db.session.rollback()
+        return err("Could not attach the file. Please check that the classwork attachment table exists in the database.")
 
 @api.delete("/classwork/attachments/<int:id>")
 @roles("teacher")

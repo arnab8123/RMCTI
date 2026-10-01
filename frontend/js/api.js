@@ -44,7 +44,11 @@ const Api = {
     const h = {}, t = sessionStorage.getItem("token");
     if (t) h.Authorization = "Bearer " + t;
     const fd = new FormData();
-    Object.entries(fields).forEach(([k,v]) => { if (v !== undefined && v !== null) fd.append(k,v); });
+    Object.entries(fields).forEach(([k,v]) => {
+      if (v === undefined || v === null) return;
+      if (Array.isArray(v)) v.forEach(item => { if (item !== undefined && item !== null) fd.append(k,item); });
+      else fd.append(k,v);
+    });
     return fetch(API + p, {method:"POST", headers:h, body:fd}).then(async r => {
       let d = {}; try { d = await r.json(); } catch {}
       if (r.status === 401) { sessionStorage.clear(); location.href = "../login.html"; throw Error("Session expired"); }

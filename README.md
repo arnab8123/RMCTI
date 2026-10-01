@@ -258,3 +258,7 @@ Run `database/add_notice_attachments.sql` once on the hosted MySQL database befo
 - Run `database/add_performance_indexes.sql` once on the Aiven/MySQL production database.
 - The fee/dashboard endpoints use bulk balance calculation to avoid per-student N+1 queries.
 - Schedule reschedules are occurrence-based and can target any future date.
+
+
+### File attachment repair
+For an existing Aiven/MySQL database, run `database/fix_file_attachments.sql` once. It repairs older notice-attachment schemas and ensures the classwork attachment table exists. The application accepts teacher classwork files up to 15 MB per file; Flask is configured with a 20 MB request limit so the documented upload size is not rejected before the route runs.
