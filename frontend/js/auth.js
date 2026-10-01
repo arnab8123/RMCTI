@@ -7,12 +7,23 @@ const Auth = {
       return null;
     }
     try {
-      const user = await Api.get('/auth/me');
-      if (user.role !== role) {
-        location.href = '../login.html';
-        return null;
+      // Reuse the already-verified profile briefly. The API still validates the JWT
+      // on every protected request; this only removes a redundant page-start request.
+      let user = null;
+      try {
+        const cached = JSON.parse(sessionStorage.getItem('user') || 'null');
+        const checkedAt = Number(sessionStorage.getItem('user_checked_at') || 0);
+        if (cached && cached.role === role && (Date.now() - checkedAt) < 120000) user = cached;
+      } catch (_) {}
+      if (!user) {
+        user = await Api.get('/auth/me');
+        if (user.role !== role) {
+          location.href = '../login.html';
+          return null;
+        }
+        sessionStorage.setItem('user', JSON.stringify(user));
+        sessionStorage.setItem('user_checked_at', String(Date.now()));
       }
-      sessionStorage.setItem('user', JSON.stringify(user));
       document.querySelectorAll('[data-user]').forEach((el) => { el.textContent = user.name || user.username || ''; });
 
       const logout = document.querySelector('[data-logout]');

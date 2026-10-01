@@ -48,7 +48,7 @@ function rmctiNavIconize() {
   document.querySelectorAll('.nav a').forEach((item) => {
     const href = item.getAttribute('href') || '';
     if (!href || href.startsWith('#')) return;
-    const current = location.pathname.split('/').pop() || 'dashboard.html';
+    const current = location.pathname.split('/').pop() || 'dashboard';
     item.classList.toggle('active', href.split('?')[0] === current);
   });
 }
@@ -165,9 +165,9 @@ function rmctiEnsureTopSearch() {
         const teacher = await Api.get(`/teachers/${id}`);
         await window.RMCTIProfiles?.teacher(teacher);
       } else if (type === 'class') {
-        location.href = `all-classes.html?view=${encodeURIComponent(id)}`;
+        location.href = `all-classes?view=${encodeURIComponent(id)}`;
       } else if (type === 'receipt') {
-        location.href = `receipts.html?view=${encodeURIComponent(id)}`;
+        location.href = `receipts?view=${encodeURIComponent(id)}`;
       }
     } catch (error) {
       U.toast(error.message || 'Could not open this result', 'error');
@@ -189,14 +189,14 @@ function rmctiBottomNav() {
   const role = document.body.dataset.role;
   if (!role || document.querySelector('[data-bottom-nav]')) return;
   const root = role === 'admin'
-    ? [['dashboard.html','⌂','Home'],['students.html','♧','Students'],['all-classes.html','▣','Classes'],['fee-payment.html','₹','Fees']]
+    ? [['dashboard','⌂','Home'],['students','♧','Students'],['all-classes','▣','Classes'],['fee-payment','₹','Fees']]
     : role === 'teacher'
-      ? [['dashboard.html','⌂','Home'],['students.html','♧','Students'],['classes.html','▦','Classes'],['homework.html','✓','Work']]
-      : [['dashboard.html','⌂','Home'],['routine.html','▦','Routine'],['fees.html','₹','Fees'],['homework.html','✓','Work']];
+      ? [['dashboard','⌂','Home'],['students','♧','Students'],['classes','▦','Classes'],['homework','✓','Work']]
+      : [['dashboard','⌂','Home'],['routine','▦','Routine'],['fees','₹','Fees'],['homework','✓','Work']];
   const nav = document.createElement('nav');
   nav.className = 'mobile-bottom-nav';
   nav.dataset.bottomNav = '1';
-  nav.innerHTML = root.map(([href,icon,label]) => `<a href="${href}" class="${href.split('?')[0] === (location.pathname.split('/').pop() || 'dashboard.html') ? 'active' : ''}"><span>${U.esc(icon)}</span><small>${U.esc(label)}</small></a>`).join('') +
+  nav.innerHTML = root.map(([href,icon,label]) => `<a href="${href}" class="${href.split('?')[0] === (location.pathname.split('/').pop() || 'dashboard') ? 'active' : ''}"><span>${U.esc(icon)}</span><small>${U.esc(label)}</small></a>`).join('') +
     `<button type="button" data-mobile-more><span>☰</span><small>More</small></button>`;
   document.body.appendChild(nav);
   nav.querySelector('[data-mobile-more]').addEventListener('click', () => document.querySelector('[data-menu]')?.click());
@@ -206,11 +206,11 @@ function rmctiMobileActions() {
   if (document.body.dataset.role !== 'admin' || document.querySelector('[data-mobile-actions]')) return;
   const page = document.body.dataset.page;
   const maps = {
-    dashboard: [['register-student.html','＋ Add Student'],['fee-payment.html','₹ Collect Fee'],['teacher-classes.html','＋ Schedule Class']],
-    students: [['register-student.html','＋ Add Student'],['fee-payment.html','₹ Collect Fee']],
-    teachers: [['register-teacher.html','＋ Add Teacher'],['teacher-classes.html','＋ Schedule Class']],
-    'teacher-classes': [['teacher-classes.html#schedule','＋ Schedule Class'],['all-classes.html','▣ Courses']],
-    'fee-payment': [['fee-payment.html','₹ Collect Fee'],['receipts.html','▤ Receipts']]
+    dashboard: [['register-student','＋ Add Student'],['fee-payment','₹ Collect Fee'],['teacher-classes','＋ Schedule Class']],
+    students: [['register-student','＋ Add Student'],['fee-payment','₹ Collect Fee']],
+    teachers: [['register-teacher','＋ Add Teacher'],['teacher-classes','＋ Schedule Class']],
+    'teacher-classes': [['teacher-classes#schedule','＋ Schedule Class'],['all-classes','▣ Courses']],
+    'fee-payment': [['fee-payment','₹ Collect Fee'],['receipts','▤ Receipts']]
   };
   const actions = maps[page];
   if (!actions) return;

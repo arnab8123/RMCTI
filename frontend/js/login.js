@@ -12,10 +12,10 @@ document.addEventListener('DOMContentLoaded', () => {
       sessionStorage.token = data.token;
       sessionStorage.user = JSON.stringify(data.user);
       location.href = data.user.role === 'admin'
-        ? 'admin/dashboard.html'
+        ? 'admin/dashboard'
         : data.user.role === 'teacher'
-          ? 'teacher/dashboard.html'
-          : 'student/dashboard.html';
+          ? 'teacher/dashboard'
+          : 'student/dashboard';
     } catch (err) {
       error.textContent = err.message || 'Login failed';
     } finally {

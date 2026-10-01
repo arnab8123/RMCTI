@@ -23,7 +23,7 @@ const Page = (() => {
     return `<div class="id-card-modal"><div id="${target}" class="id-card-export"><div class="id-card">
       <div class="id-card-header">
         <div class="id-card-brand">
-          <img class="id-logo" crossorigin="anonymous" src="${U.photoUrl('/asset/image.jpeg')}" alt="RMCTI">
+          <img class="id-logo" crossorigin="anonymous" src="${U.photoUrl('/asset/image.webp')}" alt="RMCTI">
           <div><b>RMCTI</b><strong>Ratna's Modern Computer Training Institute</strong></div>
         </div>
       </div>
@@ -145,7 +145,7 @@ const Page = (() => {
           <span class="today-class-copy"><b>${U.esc(c.subject||'')}</b><small>${U.esc(c.class_name||'')} · ${U.esc(c.batch||'')}</small><small>${U.esc(c.teacher_name||'Unassigned')}${c.room?` · ${U.esc(c.room)}`:''}</small></span>
           <span class="badge ${statusClass(c.status)}">${U.esc(c.status||'UPCOMING')}</span>
         </button>`).join('');
-      fill(q('[data-today-classes]'), todayHtml || `<div class="empty-card"><b>No classes today</b><span>There are no classes scheduled for today.</span><a class="btn primary small" href="teacher-classes.html">＋ Schedule Class</a></div>`);
+      fill(q('[data-today-classes]'), todayHtml || `<div class="empty-card"><b>No classes today</b><span>There are no classes scheduled for today.</span><a class="btn primary small" href="teacher-classes">＋ Schedule Class</a></div>`);
 
       fill(q('[data-recent-payments]'), (d.recent_payments||[]).map(p=>`
         <div class="dashboard-list-row">
@@ -154,7 +154,7 @@ const Page = (() => {
         </div>`).join('') || '<div class="empty-card"><b>No recent payments</b><span>Fee payments will appear here after collection.</span></div>');
 
       fill(q('[data-pending-fees]'), (d.pending_students||[]).map(s=>`
-        <a class="dashboard-list-row" href="fee-payment.html?student=${encodeURIComponent(s.student_id)}">
+        <a class="dashboard-list-row" href="fee-payment?student=${encodeURIComponent(s.student_id)}">
           <div><b>${U.esc(s.name)}</b><small>${U.esc(s.student_id)} · ${U.esc(s.status)}</small></div>
           <strong>${U.money(s.amount)}</strong>
         </a>`).join('') || '<div class="empty-card"><b>All caught up</b><span>No current-month fee balance is pending.</span></div>');
@@ -175,7 +175,7 @@ const Page = (() => {
               </div>
             </div>
             <div class="profile-card"><h3>Weekly Schedule</h3>${(c.allocations||[]).map(a=>`<div class="profile-list-row"><div><b>${U.esc(a.teacher_name||'Unassigned')}</b><small>${U.esc(a.subject||c.subject||'')}</small></div><span>${U.esc(a.day)} · ${U.esc(a.start_time)}–${U.esc(a.end_time)}</span></div>`).join('')||'<div class="empty-card"><b>No schedule</b><span>This course has no active schedule allocation.</span></div>'}</div>
-            <div class="right" style="justify-content:flex-end"><a class="btn secondary" href="all-classes.html">Open Courses</a><a class="btn primary" href="teacher-classes.html">Manage Schedule</a></div>`);
+            <div class="right" style="justify-content:flex-end"><a class="btn secondary" href="all-classes">Open Courses</a><a class="btn primary" href="teacher-classes">Manage Schedule</a></div>`);
         }catch(x){U.toast(x.message||'Could not load course details','error')}
       });
 
@@ -1149,7 +1149,7 @@ const Page = (() => {
       });
       m.querySelector('[data-calendar-edit-allocation]')?.addEventListener('click',()=>{
         m.remove();
-        location.href=`teacher-classes.html?edit_allocation=${encodeURIComponent(row.allocation_id)}`;
+        location.href=`teacher-classes?edit_allocation=${encodeURIComponent(row.allocation_id)}`;
       });
     };
 
@@ -1431,7 +1431,7 @@ const Page = (() => {
   }
 
   async function feePayment() {
-    const allStudents = await Api.get('/students', { status: 'active' });
+    const [allStudents, dashboardSummary] = await Promise.all([Api.get('/students', { status: 'active' }), Api.get('/admin/dashboard')]);
     const studentSelect = q('[data-student]');
     const search = q('[data-student-search]');
     const filter = q('[data-fee-filter]');
@@ -1444,7 +1444,7 @@ const Page = (() => {
     let currentFeeData=null;
     const feeSummary = async () => {
       try {
-        const d = await Api.get('/admin/dashboard');
+        const d = dashboardSummary;
         const map = {collected:d.this_month_collection, pending:d.pending_fees, partial:d.partial_fees, fine:d.fine};
         const nodes = {
           collected:q('[data-fee-summary-collected]'), pending:q('[data-fee-summary-pending]'),
@@ -1530,7 +1530,7 @@ const Page = (() => {
 
   function receiptMarkup(r) {
     return `<div class="receipt-doc" data-receipt-capture style="border:1px solid #d6dde6;border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.08)">
-      <div style="padding:22px 26px;background:#0f3d5e;color:#fff;display:flex;justify-content:space-between;gap:20px;align-items:center"><div style="display:flex;gap:14px;align-items:center"><img crossorigin="anonymous" src="${U.photoUrl('/asset/image.jpeg')}" style="width:54px;height:54px;border-radius:10px;background:#fff;padding:4px;object-fit:contain"><div><div style="font-size:22px;font-weight:800;letter-spacing:.02em">RMCTI</div><div style="font-size:12px;opacity:.86">Ratna's Modern Computer Training Institute</div></div></div><div style="text-align:right"><div style="font-size:11px;opacity:.78;text-transform:uppercase;letter-spacing:.1em">Official Fee Receipt</div><div style="font-size:18px;font-weight:800;margin-top:4px">${U.esc(r.receipt_number)}</div></div></div>
+      <div style="padding:22px 26px;background:#0f3d5e;color:#fff;display:flex;justify-content:space-between;gap:20px;align-items:center"><div style="display:flex;gap:14px;align-items:center"><img crossorigin="anonymous" src="${U.photoUrl('/asset/image.webp')}" style="width:54px;height:54px;border-radius:10px;background:#fff;padding:4px;object-fit:contain"><div><div style="font-size:22px;font-weight:800;letter-spacing:.02em">RMCTI</div><div style="font-size:12px;opacity:.86">Ratna's Modern Computer Training Institute</div></div></div><div style="text-align:right"><div style="font-size:11px;opacity:.78;text-transform:uppercase;letter-spacing:.1em">Official Fee Receipt</div><div style="font-size:18px;font-weight:800;margin-top:4px">${U.esc(r.receipt_number)}</div></div></div>
       <div style="padding:24px 26px"><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 28px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Student</div><div style="font-weight:800;font-size:17px;margin-top:5px">${U.esc(r.student)}</div><div class="muted" style="margin-top:3px">${U.esc(r.student_id)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Course</div><div style="font-weight:700;margin-top:5px">${U.esc(r.class||'—')}</div>${r.teacher?`<div class="muted" style="margin-top:3px">Teacher: ${U.esc(r.teacher)}</div>`:''}</div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Fee Month</div><div style="font-weight:700;margin-top:5px">${U.esc(r.fee_month)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Date</div><div style="font-weight:700;margin-top:5px">${U.datetime(r.payment_date)}</div></div></div>
       <div style="margin:24px 0;border-top:1px solid #e2e8f0"></div><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Method</div><div style="font-weight:700;margin-top:5px;text-transform:capitalize">${U.esc(String(r.payment_method||'').replace('_',' '))}</div></div><div style="display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:18px;text-align:right"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Amount Paid</div><div style="font-size:26px;font-weight:900;margin-top:2px;color:#0f3d5e">${U.money(r.amount)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Total Remaining Due</div><div style="font-size:22px;font-weight:900;margin-top:4px;color:#b45309">${U.money(r.remaining||0)}</div></div></div></div>
       <div style="margin-top:28px;padding-top:14px;border-top:1px dashed #cbd5e1;display:flex;justify-content:space-between;gap:20px;font-size:11px;color:#64748b"><span>Collected by: ${U.esc(r.collected_by||'Admin')}</span><span>System generated receipt</span></div></div></div>`;

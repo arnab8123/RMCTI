@@ -10,6 +10,7 @@ import os,uuid
 from werkzeug.utils import secure_filename
 from PIL import Image, ImageOps, UnidentifiedImageError
 import io
+import threading
 from flask import Response,send_file
 from .database import db
 from .extensions import limiter
@@ -18,6 +19,28 @@ from .auth import roles,current_user
 from .utils import *
 
 api=Blueprint("api",__name__,url_prefix="/api")
+
+# Tiny process-local TTL cache for read-heavy dashboards/lists. Render runs multiple
+# workers, so this is intentionally short-lived: it reduces duplicate bursts without
+# becoming a source of stale business data. Keys never contain credentials.
+_READ_CACHE = {}
+_READ_CACHE_LOCK = threading.Lock()
+
+def _read_cache_get(key):
+    import time
+    now=time.monotonic()
+    with _READ_CACHE_LOCK:
+        item=_READ_CACHE.get(key)
+        if not item or item[0] <= now:
+            _READ_CACHE.pop(key, None)
+            return None
+        return item[1]
+
+def _read_cache_set(key, value, ttl=8):
+    import time
+    with _READ_CACHE_LOCK:
+        _READ_CACHE[key]=(time.monotonic()+ttl, value)
+    return value
 
 def _request_limit(rule, scope=None):
     return limiter.limit(rule, scope=scope)
@@ -336,7 +359,7 @@ def _student_classes_bulk(student_ids):
     return out
 
 
-def _student_objs_bulk(students, private=True):
+def _student_objs_bulk(students, private=True, include_fee_status=True):
     students=list(students)
     if not students: return []
     ids=[s.id for s in students]
@@ -344,49 +367,61 @@ def _student_objs_bulk(students, private=True):
     parent_ids={s.parent_id for s in students if s.parent_id}
     parents={x.id:x for x in Parent.query.filter(Parent.id.in_(parent_ids)).all()} if parent_ids else {}
     month=today_ist().replace(day=1)
-    # One query for all applicable fee structures instead of one query per student.
-    fee_rows=(FeeStructure.query
-        .join(StudentClass,StudentClass.class_id==FeeStructure.class_id)
-        .join(Class,Class.id==FeeStructure.class_id)
-        .filter(StudentClass.student_id.in_(ids),StudentClass.status=="active",Class.course_type=="paid",FeeStructure.status=="active",FeeStructure.effective_from<=month)
-        .filter((FeeStructure.effective_to.is_(None))|(FeeStructure.effective_to>=month))
-        .order_by(FeeStructure.class_id.asc(),FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all())
+
     fee_by_student={sid:Decimal("0.00") for sid in ids}
-    seen=set()
-    # Same fee structure can apply to multiple students; add once per student/class.
-    student_class_ids={sid:set() for sid in ids}
-    for sid,rows in []: pass
-    sc_rows=StudentClass.query.filter(StudentClass.student_id.in_(ids),StudentClass.status=="active").all()
-    for sc in sc_rows: student_class_ids[sc.student_id].add(sc.class_id)
-    newest={}
-    for row in fee_rows:
-        key=(row.class_id,row.effective_from,row.id)
-        newest.setdefault(row.class_id,row)
-    for sid in ids:
-        fee_by_student[sid]=sum((Decimal(str(newest[cid].monthly_fee)) for cid in student_class_ids[sid] if cid in newest),Decimal("0.00"))
+    balances_by_student={}
+    if include_fee_status:
+        # One query for all applicable fee structures instead of one query per student.
+        fee_rows=(FeeStructure.query
+            .join(StudentClass,StudentClass.class_id==FeeStructure.class_id)
+            .join(Class,Class.id==FeeStructure.class_id)
+            .filter(StudentClass.student_id.in_(ids),StudentClass.status=="active",Class.course_type=="paid",FeeStructure.status=="active",FeeStructure.effective_from<=month)
+            .filter((FeeStructure.effective_to.is_(None))|(FeeStructure.effective_to>=month))
+            .order_by(FeeStructure.class_id.asc(),FeeStructure.effective_from.desc(),FeeStructure.id.desc()).all())
+        # Same fee structure can apply to multiple students; add once per student/class.
+        student_class_ids={sid:set() for sid in ids}
+        sc_rows=StudentClass.query.filter(StudentClass.student_id.in_(ids),StudentClass.status=="active").all()
+        for sc in sc_rows: student_class_ids[sc.student_id].add(sc.class_id)
+        newest={}
+        for row in fee_rows: newest.setdefault(row.class_id,row)
+        for sid in ids:
+            fee_by_student[sid]=sum((Decimal(str(newest[cid].monthly_fee)) for cid in student_class_ids[sid] if cid in newest),Decimal("0.00"))
+
+        # IMPORTANT: calculate balances once for the complete result set.
+        # Calling _fee_month_balances_bulk(ids) inside the student loop caused the
+        # full payment/fee history for every student to be recalculated once per
+        # student, making /api/students progressively slower as the database grew.
+        balances_by_student=_fee_month_balances_bulk(ids)
+
     out=[]
     for s in students:
         p=parents.get(s.parent_id) if s.parent_id else None
         current_due=fee_by_student.get(s.id,Decimal("0.00"))
-        # Fee status must be based on the actual balance, not merely on whether
-        # a payment row exists. This keeps partial payments and carry-forward
-        # credits consistent across the student selector and fee screens.
-        try:
-            balance_rows=_fee_month_balances_bulk(ids).get(s.id, [])
-            current_row=next((x for x in balance_rows if x["month"]==month),None)
-            if current_row and current_row["due"]>Decimal("0.00"):
-                current_month_status=current_row["status"]
-            else:
-                current_month_status="N/A" if current_due<=Decimal("0.00") else "DUE"
-        except Exception:
-            db.session.rollback()
-            current_month_status="DUE" if current_due>Decimal("0.00") else "N/A"
+        if include_fee_status:
+            # Fee status must be based on the actual balance, not merely on whether
+            # a payment row exists. This keeps partial payments and carry-forward
+            # credits consistent across the student selector and fee screens.
+            try:
+                balance_rows=balances_by_student.get(s.id, [])
+                current_row=next((x for x in balance_rows if x["month"]==month),None)
+                if current_row and current_row["due"]>Decimal("0.00"):
+                    current_month_status=current_row["status"]
+                else:
+                    current_month_status="N/A" if current_due<=Decimal("0.00") else "DUE"
+            except Exception:
+                db.session.rollback()
+                current_month_status="DUE" if current_due>Decimal("0.00") else "N/A"
+        else:
+            current_month_status="N/A"
         x={"id":s.id,"student_id":s.student_id,"name":s.name,"photo":s.photo,"gender":s.gender,"dob":s.dob.isoformat() if s.dob else None,"phone":s.phone,"aadhaar_number":s.aadhaar_number,"school_name":s.school_name,"admission_date":s.admission_date.isoformat() if s.admission_date else None,"status":s.status,"classes":classes_by_student.get(s.id,[]),"current_month_status":current_month_status}
         if private:
             x["address"]=s.address
             x["parent"]={"name":p.name,"relationship":p.relationship,"phone":p.phone,"email":p.email,"address":p.address} if p else None
         out.append(x)
     return out
+
+def student_obj(s,private=True,include_fee_status=True):
+    return _student_objs_bulk([s],private=private,include_fee_status=include_fee_status)[0]
 
 
 
@@ -632,8 +667,8 @@ def _teacher_objs_bulk(teachers):
     return [{"id":t.id,"teacher_id":t.teacher_id,"name":t.name,"photo":t.photo,"gender":t.gender,"dob":t.dob.isoformat() if t.dob else None,"phone":t.phone,"email":t.email,"address":t.address,"aadhaar_number":t.aadhaar_number,"qualification":t.qualification,"experience":t.experience,"joining_date":t.joining_date.isoformat() if t.joining_date else None,"status":t.status,"classes":by_teacher.get(t.id,[])} for t in teachers]
 
 
-def student_obj(s,private=True):
-    return _student_objs_bulk([s],private=private)[0]
+def student_obj(s,private=True,include_fee_status=True):
+    return _student_objs_bulk([s],private=private,include_fee_status=include_fee_status)[0]
 
 
 def _homework_objs_bulk(rows):
@@ -2399,7 +2434,7 @@ def student_fees(id):
     rows=_fee_rows_for_student(s.id)
     actual_fee=_fee_base_for_month(rows,today_ist().replace(day=1))
     return ok({
-        "student":student_obj(s,private=u.role=="admin"),
+        "student":student_obj(s,private=u.role=="admin",include_fee_status=False),
         "current_monthly_fee":float(actual_fee),
         "actual_monthly_fee":float(actual_fee),
         "oldest_due_month":oldest_month.strftime("%Y-%m") if oldest_month else None,
@@ -2961,7 +2996,7 @@ def del_classwork(id):
 @api.get("/student/dashboard")
 @roles("student")
 def student_dashboard():
-    s=student_for_user();x=student_obj(s,private=False);now=datetime.now(ZoneInfo("Asia/Kolkata"));today=now.date();month=today.replace(day=1)
+    s=student_for_user();x=student_obj(s,private=False,include_fee_status=False);now=datetime.now(ZoneInfo("Asia/Kolkata"));today=now.date();month=today.replace(day=1)
     class_ids=[c["class_id"] for c in x["classes"]]
     hw=[homework_obj(h) for h in Homework.query.filter(Homework.class_id.in_(class_ids or [-1]),Homework.due_date>=today).order_by(Homework.due_date).limit(5).all()]
     paid=FeePayment.query.filter_by(student_id=s.id,fee_month=month).first();fee=applicable_fee(s.id,month)
@@ -3019,7 +3054,7 @@ def student_classwork():return get_classwork()
 @api.get("/student/teacher")
 @roles("student")
 def student_teacher():
-    s=student_for_user();classes=student_obj(s,False)["classes"];teacher_codes={c["teacher_id"] for c in classes if c.get("teacher_id")};teachers={t.teacher_id:t for t in Teacher.query.filter(Teacher.teacher_id.in_(teacher_codes or ["__none__"])).all()};out=[];seen=set()
+    s=student_for_user();classes=student_obj(s,False,include_fee_status=False)["classes"];teacher_codes={c["teacher_id"] for c in classes if c.get("teacher_id")};teachers={t.teacher_id:t for t in Teacher.query.filter(Teacher.teacher_id.in_(teacher_codes or ["__none__"])).all()};out=[];seen=set()
     for c in classes:
         tid=c.get("teacher_id")
         if tid and tid not in seen:
