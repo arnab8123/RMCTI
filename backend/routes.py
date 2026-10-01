@@ -2792,9 +2792,78 @@ def _classwork_for_teacher(id):
 @api.post("/classwork")
 @roles("teacher")
 def add_classwork():
-    t=teacher_for_user();b=request.get_json() or {};cid=int(b["class_id"])
-    if not TeacherClass.query.filter_by(teacher_id=t.id,class_id=cid,status="active").first():return err("Unauthorized",403)
-    w=Classwork(class_id=cid,teacher_id=t.id,subject_id=int(b["subject_id"]),work_date=pd(b["work_date"],True),topic=str(b["topic"]).strip(),description=str(b["description"]).strip(),notes=b.get("notes"));db.session.add(w);db.session.commit();return ok(classwork_obj(w),"Classwork added",201)
+    """Create classwork and optionally its attachments in one request.
+
+    The teacher page uses multipart/form-data when files are selected.  JSON
+    remains supported for older clients and for classwork without files.
+    Keeping creation + attachments in one transaction prevents a successful
+    classwork row from being left behind when an attachment upload fails.
+    """
+    t=teacher_for_user()
+    is_multipart=request.mimetype.startswith("multipart/form-data")
+    b=request.form if is_multipart else (request.get_json(silent=True) or {})
+    try:
+        cid=int(b.get("class_id"))
+        sid=int(b.get("subject_id"))
+    except (TypeError,ValueError):
+        return err("Please select a valid course and subject")
+
+    if not TeacherClass.query.filter_by(teacher_id=t.id,class_id=cid,status="active").first():
+        return err("You are not assigned to this course",403)
+    if not Class.query.filter_by(id=cid,status="active").first():
+        return err("Selected course is not active",404)
+    if not Subject.query.filter_by(id=sid,is_active=True).first():
+        return err("Selected subject was not found",404)
+
+    topic=str(b.get("topic") or "").strip()
+    description=str(b.get("description") or "").strip()
+    notes=str(b.get("notes") or "").strip() or None
+    if not topic:
+        return err("Topic is required")
+    if not description:
+        return err("Description is required")
+
+    try:
+        work_date=pd(b.get("work_date"),True)
+    except Exception:
+        return err("Please select a valid date")
+
+    files=[]
+    if is_multipart:
+        files=[f for f in request.files.getlist("attachments") if f and f.filename]
+        max_size=15*1024*1024
+        for f in files:
+            # Read once so the size check is exact and the same bytes are stored.
+            data=f.read()
+            if not data:
+                return err(f"The selected file is empty: {f.filename}")
+            if len(data)>max_size:
+                return err(f"{f.filename} is too large. Maximum size is 15 MB per file")
+            f._rmcti_data=data
+
+    try:
+        w=Classwork(class_id=cid,teacher_id=t.id,subject_id=sid,work_date=work_date,
+                    topic=topic,description=description,notes=notes)
+        db.session.add(w)
+        db.session.flush()
+
+        created=[]
+        for f in files:
+            name=secure_filename(f.filename) or f"classwork-{uuid.uuid4().hex}"
+            mime=(f.mimetype or "application/octet-stream").lower()[:255]
+            a=ClassworkAttachment(classwork_id=w.id,original_filename=name,
+                                  mime_type=mime,file_size=len(f._rmcti_data),data=f._rmcti_data)
+            db.session.add(a)
+            created.append(a)
+
+        db.session.commit()
+        payload=classwork_obj(w)
+        return ok(payload,"Classwork added",201)
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Could not create classwork")
+        message="Could not create classwork. Please make sure the classwork tables are migrated."
+        return err(message,500)
 @api.put("/classwork/<int:id>")
 @roles("teacher")
 def edit_classwork(id):

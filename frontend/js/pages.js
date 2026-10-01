@@ -1903,7 +1903,50 @@ const Page = (() => {
     const load = async () => { records = await Api.get(`/${kind}`); fill(body, records.map((x) => kind === 'homework' ? `<tr><td>${U.date(x.homework_date)}</td><td>${U.esc(x.class_name)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.title)}</td><td>${U.date(x.due_date)}</td><td><button class="btn warning small" data-edit="${x.id}">Edit</button> <button class="btn danger small" data-del="${x.id}">Delete</button></td></tr>` : `<tr><td>${U.date(x.work_date)}</td><td>${U.esc(x.class_name)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.topic)}</td><td>${(x.attachments||[]).map(a=>`<button type="button" class="btn secondary small" data-download-classwork="${a.id}">📎 ${U.esc(a.filename)}</button>`).join(' ')||'<span class="muted">No files</span>'}</td><td><button class="btn warning small" data-edit="${x.id}">Edit</button> <button class="btn danger small" data-del="${x.id}">Delete</button></td></tr>`).join('') || tableEmpty(kind === 'homework' ? 6 : 6)); };
     q('[data-class]')?.addEventListener('change', (e) => { const opt = e.target.selectedOptions[0]; if (opt?.dataset.subjectId) q('[data-subject]').value = opt.dataset.subjectId; });
     const form = q('form[data-work-form]');
-    form?.addEventListener('submit', async (e) => { e.preventDefault(); try { const id = form.dataset.editId; const payload = formObj(form); const files = kind==='classwork' ? [...(form.querySelector('[name="attachments"]')?.files||[])] : []; delete payload.attachments; if (id) { await Api.put(`/${kind}/${id}`, payload); if(kind==='classwork' && files.length){ for(const file of files){ await Api.uploadFields(`/classwork/${id}/attachments`,{file}); } } } else { const created=await Api.post(`/${kind}`, payload); if(kind==='classwork' && files.length){ for(const file of files){ await Api.uploadFields(`/classwork/${created.id}/attachments`,{file}); } } } delete form.dataset.editId; form.querySelector('button[type="submit"]').textContent = kind === 'homework' ? 'Add homework' : 'Add classwork'; U.toast(files.length?`Saved with ${files.length} attachment${files.length===1?'':'s'}`:'Saved successfully'); form.reset(); load(); } catch (x) { U.toast(x.message, 'error'); } });
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const button=form.querySelector('button[type="submit"]');
+      const status=q('[data-attachment-status]');
+      try {
+        const id=form.dataset.editId;
+        const payload=formObj(form);
+        const files=kind==='classwork' ? [...(form.querySelector('[name="attachments"]')?.files||[])] : [];
+        delete payload.attachments;
+        button && (button.disabled=true);
+        if(status) status.textContent=files.length ? `Uploading ${files.length} attachment${files.length===1?'':'s'}…` : '';
+
+        if(id){
+          await Api.put(`/${kind}/${id}`, payload);
+          if(kind==='classwork' && files.length){
+            // Keep edit support compatible with the dedicated attachment endpoint.
+            await Api.uploadFields(`/classwork/${id}/attachments`,{file:files});
+          }
+        } else if(kind==='classwork' && files.length){
+          // Create classwork + attachments atomically. This avoids the old
+          // two-step failure where the row was created but the attachment
+          // request failed and the page appeared to have saved nothing.
+          await Api.uploadFields('/classwork',{...payload,attachments:files});
+        } else {
+          await Api.post(`/${kind}`, payload);
+        }
+
+        delete form.dataset.editId;
+        button && (button.textContent=kind==='homework' ? 'Add homework' : 'Add classwork');
+        U.toast(files.length ? `Saved with ${files.length} attachment${files.length===1?'':'s'}` : 'Saved successfully');
+        form.reset();
+        if(kind==='classwork'){
+          const dateInput=form.querySelector('[name="work_date"]');
+          if(dateInput) dateInput.value=U.today();
+          if(status) status.textContent='';
+        }
+        await load();
+      } catch (x) {
+        U.toast(x.message || 'Could not save classwork', 'error');
+        if(status) status.textContent='';
+      } finally {
+        button && (button.disabled=false);
+      }
+    });
     body?.addEventListener('click', async (e) => { const attachment=e.target.closest('[data-download-classwork]')?.dataset.downloadClasswork; if(attachment){ await openClassworkAttachment(attachment); return; } const id = e.target.dataset.del || e.target.dataset.edit; if (!id) return; if (e.target.dataset.del) { await Api.del(`/${kind}/${id}`); U.toast('Deleted'); load(); return; } const row = records.find((x) => String(x.id) === String(id)); if (!row) return; Object.entries(row).forEach(([k, v]) => { const input = form.querySelector(`[name="${k}"]`); if (input && v != null) input.value = v; }); form.dataset.editId = id; form.querySelector('button[type="submit"]').textContent = kind === 'homework' ? 'Update homework' : 'Update classwork'; window.scrollTo({ top: 0, behavior: 'smooth' }); });
     await load();
   }
