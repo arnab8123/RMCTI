@@ -35,15 +35,6 @@ function prepareMobileTables(root = document) {
    navigation, global search, mobile navigation, polished toasts/modals and
    loading-state presentation are shared without changing business logic.
 --------------------------------------------------------------------------- */
-function rmctiEnsureAiNav() {
-  if (document.body.dataset.role !== "admin") return;
-  const nav = document.querySelector(".nav");
-  if (!nav || nav.querySelector('a[href="ai-assistant.html"]')) return;
-  const link = document.createElement("a");
-  link.href = "ai-assistant.html";
-  link.innerHTML = '<span class="nav-icon" aria-hidden="true">✦</span><span class="nav-label">AI Assistance</span>';
-  nav.insertBefore(link, nav.querySelector("[data-theme]") || null);
-}
 function rmctiNavIconize() {
   document.querySelectorAll('.nav > a, .nav > button').forEach((item) => {
     if (item.dataset.rmctiNavIconized) return;
@@ -270,7 +261,6 @@ function rmctiUpgradeLoadingStates() {
 }
 
 function rmctiBootSharedUI() {
-  rmctiEnsureAiNav();
   rmctiNavIconize();
   rmctiUpgradeLoadingStates();
   rmctiBindSidebar();
@@ -444,7 +434,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const dispatch = {
       'admin:dashboard': () => Page.dashboard('admin'),
-      'admin:ai-assistant': () => {},
       'admin:teachers': () => Page.teachersPage(),
       'admin:students': () => Page.studentsPage(),
       'admin:teacher-classes': () => Page.allocationPage(),
@@ -457,6 +446,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       'admin:audit-logs': () => Page.auditLogs(),
       'admin:reports': () => Page.reportsPage(),
       'admin:analytics': () => Page.analyticsPage(),
+      'admin:assistant': () => Page.assistantPage(),
       'admin:complaints': () => Page.adminComplaints(),
       'admin:enquiries': () => Page.enquiries(),
       'admin:register-teacher': () => Page.registerPage('teacher'),

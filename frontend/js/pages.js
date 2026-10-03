@@ -2090,5 +2090,118 @@ const Page = (() => {
     fill(q('[data-fees]'), `<div class="g3"><div><div class="muted">Current monthly fee</div><div class="statv">${U.money(f.current_monthly_fee)}</div></div><div><div class="muted">Total Paid</div><div class="statv">${U.money(totalPaid)}</div><small class="muted">All recorded fee payments</small></div><div><div class="muted">Total Due</div><div class="statv">${U.money(totalDue)}</div><small class="muted">All unpaid months + applicable fines</small></div></div><div class="table" style="margin-top:18px"><table><tr><th>Month</th><th>Total Amount</th><th>Paid</th><th>Remaining</th><th>Status</th><th>Payment Date</th><th>Receipt</th></tr>${(f.history || []).map((h) => `<tr><td>${U.esc(h.month_label)}</td><td>${U.money(h.amount)}</td><td>${U.money(h.paid_amount)}</td><td><b>${U.money(h.due_amount)}</b></td><td><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'PARTIAL' ? 'partial' : h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></td><td>${h.payment_date ? U.date(h.payment_date) : '—'}</td><td>${U.esc(h.receipt_number || '—')}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No fee history.</td></tr>'}</table></div>`);
   }
 
-  return { auth, dashboard, teachersPage, studentsPage, allClasses, registerPage, feeStructure, allocationPage, feePayment, receipts, receiptPrint, attachmentsPage, workPage, studentList, studentFees, teacherStudents, teacherClasses, auditLogs, studentDetails, adminComplaints, enquiries, studentComplaints, reportsPage, analyticsPage };
+
+  async function assistantPage() {
+    const chat = q('[data-ai-chat]');
+    const form = q('[data-ai-form]');
+    const input = q('[data-ai-input]');
+    const send = q('[data-ai-send]');
+    const clear = q('[data-ai-clear]');
+    const suggestions = q('[data-ai-suggestions]');
+    if (!chat || !form || !input) return;
+
+    const KEY = 'rmcti_admin_ai_chat_v1';
+    let pendingAction = null;
+    let messages = [];
+    try { messages = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (_) { messages = []; }
+
+    const renderMarkdown = (value) => {
+      let html = U.esc(String(value || ''));
+      html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+      html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+      html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+      html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+      return html.replace(/\n/g, '<br>');
+    };
+
+    const save = () => {
+      try { localStorage.setItem(KEY, JSON.stringify(messages.slice(-60))); } catch (_) {}
+    };
+
+    const add = (role, text, meta = {}) => {
+      messages.push({role, text, ...meta});
+      save();
+      const bubble = document.createElement('article');
+      bubble.className = `ai-message ${role === 'user' ? 'ai-user' : 'ai-assistant'}`;
+      bubble.innerHTML = `<div class="ai-avatar">${role === 'user' ? 'You' : '✦'}</div><div class="ai-bubble">${renderMarkdown(text)}</div>`;
+      chat.appendChild(bubble);
+      chat.scrollTop = chat.scrollHeight;
+    };
+
+    const restore = () => {
+      chat.innerHTML = '';
+      if (!messages.length) {
+        add('assistant', 'Hello! I’m your **RMCTI Admin Assistant**.\\n\\nYou can type naturally or just use keywords like **due**, **classes today**, **attendance**, **attendance analytics**, **create student**, or **reschedule class**.');
+      } else {
+        const saved = messages.slice();
+        messages = [];
+        saved.forEach(m => add(m.role, m.text));
+      }
+    };
+
+    const setBusy = (busy) => {
+      input.disabled = busy;
+      send.disabled = busy;
+      send.textContent = busy ? 'Thinking…' : 'Send';
+    };
+
+    const ask = async (text) => {
+      const message = String(text || '').trim();
+      if (!message) return;
+      add('user', message);
+      setBusy(true);
+      const typing = document.createElement('article');
+      typing.className = 'ai-message ai-assistant ai-typing';
+      typing.innerHTML = '<div class="ai-avatar">✦</div><div class="ai-bubble"><span></span><span></span><span></span></div>';
+      chat.appendChild(typing);
+      chat.scrollTop = chat.scrollHeight;
+      try {
+        const result = await Api.post('/admin/assistant', pendingAction
+          ? {message, confirm_action: pendingAction}
+          : {message});
+        typing.remove();
+        pendingAction = result.action || null;
+        add('assistant', result.reply || 'Done.');
+        if (result.confirm) {
+          input.placeholder = 'Type yes to confirm or no to cancel…';
+        } else {
+          input.placeholder = 'Ask anything about RMCTI…';
+        }
+      } catch (e) {
+        typing.remove();
+        add('assistant', `I couldn't complete that request. ${e.message || 'Please try again.'}`);
+      } finally {
+        setBusy(false);
+        input.focus();
+      }
+    };
+
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const value = input.value.trim();
+      input.value = '';
+      ask(value);
+    });
+
+    suggestions?.addEventListener('click', e => {
+      const button = e.target.closest('[data-ai-prompt]');
+      if (!button) return;
+      input.value = button.dataset.aiPrompt || '';
+      form.requestSubmit();
+    });
+
+    clear?.addEventListener('click', () => {
+      messages = [];
+      pendingAction = null;
+      localStorage.removeItem(KEY);
+      restore();
+      input.focus();
+    });
+
+    restore();
+  }
+
+  return { auth, dashboard, teachersPage, studentsPage, allClasses, registerPage, feeStructure, allocationPage, feePayment, receipts, receiptPrint, attachmentsPage, workPage, studentList, studentFees, teacherStudents, teacherClasses, auditLogs, studentDetails, adminComplaints, enquiries, studentComplaints, reportsPage, analyticsPage, assistantPage };
 })();
