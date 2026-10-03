@@ -16,16 +16,15 @@
 </nav></aside>
 <main class="main"><header class="top"><div><button type="button" class="btn secondary menu" data-menu>☰</button> <b>AI Assistant</b></div><span class="muted" data-user></span></header>
 <section class="content ai-content">
-<div class="ai-page-head"><div><span class="eyebrow">RMCTI ADMIN</span><h1>AI Assistant <span>✦</span></h1><p class="muted">Ask questions, find records, understand shortcuts, or let the assistant perform admin actions.</p></div><button type="button" class="btn secondary small" data-ai-clear>Clear chat</button></div>
+<div class="ai-page-head"><div><span class="ai-status"><i></i> RMCTI AI</span><h1>AI Assistant</h1><p class="muted">Your RMCTI admin copilot.</p></div></div>
 <div class="ai-layout">
-<section class="card ai-chat-card"><div class="ai-chat" data-ai-chat></div>
-<form class="ai-composer" data-ai-form><textarea class="textarea" data-ai-input rows="2" placeholder="Ask anything about RMCTI…" autocomplete="off"></textarea><button class="btn primary ai-send" data-ai-send type="submit">Send</button></form>
-</section>
-<aside class="ai-help card"><h3>Try asking</h3><div class="ai-suggestions" data-ai-suggestions>
-<button type="button" data-ai-prompt="classes today">📅 Classes today</button><button type="button" data-ai-prompt="fee due">₹ Fee due</button><button type="button" data-ai-prompt="attendance analytics">◉ Attendance analytics</button><button type="button" data-ai-prompt="show students">♧ Students</button><button type="button" data-ai-prompt="show teachers">♙ Teachers</button><button type="button" data-ai-prompt="create student &quot;Rahul Das&quot;">＋ Create student</button><button type="button" data-ai-prompt="create teacher &quot;Anita Roy&quot;">＋ Create teacher</button><button type="button" data-ai-prompt="reschedule the physics class tomorrow to 6 pm">↻ Reschedule class</button><button type="button" data-ai-prompt="delete student STD-00012">⌫ Delete student</button>
-</div>
-<div class="ai-capabilities"><b>Zero API billing</b><span>No OpenAI/Gemini/Claude API key is required. The assistant uses the RMCTI backend and your existing Aiven/MySQL data.</span></div>
-<div class="ai-safety"><b>Actions need confirmation</b><span>Creating, deleting, assigning, or rescheduling never happens silently.</span></div>
-</aside></div></section></main></div>
+<section class="ai-chat-shell">
+  <div class="ai-chat-topbar"><div class="ai-brand"><div class="ai-logo">✦</div><div><b>RMCTI Assistant</b><span>Admin workspace</span></div></div><div class="ai-online"><i></i> Online</div></div>
+  <div class="ai-chat" data-ai-chat></div>
+  <div class="ai-suggestions" data-ai-suggestions>
+    <button type="button" data-ai-prompt="classes today">Classes today</button><button type="button" data-ai-prompt="fee due">Fee due</button><button type="button" data-ai-prompt="attendance analytics">Attendance</button><button type="button" data-ai-prompt="show students">Students</button><button type="button" data-ai-prompt="show teachers">Teachers</button><button type="button" data-ai-prompt="reschedule the physics class tomorrow to 6 pm">Reschedule class</button>
+  </div>
+  <form class="ai-composer" data-ai-form><div class="ai-input-wrap"><textarea data-ai-input rows="1" placeholder="Message RMCTI Assistant…" autocomplete="off"></textarea><span>Enter to send · Shift + Enter for new line</span></div><button class="ai-send" data-ai-send type="submit">Send <span>➤</span></button></form>
+</section></div></section></main></div>
 <script src="../js/theme.js?v=20260926"></script><script src="../js/api.js?v=20260926"></script><script src="../js/utils.js?v=20260926"></script><script src="../js/auth.js?v=20260926"></script><script src="../js/pages.js?v=20261003"></script><script src="../js/app.js?v=20261003"></script>
 </body></html>

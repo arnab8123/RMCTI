@@ -2096,14 +2096,15 @@ const Page = (() => {
     const form = q('[data-ai-form]');
     const input = q('[data-ai-input]');
     const send = q('[data-ai-send]');
-    const clear = q('[data-ai-clear]');
     const suggestions = q('[data-ai-suggestions]');
     if (!chat || !form || !input) return;
 
+    // Start every visit with a completely fresh conversation. Nothing is
+    // restored from localStorage, so previous messages never reappear.
     const KEY = 'rmcti_admin_ai_chat_v1';
+    try { localStorage.removeItem(KEY); } catch (_) {}
     let pendingAction = null;
     let messages = [];
-    try { messages = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (_) { messages = []; }
 
     const renderMarkdown = (value) => {
       let html = U.esc(String(value || ''));
@@ -2116,13 +2117,8 @@ const Page = (() => {
       return html.replace(/\n/g, '<br>');
     };
 
-    const save = () => {
-      try { localStorage.setItem(KEY, JSON.stringify(messages.slice(-60))); } catch (_) {}
-    };
-
     const add = (role, text, meta = {}) => {
       messages.push({role, text, ...meta});
-      save();
       const bubble = document.createElement('article');
       bubble.className = `ai-message ${role === 'user' ? 'ai-user' : 'ai-assistant'}`;
       bubble.innerHTML = `<div class="ai-avatar">${role === 'user' ? 'You' : '✦'}</div><div class="ai-bubble">${renderMarkdown(text)}</div>`;
@@ -2130,21 +2126,13 @@ const Page = (() => {
       chat.scrollTop = chat.scrollHeight;
     };
 
-    const restore = () => {
-      chat.innerHTML = '';
-      if (!messages.length) {
-        add('assistant', 'Hello! I’m your **RMCTI Admin Assistant**.\\n\\nYou can type naturally or just use keywords like **due**, **classes today**, **attendance**, **attendance analytics**, **create student**, or **reschedule class**.');
-      } else {
-        const saved = messages.slice();
-        messages = [];
-        saved.forEach(m => add(m.role, m.text));
-      }
-    };
+    // One short welcome message only; all old/help text is intentionally gone.
+    add('assistant', 'Hi! How can I help with RMCTI?');
 
     const setBusy = (busy) => {
       input.disabled = busy;
       send.disabled = busy;
-      send.textContent = busy ? 'Thinking…' : 'Send';
+      send.innerHTML = busy ? '<span class="ai-send-spinner"></span>' : 'Send <span>➤</span>';
     };
 
     const ask = async (text) => {
@@ -2164,11 +2152,7 @@ const Page = (() => {
         typing.remove();
         pendingAction = result.action || null;
         add('assistant', result.reply || 'Done.');
-        if (result.confirm) {
-          input.placeholder = 'Type yes to confirm or no to cancel…';
-        } else {
-          input.placeholder = 'Ask anything about RMCTI…';
-        }
+        input.placeholder = result.confirm ? 'Type yes to confirm or no to cancel…' : 'Message RMCTI Assistant…';
       } catch (e) {
         typing.remove();
         add('assistant', `I couldn't complete that request. ${e.message || 'Please try again.'}`);
@@ -2185,22 +2169,18 @@ const Page = (() => {
       ask(value);
     });
 
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
     suggestions?.addEventListener('click', e => {
       const button = e.target.closest('[data-ai-prompt]');
       if (!button) return;
-      input.value = button.dataset.aiPrompt || '';
-      form.requestSubmit();
+      ask(button.dataset.aiPrompt || '');
     });
-
-    clear?.addEventListener('click', () => {
-      messages = [];
-      pendingAction = null;
-      localStorage.removeItem(KEY);
-      restore();
-      input.focus();
-    });
-
-    restore();
   }
 
   return { auth, dashboard, teachersPage, studentsPage, allClasses, registerPage, feeStructure, allocationPage, feePayment, receipts, receiptPrint, attachmentsPage, workPage, studentList, studentFees, teacherStudents, teacherClasses, auditLogs, studentDetails, adminComplaints, enquiries, studentComplaints, reportsPage, analyticsPage, assistantPage };
