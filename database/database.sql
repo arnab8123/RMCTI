@@ -17,7 +17,10 @@ CREATE TABLE notice_attachments (
  original_filename VARCHAR(255) NOT NULL,
  mime_type VARCHAR(100) NOT NULL,
  file_size BIGINT UNSIGNED NOT NULL,
- data MEDIUMBLOB NOT NULL,
+ cloudinary_url VARCHAR(1000) NULL,
+ cloudinary_public_id VARCHAR(500) NULL,
+ cloudinary_resource_type VARCHAR(20) NULL,
+ data MEDIUMBLOB NULL,
  uploaded_by BIGINT UNSIGNED NOT NULL,
  target_type ENUM('all','student','class') NOT NULL DEFAULT 'all',
  target_student_id BIGINT UNSIGNED NULL,
@@ -32,7 +35,10 @@ CREATE TABLE notice_attachments (
 CREATE TABLE photo_assets (
  id VARCHAR(100) PRIMARY KEY,
  mime_type VARCHAR(50) NOT NULL,
- data MEDIUMBLOB NOT NULL,
+ cloudinary_url VARCHAR(1000) NULL,
+ cloudinary_public_id VARCHAR(500) NULL,
+ cloudinary_resource_type VARCHAR(20) NULL,
+ data MEDIUMBLOB NULL,
  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
@@ -159,7 +165,10 @@ CREATE TABLE classwork_attachments (
  original_filename VARCHAR(255) NOT NULL,
  mime_type VARCHAR(255) NOT NULL DEFAULT 'application/octet-stream',
  file_size BIGINT UNSIGNED NOT NULL,
- data MEDIUMBLOB NOT NULL,
+ cloudinary_url VARCHAR(1000) NULL,
+ cloudinary_public_id VARCHAR(500) NULL,
+ cloudinary_resource_type VARCHAR(20) NULL,
+ data MEDIUMBLOB NULL,
  uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
  INDEX idx_classwork_attachments_work(classwork_id),
  FOREIGN KEY(classwork_id) REFERENCES classwork(id) ON DELETE CASCADE

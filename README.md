@@ -262,3 +262,26 @@ Run `database/add_notice_attachments.sql` once on the hosted MySQL database befo
 
 ### File attachment repair
 For an existing Aiven/MySQL database, run `database/fix_file_attachments.sql` once. It repairs older notice-attachment schemas and ensures the classwork attachment table exists. The application accepts teacher classwork files up to 15 MB per file; Flask is configured with a 20 MB request limit so the documented upload size is not rejected before the route runs.
+
+
+## Fee discounts + Cloudinary file storage
+
+### Required Render environment variable
+Keep `CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME` configured in Render.
+Optional:
+- `CLOUDINARY_FOLDER=rmcti/photos`
+- `CLOUDINARY_FILE_FOLDER=rmcti/files`
+
+The landing page keeps its existing `frontend/asset/` files. Admin notice-board attachments, teacher classwork attachments, and uploaded student/teacher photos use Cloudinary instead of MySQL BLOB storage.
+
+### Existing uploaded files
+After the new deployment has run `scripts/migrate.py`, run the one-time migration from the project root:
+
+```bash
+python scripts/migrate_cloudinary_files.py
+```
+
+This transfers legacy notice/classwork/photo BLOBs to Cloudinary, updates photo references, and clears the old BLOB bytes. It is safe to rerun.
+
+### Fee discount
+Admin → Collect Fee now has **Discount / Fee Waiver**. The server records the discount separately from cash/UPI/bank payment. The student's balance is reduced by `payment + discount`, while collection reports continue to count only actual money collected.

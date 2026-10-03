@@ -1437,6 +1437,7 @@ const Page = (() => {
     const filter = q('[data-fee-filter]');
     const monthInput = q('[name="month"]');
     const amountInput = q('[name="amount"]');
+    const discountInput = q('[name="discount_amount"]');
     const params = new URLSearchParams(location.search);
     if (filter && params.get('filter') === 'due') filter.value = 'due';
     const requestedStudent = params.get('student');
@@ -1475,11 +1476,11 @@ const Page = (() => {
     };
 
     const load = async () => {
-      if (!studentSelect?.value) { currentFeeData=null; fill(q('[data-history]'), '<div class="empty">No student selected.</div>'); if(monthInput) monthInput.value=''; if(amountInput) amountInput.value=''; return; }
+      if (!studentSelect?.value) { currentFeeData=null; fill(q('[data-history]'), '<div class="empty">No student selected.</div>'); if(monthInput) monthInput.value=''; if(amountInput) amountInput.value=''; if(discountInput) discountInput.value='0'; return; }
       const d = await Api.get(`/fees/student/${studentSelect.value}`); currentFeeData=d;
       fill(q('[data-history]'), `<div class="fee-timeline">${(d.history || []).map((h) => `<div class="fee-timeline-item ${String(h.status||'').toLowerCase()}"><div class="fee-timeline-marker">${h.status === 'PAID' ? '✓' : h.status === 'PARTIAL' ? '◐' : '!'}</div><div class="fee-timeline-main"><div class="fee-timeline-head"><b>${U.esc(h.month_label)}</b><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'PARTIAL' ? 'partial' : h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></div><div class="fee-timeline-amounts"><span>Due <b>${U.money(h.amount)}</b></span><span>Paid <b>${U.money(h.paid_amount)}</b></span><span>Remaining <b>${U.money(h.due_amount)}</b></span></div>${h.payment_date?`<small>Last payment: ${U.esc(U.datetime(h.payment_date))}${h.receipt_number?` · Receipt ${U.esc(h.receipt_number)}`:''}</small>`:''}<button type="button" class="btn secondary small fee-detail-btn" data-fee-detail="${U.esc(h.month)}">View fee calculation</button></div></div>`).join('') || '<div class="empty-card"><b>No fee history</b><span>No fee records are available for this student.</span></div>'}</div>`);
       if(monthInput){monthInput.value=d.oldest_due_month || U.today().slice(0,7);monthInput.readOnly=true;monthInput.title=d.oldest_due_month?'Oldest due month is selected automatically':'No unpaid month is due; current month is selected.';}
-      if(amountInput) { amountInput.value=d.oldest_due_amount>0?d.oldest_due_amount:''; amountInput.min='0.01'; amountInput.max=d.oldest_due_amount>0?String(d.oldest_due_amount):'0'; amountInput.title=`Maximum ₹${Number(d.oldest_due_amount||0).toFixed(2)} (remaining balance for the selected month). Partial payments are allowed.`; }
+      if(amountInput) { amountInput.value=d.oldest_due_amount>0?d.oldest_due_amount:''; amountInput.min='0'; amountInput.max=d.oldest_due_amount>0?String(d.oldest_due_amount):'0'; amountInput.title=`Payment + discount cannot exceed ₹${Number(d.oldest_due_amount||0).toFixed(2)}.`; } if(discountInput){discountInput.value='0';discountInput.max=d.oldest_due_amount>0?String(d.oldest_due_amount):'0';}
     };
 
     q('[data-history]')?.addEventListener('click',(e)=>{
@@ -1503,6 +1504,7 @@ const Page = (() => {
     studentSelect?.addEventListener('change', load);
     search?.addEventListener('input', U.debounce(renderStudents, 200));
     filter?.addEventListener('change', renderStudents);
+     discountInput?.addEventListener('input',()=>{ const due=Number(currentFeeData?.oldest_due_amount||0), discount=Number(discountInput.value||0); if(amountInput){amountInput.max=String(Math.max(0,due-discount)); if(Number(amountInput.value)>due-discount) amountInput.value=Math.max(0,due-discount).toFixed(2);} });
     q('form[data-fee-payment]')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       try {
@@ -1510,7 +1512,10 @@ const Page = (() => {
         const body = formObj(e.currentTarget);
         body.student_id = Number(studentSelect.value);
         body.month = currentFeeData?.oldest_due_month || U.today().slice(0,7);
-        body.amount = Number(amountInput.value);
+        body.amount = Number(amountInput.value || 0);
+         body.discount_amount = Number(discountInput?.value || 0);
+         if(body.amount + body.discount_amount <= 0) throw Error('Enter a payment amount or a discount');
+         if(body.amount + body.discount_amount > Number(currentFeeData?.oldest_due_amount || 0)) throw Error('Payment + discount cannot exceed the remaining balance');
         const btn=e.currentTarget.querySelector('button[type="submit"]') || e.currentTarget.querySelector('button'); if(btn) btn.disabled=true;
         const r = await Api.post('/fees/payment', body);
         U.toast('Fee payment recorded');
@@ -1532,7 +1537,7 @@ const Page = (() => {
     return `<div class="receipt-doc" data-receipt-capture style="border:1px solid #d6dde6;border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.08)">
       <div style="padding:22px 26px;background:#0f3d5e;color:#fff;display:flex;justify-content:space-between;gap:20px;align-items:center"><div style="display:flex;gap:14px;align-items:center"><img crossorigin="anonymous" src="${U.photoUrl('/asset/image.jpeg')}" style="width:54px;height:54px;border-radius:10px;background:#fff;padding:4px;object-fit:contain"><div><div style="font-size:22px;font-weight:800;letter-spacing:.02em">RMCTI</div><div style="font-size:12px;opacity:.86">Ratna's Modern Computer Training Institute</div></div></div><div style="text-align:right"><div style="font-size:11px;opacity:.78;text-transform:uppercase;letter-spacing:.1em">Official Fee Receipt</div><div style="font-size:18px;font-weight:800;margin-top:4px">${U.esc(r.receipt_number)}</div></div></div>
       <div style="padding:24px 26px"><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 28px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Student</div><div style="font-weight:800;font-size:17px;margin-top:5px">${U.esc(r.student)}</div><div class="muted" style="margin-top:3px">${U.esc(r.student_id)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Course</div><div style="font-weight:700;margin-top:5px">${U.esc(r.class||'—')}</div>${r.teacher?`<div class="muted" style="margin-top:3px">Teacher: ${U.esc(r.teacher)}</div>`:''}</div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Fee Month</div><div style="font-weight:700;margin-top:5px">${U.esc(r.fee_month)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Date</div><div style="font-weight:700;margin-top:5px">${U.datetime(r.payment_date)}</div></div></div>
-      <div style="margin:24px 0;border-top:1px solid #e2e8f0"></div><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Method</div><div style="font-weight:700;margin-top:5px;text-transform:capitalize">${U.esc(String(r.payment_method||'').replace('_',' '))}</div></div><div style="display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:18px;text-align:right"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Amount Paid</div><div style="font-size:26px;font-weight:900;margin-top:2px;color:#0f3d5e">${U.money(r.amount)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Total Remaining Due</div><div style="font-size:22px;font-weight:900;margin-top:4px;color:#b45309">${U.money(r.remaining||0)}</div></div></div></div>
+      <div style="margin:24px 0;border-top:1px solid #e2e8f0"></div><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Method</div><div style="font-weight:700;margin-top:5px;text-transform:capitalize">${U.esc(String(r.payment_method||'').replace('_',' '))}</div></div><div style="display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:18px;text-align:right"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Amount Paid</div><div style="font-size:26px;font-weight:900;margin-top:2px;color:#0f3d5e">${U.money(r.amount)}</div>${Number(r.discount||0)>0?`<div class="muted" style="margin-top:5px">Discount / waiver: ${U.money(r.discount)}</div>`:""}</div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Total Remaining Due</div><div style="font-size:22px;font-weight:900;margin-top:4px;color:#b45309">${U.money(r.remaining||0)}</div></div></div></div>
       <div style="margin-top:28px;padding-top:14px;border-top:1px dashed #cbd5e1;display:flex;justify-content:space-between;gap:20px;font-size:11px;color:#64748b"><span>Collected by: ${U.esc(r.collected_by||'Admin')}</span><span>System generated receipt</span></div></div></div>`;
   }
 
@@ -1624,7 +1629,7 @@ const Page = (() => {
 
   async function receipts() {
     const search = q('[data-search]');
-    const load = async () => { const rows = await Api.get('/receipts', { q: search?.value || '' }); fill(q('[data-body]'), rows.map((r) => `<tr><td>${U.esc(r.receipt_number)}</td><td>${U.esc(r.student_name)}</td><td>${U.esc(r.month)}</td><td>${U.money(r.amount)}</td><td>${U.esc(r.method)}</td><td>${U.datetime(r.generated_at)}</td><td><button class="btn secondary small" data-view-receipt="${r.id}">Print / View</button></td></tr>`).join('') || tableEmpty(7)); };
+    const load = async () => { const rows = await Api.get('/receipts', { q: search?.value || '' }); fill(q('[data-body]'), rows.map((r) => `<tr><td>${U.esc(r.receipt_number)}</td><td>${U.esc(r.student_name)}</td><td>${U.esc(r.month)}</td><td>${U.money(r.amount)}</td><td>${Number(r.discount||0)>0?U.money(r.discount):"—"}</td><td>${U.esc(r.method)}</td><td>${U.datetime(r.generated_at)}</td><td><button class="btn secondary small" data-view-receipt="${r.id}">Print / View</button></td></tr>`).join('') || tableEmpty(7)); };
     search?.addEventListener('input', U.debounce(load));
     q('[data-body]')?.addEventListener('click',async e=>{const id=e.target.dataset.viewReceipt;if(!id)return;try{const r=await Api.get(`/receipts/${id}`);await showReceipt(r,false)}catch(x){U.toast(x.message||'Could not load receipt','error')}});
     await load();

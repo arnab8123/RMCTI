@@ -224,6 +224,47 @@ def ensure_attachment_targets():
     except Exception:
         db.session.rollback()
 
+def ensure_fee_discount():
+    inspector=inspect(db.engine)
+    if "fee_payments" not in inspector.get_table_names():
+        return
+    existing={c["name"] for c in inspector.get_columns("fee_payments")}
+    if "discount_amount" not in existing:
+        db.session.execute(text("ALTER TABLE fee_payments ADD COLUMN discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER amount"))
+
+
+def ensure_cloudinary_file_storage():
+    inspector=inspect(db.engine)
+    if "photo_assets" in inspector.get_table_names():
+        existing={c["name"] for c in inspector.get_columns("photo_assets")}
+        for name,definition in (("cloudinary_url","VARCHAR(1000) NULL"),("cloudinary_public_id","VARCHAR(500) NULL"),("cloudinary_resource_type","VARCHAR(20) NULL")):
+            if name not in existing:
+                db.session.execute(text(f"ALTER TABLE photo_assets ADD COLUMN {name} {definition}"))
+        try:
+            db.session.execute(text("ALTER TABLE photo_assets MODIFY COLUMN data MEDIUMBLOB NULL"))
+        except Exception:
+            db.session.rollback()
+
+    for table in ("notice_attachments","classwork_attachments"):
+        if table not in inspector.get_table_names():
+            continue
+        existing={c["name"] for c in inspector.get_columns(table)}
+        additions=[
+            ("cloudinary_url","VARCHAR(1000) NULL"),
+            ("cloudinary_public_id","VARCHAR(500) NULL"),
+            ("cloudinary_resource_type","VARCHAR(20) NULL"),
+        ]
+        for name,definition in additions:
+            if name not in existing:
+                db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {definition}"))
+        # Keep data nullable while the one-time migration script transfers
+        # existing BLOBs to Cloudinary. New uploads never write BLOB bytes.
+        try:
+            db.session.execute(text(f"ALTER TABLE {table} MODIFY COLUMN data MEDIUMBLOB NULL"))
+        except Exception:
+            db.session.rollback()
+
+
 def ensure_performance_indexes():
     """Add indexes used by the high-traffic list/dashboard endpoints.
     Safe to run repeatedly; existing indexes are left untouched.
@@ -298,6 +339,8 @@ with app.app_context():
     ensure_schedule_exceptions()
     ensure_personal_fields()
     ensure_attachment_targets()
+    ensure_fee_discount()
+    ensure_cloudinary_file_storage()
     ensure_performance_indexes()
     db.session.commit()
     print("RMCTI database schema is ready. Schedule controls, Aadhaar fields, targeted attachments, attendance marker, and performance indexes are ready. Existing data is preserved.")

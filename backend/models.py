@@ -53,7 +53,7 @@ class StudentClass(db.Model):
 class FeeStructure(db.Model):
     __tablename__="fee_structures"; id=db.Column(db.BigInteger,primary_key=True); class_id=db.Column(db.BigInteger,db.ForeignKey("classes.id"),nullable=False); monthly_fee=db.Column(db.Numeric(10,2),nullable=False); effective_from=db.Column(db.Date,nullable=False); effective_to=db.Column(db.Date); status=db.Column(db.Enum("active","inactive"),default="active",nullable=False); created_by=db.Column(db.BigInteger,db.ForeignKey("users.id")); created_at=db.Column(db.DateTime,default=datetime.utcnow); updated_at=db.Column(db.DateTime,default=datetime.utcnow,onupdate=datetime.utcnow)
 class FeePayment(db.Model):
-    __tablename__="fee_payments"; id=db.Column(db.BigInteger,primary_key=True); student_id=db.Column(db.BigInteger,db.ForeignKey("students.id"),nullable=False); fee_month=db.Column(db.Date,nullable=False); amount=db.Column(db.Numeric(10,2),nullable=False); payment_date=db.Column(db.DateTime,default=datetime.utcnow); payment_method=db.Column(db.Enum("cash","upi","bank_transfer","other"),nullable=False); collected_by=db.Column(db.BigInteger,db.ForeignKey("users.id"),nullable=False); receipt_number=db.Column(db.String(50),unique=True,nullable=False); notes=db.Column(db.Text); __table_args__=(db.Index("idx_fee_payments_student_month_date","student_id","fee_month","payment_date"),db.Index("idx_fee_payments_month","fee_month"))
+    __tablename__="fee_payments"; id=db.Column(db.BigInteger,primary_key=True); student_id=db.Column(db.BigInteger,db.ForeignKey("students.id"),nullable=False); fee_month=db.Column(db.Date,nullable=False); amount=db.Column(db.Numeric(10,2),nullable=False); discount_amount=db.Column(db.Numeric(10,2),nullable=False,default=0); payment_date=db.Column(db.DateTime,default=datetime.utcnow); payment_method=db.Column(db.Enum("cash","upi","bank_transfer","other"),nullable=False); collected_by=db.Column(db.BigInteger,db.ForeignKey("users.id"),nullable=False); receipt_number=db.Column(db.String(50),unique=True,nullable=False); notes=db.Column(db.Text); __table_args__=(db.Index("idx_fee_payments_student_month_date","student_id","fee_month","payment_date"),db.Index("idx_fee_payments_month","fee_month"))
 class Receipt(db.Model):
     __tablename__="receipts"; id=db.Column(db.BigInteger,primary_key=True); fee_payment_id=db.Column(db.BigInteger,db.ForeignKey("fee_payments.id"),unique=True,nullable=False); receipt_number=db.Column(db.String(50),unique=True,nullable=False); generated_at=db.Column(db.DateTime,default=datetime.utcnow)
 class Homework(db.Model):
@@ -67,7 +67,10 @@ class ClassworkAttachment(db.Model):
     original_filename=db.Column(db.String(255),nullable=False)
     mime_type=db.Column(db.String(255),nullable=False,default="application/octet-stream")
     file_size=db.Column(db.BigInteger,nullable=False)
-    data=db.Column(MEDIUMBLOB,nullable=False)
+    cloudinary_url=db.Column(db.String(1000),nullable=True)
+    cloudinary_public_id=db.Column(db.String(500),nullable=True)
+    cloudinary_resource_type=db.Column(db.String(20),nullable=True)
+    data=db.Column(MEDIUMBLOB,nullable=True)
     uploaded_at=db.Column(db.DateTime,default=datetime.utcnow,nullable=False)
     __table_args__=(db.Index("idx_classwork_attachments_work","classwork_id"),)
 class Attendance(db.Model):
@@ -121,7 +124,10 @@ class NoticeAttachment(db.Model):
     original_filename = db.Column(db.String(255), nullable=False)
     mime_type = db.Column(db.String(100), nullable=False)
     file_size = db.Column(db.BigInteger, nullable=False)
-    data = db.Column(MEDIUMBLOB, nullable=False)
+    cloudinary_url = db.Column(db.String(1000), nullable=True)
+    cloudinary_public_id = db.Column(db.String(500), nullable=True)
+    cloudinary_resource_type = db.Column(db.String(20), nullable=True)
+    data = db.Column(MEDIUMBLOB, nullable=True)
     uploaded_by = db.Column(db.BigInteger, db.ForeignKey("users.id"), nullable=False)
     target_type = db.Column(db.Enum("all","student","class"), default="all", nullable=False)
     target_student_id = db.Column(db.BigInteger, db.ForeignKey("students.id", ondelete="CASCADE"), nullable=True)
@@ -134,5 +140,8 @@ class PhotoAsset(db.Model):
     __tablename__ = "photo_assets"
     id = db.Column(db.String(100), primary_key=True)
     mime_type = db.Column(db.String(50), nullable=False)
-    data = db.Column(MEDIUMBLOB, nullable=False)
+    cloudinary_url = db.Column(db.String(1000), nullable=True)
+    cloudinary_public_id = db.Column(db.String(500), nullable=True)
+    cloudinary_resource_type = db.Column(db.String(20), nullable=True)
+    data = db.Column(MEDIUMBLOB, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

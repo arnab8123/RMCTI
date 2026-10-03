@@ -23,6 +23,42 @@ def _request_limit(rule, scope=None):
     return limiter.limit(rule, scope=scope)
 
 
+def _cloudinary():
+    """Return configured Cloudinary SDK modules or raise a clear configuration error."""
+    import cloudinary
+    import cloudinary.uploader
+    cloudinary_url = os.getenv("CLOUDINARY_URL", "").strip()
+    if not cloudinary_url or not cloudinary_url.startswith("cloudinary://"):
+        raise RuntimeError("CLOUDINARY_URL is missing or invalid")
+    cloudinary.config(cloudinary_url=cloudinary_url, secure=True)
+    return cloudinary, cloudinary.uploader
+
+
+def _cloudinary_upload(data, filename, folder="rmcti/files", resource_type="auto"):
+    """Upload bytes directly to Cloudinary and return CDN metadata."""
+    cloudinary, uploader = _cloudinary()
+    stem = secure_filename(os.path.splitext(filename or "file")[0])[:80] or "file"
+    public_id = f"{stem}-{uuid.uuid4().hex}"
+    result = uploader.upload(
+        data,
+        folder=folder,
+        public_id=public_id,
+        resource_type=resource_type,
+        overwrite=False,
+        use_filename=False,
+        unique_filename=False,
+    )
+    return result["secure_url"], result.get("public_id"), result.get("resource_type", resource_type)
+
+
+def _cloudinary_delete(public_id, resource_type="auto"):
+    if not public_id:
+        return
+    cloudinary, uploader = _cloudinary()
+    uploader.destroy(public_id, resource_type=resource_type, invalidate=True)
+
+
+
 def _bounded_limit(default=100, maximum=500):
     """Read an optional API limit while keeping every collection endpoint bounded."""
     try:
@@ -635,9 +671,7 @@ def _classwork_objs_bulk(rows):
     subjects={x.id:x for x in Subject.query.filter(Subject.id.in_(sids)).all()} if sids else {}
     teachers={x.id:x for x in Teacher.query.filter(Teacher.id.in_(tids)).all()} if tids else {}
     attachments_by_work={wid:[] for wid in wids}
-    # Attachment data is a MEDIUMBLOB. Never load it while rendering a list;
-    # only the metadata is needed here. The actual bytes are fetched by the
-    # dedicated download endpoint.
+    # Only attachment metadata is loaded here. File bytes live on Cloudinary.
     attachment_rows=(ClassworkAttachment.query
         .options(load_only(
             ClassworkAttachment.id,
@@ -738,13 +772,17 @@ def upload_attachment():
         target_student_id=None
     else:
         target_student_id=target_class_id=None
-    row=NoticeAttachment(title=title[:255],original_filename=name,mime_type=mime,file_size=len(data),data=data,
-        uploaded_by=current_user().id,target_type=target_type,target_student_id=target_student_id,target_class_id=target_class_id)
     try:
+        cloud_url, public_id, resource_type = _cloudinary_upload(data, name, folder=os.getenv("CLOUDINARY_FILE_FOLDER", "rmcti/notice-board"))
+        row=NoticeAttachment(title=title[:255],original_filename=name,mime_type=mime,file_size=len(data),
+            cloudinary_url=cloud_url,cloudinary_public_id=public_id,cloudinary_resource_type=resource_type,data=None,
+            uploaded_by=current_user().id,target_type=target_type,target_student_id=target_student_id,target_class_id=target_class_id)
         db.session.add(row);db.session.flush();audit(current_user().id,"upload","notice_attachment",row.id,name);db.session.commit()
-        return ok({"id":row.id,"title":row.title,"filename":row.original_filename,"mime_type":row.mime_type,"file_size":row.file_size,"created_at":iso_ist(row.created_at)},"File attached to notice board",201)
-    except Exception:
-        db.session.rollback();return err("Could not upload the file")
+        return ok({"id":row.id,"title":row.title,"filename":row.original_filename,"mime_type":row.mime_type,"file_size":row.file_size,"download_url":f"/api/attachments/{row.id}/download","created_at":iso_ist(row.created_at)},"File attached to notice board",201)
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Cloudinary notice attachment upload failed: %s", exc)
+        return err("Could not upload the file. Check Cloudinary configuration and try again.",500)
 
 @api.delete("/admin/attachments/<int:id>")
 @roles("admin")
@@ -752,6 +790,11 @@ def delete_attachment(id):
     row=NoticeAttachment.query.get(id)
     if not row:return err("Attachment not found",404)
     try:
+        if row.cloudinary_public_id:
+            try:
+                _cloudinary_delete(row.cloudinary_public_id, row.cloudinary_resource_type or ("image" if row.mime_type.startswith("image/") else "raw"))
+            except Exception:
+                current_app.logger.exception("Could not delete notice attachment from Cloudinary")
         db.session.delete(row);audit(current_user().id,"delete","notice_attachment",id,row.original_filename);db.session.commit();return ok(message="Attachment deleted")
     except Exception:
         db.session.rollback();return err("Could not delete attachment")
@@ -763,7 +806,11 @@ def download_attachment(id):
     if not row:return err("Attachment not found",404)
     if not _attachment_visible_to_current_user(row):
         return err("You do not have access to this file",403)
-    return send_file(io.BytesIO(bytes(row.data)),mimetype=row.mime_type,as_attachment=False,download_name=row.original_filename,max_age=300)
+    if row.cloudinary_url:
+        return Response("", status=302, headers={"Location": row.cloudinary_url, "Cache-Control": "private, max-age=300"})
+    if row.data:
+        return send_file(io.BytesIO(bytes(row.data)),mimetype=row.mime_type,as_attachment=False,download_name=row.original_filename,max_age=300)
+    return err("Attachment storage is unavailable",410)
 
 @api.get("/subjects")
 @roles("admin","teacher","student")
@@ -2264,7 +2311,7 @@ def _fee_month_balances_bulk(student_ids):
             )
             if paid_date is None:
                 continue
-            running_total += Decimal(str(pay.amount))
+            running_total += Decimal(str(pay.amount)) + Decimal(str(pay.discount_amount or 0))
             payment_dates.append(paid_date)
             cumulative_paid.append(running_total)
 
@@ -2317,7 +2364,7 @@ def _fee_month_balances_bulk(student_ids):
 
             month_payments = p_by_month.get(m, ())
             incoming = sum(
-                (Decimal(str(p.amount)) for p in month_payments),
+                (Decimal(str(p.amount)) + Decimal(str(p.discount_amount or 0)) for p in month_payments),
                 Decimal("0.00"),
             ) + running_credit
 
@@ -2383,7 +2430,7 @@ def history(sid):
                     "amount":float(x["due"]),"due_amount":float(x["balance"]),"base_fee":float(x["base"]),
                     "fine_amount":float(max(Decimal("0.00"),x["due"]-x["base"])),
                     "fine_cycles":int(max(Decimal("0.00"),x["due"]-x["base"]) / Decimal("50.00")),
-                    "paid_amount":float(x["paid"]),"credit":float(x.get("credit",0)),
+                    "paid_amount":float(x["paid"]),"payment_amount":float(sum((Decimal(str(p.amount)) for p in (payment_map.get(x["month"]) or ())),Decimal("0.00"))),"discount_amount":float(sum((Decimal(str(p.discount_amount or 0)) for p in (payment_map.get(x["month"]) or ())),Decimal("0.00"))),"credit":float(x.get("credit",0)),
                     "status":x["status"],"payment_date":iso_ist(latest.payment_date) if latest else None,
                     "receipt_number":latest.receipt_number if latest else None})
     return out
@@ -2464,6 +2511,7 @@ def pay_fee():
         requested_month=str(b.get("month") or "").strip()
         m=date.fromisoformat(requested_month+"-01")
         amount=money(b.get("amount"))
+        discount=money(b.get("discount_amount") or 0)
         method=str(b.get("payment_method") or "").strip().lower()
         if method not in ("cash","upi","bank_transfer","other"): return err("Please select a valid payment method")
         if not oldest_month:return err("No outstanding fee is due for this student",409)
@@ -2471,18 +2519,21 @@ def pay_fee():
         rows=_fee_rows_for_student(sid)
         actual_fee=_fee_base_for_month(rows,m)
         if actual_fee<=0:return err("No fee structure applies to this month")
-        if amount <= 0:return err("Payment amount must be greater than zero")
-        if amount > oldest_balance:return err(f"Payment cannot exceed the remaining balance for {oldest_month.strftime('%B %Y')}: ₹{oldest_balance:.2f}",409)
+        if amount < 0 or discount < 0:return err("Payment and discount cannot be negative")
+        if amount <= 0 and discount <= 0:return err("Enter a payment amount or a discount")
+        if amount + discount > oldest_balance:
+            return err(f"Payment + discount cannot exceed the remaining balance for {oldest_month.strftime('%B %Y')}: ₹{oldest_balance:.2f}",409)
         rno=f"RCPT-{now_ist():%Y%m%d%H%M%S}-{__import__('secrets').token_hex(2).upper()}"
-        p=FeePayment(student_id=sid,fee_month=m,amount=amount,payment_method=method,collected_by=current_user().id,receipt_number=rno,notes=str(b.get("notes") or "").strip() or None)
+        p=FeePayment(student_id=sid,fee_month=m,amount=amount,discount_amount=discount,payment_method=method,collected_by=current_user().id,receipt_number=rno,notes=str(b.get("notes") or "").strip() or None)
         db.session.add(p); db.session.flush()
         r=Receipt(fee_payment_id=p.id,receipt_number=rno); db.session.add(r)
-        audit(current_user().id,"collect_fee","fee_payment",p.id,rno); db.session.commit()
+        audit(current_user().id,"collect_fee","fee_payment",p.id,f"{rno}; payment=₹{amount:.2f}; discount=₹{discount:.2f}"); db.session.commit()
         a=Admin.query.filter_by(user_id=current_user().id).first()
         sobj=student_obj(s); first=sobj["classes"][0] if sobj["classes"] else {}
         receipt_data={"receipt_number":rno,"student":s.name,"student_id":s.student_id,"class":first.get("class_name",""),
                       "teacher":first.get("teacher_name",""),"fee_month":m.strftime("%B %Y"),"amount":float(p.amount),
-                      "payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),oldest_balance-amount))}
+                      "discount":float(p.discount_amount or 0),"total_adjustment":float(p.amount+(p.discount_amount or 0)),
+                      "payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),oldest_balance-amount-discount))}
         return ok({"id":p.id,"receipt_id":r.id,"receipt_number":rno,"receipt":receipt_data},"Fee payment recorded",201)
     except IntegrityError:
         db.session.rollback();return err("Payment could not be recorded because of a database constraint. Run the fee-payment migration included with this update.",409)
@@ -2504,7 +2555,7 @@ def receipts():
         p=payments.get(r.fee_payment_id);st=students.get(p.student_id) if p else None
         if not p or not st:continue
         if q and q not in f"{r.receipt_number} {st.student_id} {st.name}".lower():continue
-        out.append({"id":r.id,"receipt_number":r.receipt_number,"student_name":st.name,"student_id":st.student_id,"month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"method":p.payment_method,"generated_at":iso_ist(r.generated_at)})
+        out.append({"id":r.id,"receipt_number":r.receipt_number,"student_name":st.name,"student_id":st.student_id, "month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"discount":float(p.discount_amount or 0),"total_adjustment":float(p.amount+(p.discount_amount or 0)),"method":p.payment_method,"generated_at":iso_ist(r.generated_at)})
     return ok(out)
 @api.get("/receipts/<int:id>")
 @roles("admin")
@@ -2518,7 +2569,7 @@ def receipt(id):
     balances=_fee_month_balances(p.student_id)
     month_balance=next((x for x in balances if x["month"]==p.fee_month.replace(day=1)), None)
     remaining=month_balance["balance"] if month_balance else Decimal("0.00")
-    return ok({"receipt_number":r.receipt_number,"student":s.name if s else "","student_id":s.student_id if s else "","class":first.get("class_name", ""),"teacher":first.get("teacher_name", ""),"fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),remaining))})
+    return ok({"receipt_number":r.receipt_number,"student":s.name if s else "","student_id":s.student_id if s else "","class":first.get("class_name", ""),"teacher":first.get("teacher_name", ""),"fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"discount":float(p.discount_amount or 0),"total_adjustment":float(p.amount+(p.discount_amount or 0)),"payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),remaining))})
 
 def teacher_for_user():
     return Teacher.query.filter_by(user_id=current_user().id).first()
@@ -2893,8 +2944,10 @@ def add_classwork():
         for f in files:
             name=secure_filename(f.filename) or f"classwork-{uuid.uuid4().hex}"
             mime=(f.mimetype or "application/octet-stream").lower()[:255]
+            cloud_url, public_id, resource_type = _cloudinary_upload(f._rmcti_data, name, folder=os.getenv("CLOUDINARY_FILE_FOLDER", "rmcti/classwork"))
             a=ClassworkAttachment(classwork_id=w.id,original_filename=name,
-                                  mime_type=mime,file_size=len(f._rmcti_data),data=f._rmcti_data)
+                                  mime_type=mime,file_size=len(f._rmcti_data),
+                                  cloudinary_url=cloud_url,cloudinary_public_id=public_id,cloudinary_resource_type=resource_type,data=None)
             db.session.add(a)
             created.append(a)
 
@@ -2943,12 +2996,16 @@ def add_classwork_attachment(id):
 
             name=secure_filename(f.filename) or f"classwork-{uuid.uuid4().hex}"
             mime=(f.mimetype or "application/octet-stream").lower()[:255]
+            cloud_url, public_id, resource_type = _cloudinary_upload(data, name, folder=os.getenv("CLOUDINARY_FILE_FOLDER", "rmcti/classwork"))
             a=ClassworkAttachment(
                 classwork_id=w.id,
                 original_filename=name,
                 mime_type=mime,
                 file_size=len(data),
-                data=data,
+                cloudinary_url=cloud_url,
+                cloudinary_public_id=public_id,
+                cloudinary_resource_type=resource_type,
+                data=None,
             )
             db.session.add(a)
             created.append(a)
@@ -2975,7 +3032,12 @@ def delete_classwork_attachment(id):
     a=ClassworkAttachment.query.get(id);t=teacher_for_user()
     w=Classwork.query.get(a.classwork_id) if a else None
     if not a or not w or w.teacher_id!=t.id:return err("Not found",404)
-    db.session.delete(a);db.session.commit();return ok(message="Attachment deleted")
+    try:
+        if a.cloudinary_public_id:
+            _cloudinary_delete(a.cloudinary_public_id, a.cloudinary_resource_type or ("image" if a.mime_type.startswith("image/") else "raw"))
+        db.session.delete(a);db.session.commit();return ok(message="Attachment deleted")
+    except Exception:
+        db.session.rollback();return err("Could not delete attachment")
 
 @api.get("/classwork/attachments/<int:id>/download")
 @roles("admin","teacher","student")
@@ -2991,7 +3053,11 @@ def download_classwork_attachment(id):
     else:
         s=student_for_user();allowed=bool(StudentClass.query.filter_by(student_id=s.id,class_id=w.class_id,status="active").first())
     if not allowed:return err("You do not have access to this file",403)
-    return send_file(io.BytesIO(bytes(a.data)),mimetype=a.mime_type,as_attachment=True,download_name=a.original_filename,max_age=300)
+    if a.cloudinary_url:
+        return Response("", status=302, headers={"Location": a.cloudinary_url, "Cache-Control": "private, max-age=300"})
+    if a.data:
+        return send_file(io.BytesIO(bytes(a.data)),mimetype=a.mime_type,as_attachment=True,download_name=a.original_filename,max_age=300)
+    return err("Attachment storage is unavailable",410)
 
 @api.delete("/classwork/<int:id>")
 @roles("teacher")

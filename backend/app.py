@@ -57,12 +57,16 @@ def create_app():
             from .models import PhotoAsset
             asset = PhotoAsset.query.filter_by(id=filename).first()
             if asset:
-                from flask import Response
-                return Response(
-                    asset.data,
-                    mimetype=asset.mime_type,
-                    headers={"Cache-Control": "public, max-age=31536000, immutable"},
-                )
+                if asset.cloudinary_url:
+                    from flask import Response
+                    return Response("", status=302, headers={"Location": asset.cloudinary_url, "Cache-Control": "public, max-age=31536000, immutable"})
+                if asset.data:
+                    from flask import Response
+                    return Response(
+                        asset.data,
+                        mimetype=asset.mime_type,
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+                    )
         except Exception:
             db.session.rollback()
         return send_from_directory(
