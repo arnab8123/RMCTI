@@ -52,6 +52,10 @@ class Config:
     PHOTO_STORAGE = os.getenv("PHOTO_STORAGE", "cloudinary").strip().lower()
     CLOUDINARY_FOLDER = os.getenv("CLOUDINARY_FOLDER", "rmcti/photos")
 
+    # Admin AI assistant (server-side only; never expose the key to the browser).
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-6-luna")
+
     CORS_ORIGINS = [
         x.strip()
         for x in os.getenv(

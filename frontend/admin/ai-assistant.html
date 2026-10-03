@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RMCTI · AI Assistance</title>
+<link rel="stylesheet" href="../css/variables.css?v=20260926">
+<link rel="stylesheet" href="../css/global.css?v=20260926">
+<link rel="stylesheet" href="../css/ai-assistant.css?v=20261003">
+</head>
+<body data-role="admin" data-page="ai-assistant">
+<div class="app">
+  <aside class="side"><div class="brand"><img class="brandlogo" src="../asset/image.jpeg" alt="RMCTI logo" loading="lazy" decoding="async"><span>RMCTI</span></div>
+    <nav class="nav">
+      <a href="dashboard.html">⌂ Dashboard</a><a href="teachers.html">♙ Teachers</a><a href="register-teacher.html">＋ Register Teacher</a>
+      <a href="teacher-classes.html">▦ Allot Classes</a><a href="all-classes.html">▣ All Classes</a><a href="students.html">♧ Students</a>
+      <a href="register-student.html">＋ Register Student</a><a href="fee-structure.html">₹ Fee Structure</a><a href="fee-payment.html">₹ Collect Fee</a>
+      <a href="receipts.html">▤ Receipts</a><a href="attachments.html">📎 Attach File</a><a href="audit-logs.html">◷ Audit History</a>
+      <a href="reports.html">▤ Reports</a><a href="analytics.html">◈ Analytics</a><a href="complaints.html">⚠ Complaints</a><a href="enquiries.html">✉ Enquire</a>
+      <button type="button" data-theme>◐ Theme</button><button type="button" data-logout>↪ Logout</button>
+    </nav>
+  </aside>
+  <main class="main">
+    <header class="top"><div><button type="button" class="btn secondary menu" data-menu>☰</button> <b>AI Assistance</b></div><span class="muted" data-user></span></header>
+    <section class="content ai-page">
+      <div class="ai-hero">
+        <div>
+          <span class="eyebrow">RMCTI ADMIN AI</span>
+          <h1>How can I help you? <span aria-hidden="true">✦</span></h1>
+          <p class="muted">Ask normally, use shorthand, or give a direct command. I can read RMCTI data and perform supported admin actions.</p>
+        </div>
+        <div class="ai-status"><span class="ai-status-dot"></span><span>Admin tools enabled</span></div>
+      </div>
+
+      <div class="ai-layout">
+        <section class="card ai-chat-card">
+          <div class="ai-chat-head">
+            <div><strong>RMCTI Assistant</strong><small>Understands keywords like “due”, “classes today”, “attendance”, “reschedule”</small></div>
+            <button class="btn secondary small" type="button" data-ai-clear>Clear chat</button>
+          </div>
+          <div class="ai-messages" data-ai-messages>
+            <div class="ai-message assistant">
+              <div class="ai-avatar">✦</div><div class="ai-bubble"><b>Hello Admin 👋</b><p>I can help with students, teachers, fees, attendance and schedules. Try:</p>
+              <ul><li>“due”</li><li>“classes today”</li><li>“attendance of Rahul”</li><li>“reschedule Physics batch A tomorrow to 5 pm”</li><li>“create a student named Arjun, password 12345”</li></ul></div>
+            </div>
+          </div>
+          <div class="ai-typing" data-ai-typing hidden><span></span><span></span><span></span> Working with RMCTI…</div>
+          <div class="ai-composer">
+            <textarea data-ai-input rows="2" maxlength="4000" placeholder="Ask RMCTI anything… e.g. “show fee due students”"></textarea>
+            <button class="btn primary ai-send" type="button" data-ai-send><span>Send</span> ➤</button>
+          </div>
+          <div class="ai-hints">
+            <button type="button" data-ai-prompt="due">Fee due</button>
+            <button type="button" data-ai-prompt="classes today">Classes today</button>
+            <button type="button" data-ai-prompt="attendance analytics">Attendance analytics</button>
+            <button type="button" data-ai-prompt="show active teachers">Teachers</button>
+            <button type="button" data-ai-prompt="show active students">Students</button>
+          </div>
+        </section>
+
+        <aside class="ai-side">
+          <section class="card ai-capabilities">
+            <div class="ai-section-title"><span>✦</span><div><h2>What I can do</h2><small>Live RMCTI operations</small></div></div>
+            <div class="ai-capability"><b>🔎 Find</b><span>Students, teachers, courses, IDs and schedules</span></div>
+            <div class="ai-capability"><b>₹ Fees</b><span>Due students, balances and fee status</span></div>
+            <div class="ai-capability"><b>◉ Attendance</b><span>Student attendance and monthly analytics</span></div>
+            <div class="ai-capability"><b>📅 Schedule</b><span>Move a class occurrence or change recurring time</span></div>
+            <div class="ai-capability"><b>＋ Create</b><span>Register students and teachers</span></div>
+          </section>
+          <section class="card ai-command-help">
+            <h2>Natural language</h2>
+            <p class="muted">You don't need to write a perfect question.</p>
+            <div class="keyword-grid">
+              <span>due</span><span>today classes</span><span>attendance</span><span>reschedule</span><span>student</span><span>teacher</span><span>fee</span><span>schedule</span>
+            </div>
+          </section>
+          <section class="card ai-safety">
+            <b>🔐 Admin-only actions</b>
+            <p class="muted">Changes are executed by the RMCTI backend and recorded in audit history. The AI never receives your database credentials.</p>
+          </section>
+        </aside>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="../js/theme.js?v=20260926"></script>
+<script src="../js/api.js?v=20260926"></script>
+<script src="../js/utils.js?v=20260926"></script>
+<script src="../js/auth.js?v=20260926"></script>
+<script src="../js/pages.js?v=20260926"></script>
+<script src="../js/app.js?v=20261003"></script>
+<script src="../js/ai-assistant.js?v=20261003"></script>
+</body></html>
