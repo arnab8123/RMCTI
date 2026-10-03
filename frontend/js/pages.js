@@ -1905,56 +1905,61 @@ const Page = (() => {
     const form = q('form[data-work-form]');
     form?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const button=form.querySelector('button[type="submit"]');
+      // The HTML button may rely on the browser's default submit type, so
+      // support both an explicit type="submit" and a plain <button>.
+      const button=form.querySelector('button[type="submit"], button:not([type])');
       const status=q('[data-attachment-status]');
-      try {
-        const id=form.dataset.editId;
-        const payload=formObj(form);
-        const files=kind==='classwork' ? [...(form.querySelector('[name="attachments"]')?.files||[])] : [];
-        delete payload.attachments;
-        button && (button.disabled=true);
-        if(status) status.textContent=files.length ? `Uploading ${files.length} attachment${files.length===1?'':'s'}…` : '';
+      const id=form.dataset.editId;
+      const payload=formObj(form);
+      const files=kind==='classwork' ? [...(form.querySelector('[name="attachments"]')?.files||[])] : [];
+      delete payload.attachments;
 
+      if (button) button.disabled=true;
+      if (status) status.textContent=files.length ? `Uploading ${files.length} attachment${files.length===1?'':'s'}…` : '';
+
+      // API phase: only actual save/upload failures are handled here.
+      // Successful uploads must never be turned into an error because of a
+      // later DOM refresh problem.
+      try {
         if(id){
           await Api.put(`/${kind}/${id}`, payload);
           if(kind==='classwork' && files.length){
-            // Keep edit support compatible with the dedicated attachment endpoint.
             await Api.uploadFields(`/classwork/${id}/attachments`,{file:files});
           }
         } else if(kind==='classwork' && files.length){
-          // Create classwork + attachments atomically. This avoids the old
-          // two-step failure where the row was created but the attachment
-          // request failed and the page appeared to have saved nothing.
           await Api.uploadFields('/classwork',{...payload,attachments:files});
         } else {
           await Api.post(`/${kind}`, payload);
         }
-
-        delete form.dataset.editId;
-        button && (button.textContent=kind==='homework' ? 'Add homework' : 'Add classwork');
-        U.toast(files.length ? `Saved with ${files.length} attachment${files.length===1?'':'s'}` : 'Saved successfully');
-        form.reset();
-        if(kind==='classwork'){
-          const dateInput=form.querySelector('[name="work_date"]');
-          if(dateInput) dateInput.value=U.today();
-          if(status) status.textContent='';
-        }
-        // The save/upload has already succeeded. Keep a refresh failure from
-        // falsely reporting the upload as failed.
-        try {
-          await load();
-        } catch (refreshError) {
-          console.error('Classwork saved, but list refresh failed:', refreshError);
-          U.toast('Saved successfully, but the classwork list could not refresh. Please reload the page.', 'warning');
-        }
       } catch (x) {
-        U.toast(x.message || 'Could not save classwork', 'error');
         if(status) status.textContent='';
-      } finally {
-        button && (button.disabled=false);
+        if(button) button.disabled=false;
+        U.toast(x.message || (kind==='classwork' ? 'Could not save classwork' : 'Could not save homework'),'error');
+        return;
+      }
+
+      // The server has confirmed success. From this point onward, UI work is
+      // deliberately isolated from the save error handler.
+      delete form.dataset.editId;
+      if (button) button.textContent=kind==='homework' ? 'Add homework' : 'Add classwork';
+      form.reset();
+      if(kind==='classwork'){
+        const dateInput=form.querySelector('[name="work_date"]');
+        if(dateInput) dateInput.value=U.today();
+        if(status) status.textContent='';
+      }
+      if(button) button.disabled=false;
+      U.toast(files.length ? `Saved with ${files.length} attachment${files.length===1?'':'s'}` : 'Saved successfully');
+
+      // Best-effort refresh. If this fails, the upload is still successful.
+      try {
+        await load();
+      } catch (refreshError) {
+        console.error('Classwork saved, but list refresh failed:', refreshError);
+        U.toast('Saved successfully, but the classwork list could not refresh. Please reload the page.', 'warning');
       }
     });
-    body?.addEventListener('click', async (e) => { const attachment=e.target.closest('[data-download-classwork]')?.dataset.downloadClasswork; if(attachment){ await openClassworkAttachment(attachment); return; } const id = e.target.dataset.del || e.target.dataset.edit; if (!id) return; if (e.target.dataset.del) { await Api.del(`/${kind}/${id}`); U.toast('Deleted'); load(); return; } const row = records.find((x) => String(x.id) === String(id)); if (!row) return; Object.entries(row).forEach(([k, v]) => { const input = form.querySelector(`[name="${k}"]`); if (input && v != null) input.value = v; }); form.dataset.editId = id; form.querySelector('button[type="submit"]').textContent = kind === 'homework' ? 'Update homework' : 'Update classwork'; window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    body?.addEventListener('click', async (e) => { const attachment=e.target.closest('[data-download-classwork]')?.dataset.downloadClasswork; if(attachment){ await openClassworkAttachment(attachment); return; } const id = e.target.dataset.del || e.target.dataset.edit; if (!id) return; if (e.target.dataset.del) { await Api.del(`/${kind}/${id}`); U.toast('Deleted'); load(); return; } const row = records.find((x) => String(x.id) === String(id)); if (!row) return; Object.entries(row).forEach(([k, v]) => { const input = form.querySelector(`[name="${k}"]`); if (input && v != null) input.value = v; }); form.dataset.editId = id; const submitButton=form.querySelector('button[type="submit"], button:not([type])'); if(submitButton) submitButton.textContent = kind === 'homework' ? 'Update homework' : 'Update classwork'; window.scrollTo({ top: 0, behavior: 'smooth' }); });
     await load();
   }
 
@@ -2041,7 +2046,7 @@ const Page = (() => {
     const loadRecipients=async()=>{
       if(!isAdmin)return;
       try{
-        const [students,classes]=await Promise.all([Api.get('/students',{status:'active',select:1}),Api.get('/classes',{status:'active'})]);
+        const [students,classes]=await Promise.all([Api.get('/students',{status:'active'}),Api.get('/classes',{status:'active'})]);
         fill(studentSelect,'<option value="">Select student</option>'+students.map(s=>`<option value="${s.id}">${U.esc(s.name)} · ${U.esc(s.student_id)}</option>`).join(''));
         fill(classSelect,'<option value="">Select class</option>'+classes.map(c=>`<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}${c.course_type==='free'?' · FREE':' · PAID'}</option>`).join(''));
       }catch(e){U.toast(e.message||'Could not load recipients','error');}
