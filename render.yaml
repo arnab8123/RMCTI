@@ -5,6 +5,6 @@ services:
     region: singapore
     plan: free
     buildCommand: pip install -r requirements.txt && python scripts/migrate.py
-    startCommand: gunicorn --workers 2 --threads 4 --timeout 60 --keep-alive 5 backend.app:app
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 60 --keep-alive 5 backend.app:app
     healthCheckPath: /health
     autoDeployTrigger: commit

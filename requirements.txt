@@ -11,4 +11,3 @@ cryptography
 Pillow>=10.4,<12
 
 cloudinary>=1.44,<2
-

@@ -9,5 +9,5 @@ ALTER TABLE student_classes ADD INDEX idx_student_classes_student_status (studen
 ALTER TABLE fee_payments ADD INDEX idx_fee_payments_student_month_date (student_id, fee_month, payment_date);
 ALTER TABLE fee_payments ADD INDEX idx_fee_payments_month (fee_month);
 ALTER TABLE attendance ADD INDEX idx_attendance_class_date_session (class_id, attendance_date, session_start_time, session_end_time);
-ALTER TABLE schedule_exceptions ADD INDEX idx_schedule_exceptions_week_kind_date_teacher (week_start, kind, schedule_date, teacher_id);
+\nALTER TABLE schedule_exceptions ADD INDEX idx_schedule_exceptions_week_kind_date_teacher (week_start, kind, schedule_date, teacher_id);
 ALTER TABLE schedule_exceptions ADD INDEX idx_schedule_exceptions_date_kind (schedule_date, kind);

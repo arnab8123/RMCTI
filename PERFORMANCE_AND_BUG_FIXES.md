@@ -24,11 +24,3 @@
 ## Verification
 - Python syntax compilation passed for backend and migration scripts.
 - JavaScript syntax checks passed for all frontend JS files.
-## Latest speed/routing fixes
-- Fixed the admin `/api/students` hot path so the complete fee-balance engine is calculated once for the requested student set instead of once per student.
-- Student dashboard/teacher student lookups can skip fee-status serialization when they already calculate fee information separately, avoiding duplicate fee-history work.
-- Added canonical extensionless frontend URLs such as `/admin/dashboard`, `/admin/students`, and `/admin/receipts`.
-- Existing `/admin/*.html`, `/teacher/*.html`, and `/student/*.html` links remain compatible through permanent redirects.
-- Updated internal portal navigation to use extensionless page URLs.
-- Render deployment now uses 2 Gunicorn workers with 4 threads for better concurrent request handling.
-

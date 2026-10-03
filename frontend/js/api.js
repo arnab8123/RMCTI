@@ -2,37 +2,21 @@ const API = ((window.location.hostname === 'localhost' || window.location.hostna
   ? 'http://127.0.0.1:5000/api'
   : '/api';
 
-const _rmctiInflightGets = new Map();
-
 const Api = {
   async req(path, opt = {}) {
-    const method = String(opt.method || "GET").toUpperCase();
-    const isGet = method === "GET";
-    const key = isGet ? path : null;
-    if (key && _rmctiInflightGets.has(key)) return _rmctiInflightGets.get(key);
-
-    const run = async () => {
-      const h = {"Content-Type":"application/json", ...(opt.headers || {})};
-      const t = sessionStorage.getItem("token");
-      if (t) h.Authorization = "Bearer " + t;
-      const r = await fetch(API + path, {...opt, headers:h});
-      let d = {};
-      try { d = await r.json(); } catch {}
-      if (r.status === 401) {
-        sessionStorage.clear();
-        location.href = "../login.html";
-        throw Error("Session expired");
-      }
-      if (!r.ok || d.success === false) throw Error(d.message || "Request failed");
-      return d.data;
-    };
-
-    const promise = run();
-    if (key) {
-      _rmctiInflightGets.set(key, promise);
-      try { return await promise; } finally { _rmctiInflightGets.delete(key); }
+    const h = {"Content-Type":"application/json", ...(opt.headers || {})};
+    const t = sessionStorage.getItem("token");
+    if (t) h.Authorization = "Bearer " + t;
+    const r = await fetch(API + path, {...opt, headers:h});
+    let d = {};
+    try { d = await r.json(); } catch {}
+    if (r.status === 401) {
+      sessionStorage.clear();
+      location.href = "../login.html";
+      throw Error("Session expired");
     }
-    return promise;
+    if (!r.ok || d.success === false) throw Error(d.message || "Request failed");
+    return d.data;
   },
   get(p, q = {}) {
     const s = new URLSearchParams(Object.entries(q).filter(([,v]) => v !== "" && v != null));

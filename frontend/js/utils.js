@@ -2,12 +2,12 @@ const U={photoUrl:x=>{
   const isStaticFrontend=(window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1')&&window.location.port==='5500';
   const frontendOrigin=location.origin;
   const apiOrigin=isStaticFrontend?'http://127.0.0.1:5000':location.origin;
-  const fallback=`${frontendOrigin}/asset/image.webp`;
+  const fallback=`${frontendOrigin}/asset/image.jpeg`;
   if(!x)return fallback;
   const raw=String(x).trim().replace(/\\/g,'/').replace(/^\/+/, '');
   if(!raw)return fallback;
   if(/^https?:\/\//i.test(raw)||/^data:image\//i.test(raw)||/^blob:/i.test(raw))return raw;
-  if(raw==='asset/image.webp'||raw.startsWith('asset/'))return frontendOrigin+'/'+raw;
+  if(raw==='asset/image.jpeg'||raw.startsWith('asset/'))return frontendOrigin+'/'+raw;
   if(raw.startsWith('backend/uploads/photos/'))return apiOrigin+'/'+raw.replace(/^backend\//,'');
   if(raw.startsWith('uploads/photos/'))return apiOrigin+'/'+raw;
   if(raw.startsWith('uploads/'))return apiOrigin+'/'+raw;
