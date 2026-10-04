@@ -2564,8 +2564,19 @@ def pay_fee():
         oldest_month,oldest_balance=oldest_due_month(sid)
         requested_month=str(b.get("month") or "").strip()
         m=date.fromisoformat(requested_month+"-01")
-        amount=money(b.get("amount"))
-        discount=money(b.get("discount_amount") or 0)
+        # Payment amount may be zero when the admin is applying a discount/waiver.
+        # The shared money() helper intentionally rejects zero, so fee collection
+        # must parse these two fields separately and only reject zero after both
+        # values have been validated.
+        def nonnegative_money(value):
+            raw = 0 if value is None or str(value).strip() == "" else value
+            n = Decimal(str(raw))
+            if not n.is_finite() or n < 0:
+                raise ValueError("Payment and discount cannot be negative")
+            return n.quantize(Decimal("0.01"))
+
+        amount=nonnegative_money(b.get("amount"))
+        discount=nonnegative_money(b.get("discount_amount"))
         method=str(b.get("payment_method") or "").strip().lower()
         if method not in ("cash","upi","bank_transfer","other"): return err("Please select a valid payment method")
         if not oldest_month:return err("No outstanding fee is due for this student",409)

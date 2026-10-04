@@ -1,5 +1,23 @@
 document.addEventListener('DOMContentLoaded', () => {
   const form = document.querySelector('#login');
+  const error = document.querySelector('#err');
+  const toggle = document.querySelector('[data-toggle-password]');
+  const password = document.querySelector('#login-password');
+
+  // Password visibility toggle: keep this inside DOMContentLoaded so it works
+  // consistently even when the login script is cached or loaded asynchronously.
+  toggle?.addEventListener('click', () => {
+    if (!password) return;
+    const showing = password.type === 'text';
+    password.type = showing ? 'password' : 'text';
+    toggle.textContent = showing ? '◉' : '◌';
+    toggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+    toggle.title = showing ? 'Show password' : 'Hide password';
+  });
+
+  // A remembered token is stored only in localStorage; the password itself is
+  // never stored. The backend keeps remembered tokens valid for 365 days by
+  // default so the same device stays signed in across browser restarts.
   const savedToken = localStorage.getItem('rmcti_token');
   if (savedToken) {
     Api.get('/auth/me').then((user) => {
@@ -8,10 +26,11 @@ document.addEventListener('DOMContentLoaded', () => {
         : user.role === 'teacher'
           ? 'teacher/dashboard.html'
           : 'student/dashboard.html';
-    }).catch(() => {});
+    }).catch(() => {
+      localStorage.removeItem('rmcti_token');
+      localStorage.removeItem('rmcti_user');
+    });
   }
-
-  const error = document.querySelector('#err');
 
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -21,10 +40,15 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const fd = new FormData(form);
       const remember = fd.get('remember') === '1';
-      const payload = { username: String(fd.get('username') || ''), password: String(fd.get('password') || ''), remember };
+      const payload = {
+        username: String(fd.get('username') || ''),
+        password: String(fd.get('password') || ''),
+        remember
+      };
       const data = await Api.post('/auth/login', payload);
-      sessionStorage.token = data.token;
-      sessionStorage.user = JSON.stringify(data.user);
+
+      sessionStorage.setItem('token', data.token);
+      sessionStorage.setItem('user', JSON.stringify(data.user));
       if (remember) {
         localStorage.setItem('rmcti_token', data.token);
         localStorage.setItem('rmcti_user', JSON.stringify(data.user));
@@ -32,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.removeItem('rmcti_token');
         localStorage.removeItem('rmcti_user');
       }
+
       location.href = data.user.role === 'admin'
         ? 'admin/dashboard.html'
         : data.user.role === 'teacher'
@@ -44,14 +69,3 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
-
-
-  const toggle = document.querySelector('[data-toggle-password]');
-  const password = document.querySelector('#login-password');
-  toggle?.addEventListener('click', () => {
-    const showing = password.type === 'text';
-    password.type = showing ? 'password' : 'text';
-    toggle.textContent = showing ? '◉' : '◌';
-    toggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
-    toggle.title = showing ? 'Show password' : 'Hide password';
-  });
