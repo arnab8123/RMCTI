@@ -2136,8 +2136,7 @@ const Page = (() => {
       chat.scrollTop = chat.scrollHeight;
     };
 
-    // One short welcome message only; all old/help text is intentionally gone.
-    add('assistant', 'Hi! How can I help with RMCTI?');
+    // Do not inject a canned chatbot greeting. Gemini handles the conversation itself.
 
     const setBusy = (busy) => {
       input.disabled = busy;
@@ -2156,7 +2155,7 @@ const Page = (() => {
       chat.appendChild(typing);
       chat.scrollTop = chat.scrollHeight;
       try {
-        const history = messages.slice(0, -1).slice(-12).map(m => ({role:m.role, content:m.text}));
+        const history = messages.slice(0, -1).slice(-24).map(m => ({role:m.role, content:m.text}));
         const payload = pendingAction
           ? {message, confirm_action: pendingAction, history}
           : {message, history};

@@ -850,17 +850,12 @@ def admin_assistant():
     message = str(b.get("message", "")).strip()
     confirm_action = b.get("confirm_action")
     history = b.get("history") if isinstance(b.get("history"), list) else []
+    # assistant_handle now runs the full Gemini agent loop when GEMINI_API_KEY is
+    # configured: understand the conversation, call the RMCTI tool when needed,
+    # execute/validate it on the server, and let Gemini formulate the final reply.
+    # There is deliberately no second "rewrite" call here; doing that used to
+    # turn the assistant back into a repetitive canned-answer bot.
     result = assistant_handle(message, confirm_action=confirm_action, user_id=current_user().id, history=history)
-    # The database/tool router remains authoritative. The LLM only improves
-    # understanding and phrasing; it cannot directly write to the database.
-    if not result.get("confirm") and not result.get("needs_input"):
-        try:
-            from .assistant import _gemini_answer
-            natural = _gemini_answer(message, history=history, result=result)
-            if natural:
-                result["reply"] = natural
-        except Exception:
-            pass
     return ok(result)
 
 @api.get("/admin/dashboard")
