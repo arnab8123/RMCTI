@@ -6,6 +6,10 @@ plus the existing database as its tool layer. No external AI API or API key is
 required, and all mutations remain behind the normal admin JWT.
 """
 import re
+import os
+import json
+import urllib.request
+import urllib.error
 from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta, time
 from decimal import Decimal
@@ -98,6 +102,20 @@ def _parse_phone(text):
 def _parse_password(text):
     m = re.search(r"password\s*[:=-]?\s*([A-Za-z0-9@#$%^&*._-]{8,})", text, re.I)
     return m.group(1) if m else None
+
+def _parse_money(text, keywords=()):
+    patterns = []
+    for key in keywords:
+        patterns.append(rf"\b{re.escape(key)}\b\s*(?:of|is|=|:)?\s*₹?\s*([0-9]+(?:\.[0-9]+)?)")
+    patterns += [r"₹\s*([0-9]+(?:\.[0-9]+)?)", r"\b([0-9]+(?:\.[0-9]+)?)\s*(?:rupees|rs|inr)\b"]
+    for pat in patterns:
+        m = re.search(pat, text, re.I)
+        if m:
+            try:
+                return Decimal(m.group(1))
+            except Exception:
+                pass
+    return None
 
 
 def _parse_id(text, prefix):
@@ -349,6 +367,44 @@ def _execute_confirm(action, user_id):
         audit(user_id, "assign", "student_class", None, f"{s.student_id} assigned to {c.class_name} · {c.batch}")
         db.session.commit()
         return {"reply": f"✅ **{s.name}** is now assigned to **{c.class_name} · {c.batch}**."}
+    if kind in ("collect_fee", "discount_fee"):
+        sid = int(action["student_id"])
+        s = Student.query.get(sid)
+        if not s or s.status != "active":
+            return {"reply": "The student is no longer active."}
+        oldest_month, oldest_balance = __import__("backend.routes", fromlist=["oldest_due_month"]).oldest_due_month(sid)
+        if not oldest_month:
+            return {"reply": "That student has no outstanding fee balance."}
+        requested_month = str(action.get("month") or oldest_month.strftime("%Y-%m"))
+        try:
+            m = date.fromisoformat(requested_month + "-01")
+        except ValueError:
+            return {"reply": "I couldn't understand the fee month."}
+        if m != oldest_month:
+            return {"reply": f"RMCTI collects the oldest outstanding month first: {oldest_month.strftime('%B %Y')}."}
+        amount = Decimal(str(action.get("amount") or 0))
+        discount = Decimal(str(action.get("discount") or 0))
+        if amount < 0 or discount < 0 or amount + discount <= 0:
+            return {"reply": "The payment or discount must be greater than zero."}
+        if amount + discount > oldest_balance:
+            return {"reply": f"Payment plus discount cannot exceed the remaining balance of {_money(oldest_balance)}."}
+        from .models import Receipt
+        rno = f"RCPT-{now_ist():%Y%m%d%H%M%S}-{__import__('secrets').token_hex(2).upper()}"
+        p = FeePayment(student_id=sid, fee_month=m, amount=amount, discount_amount=discount,
+                       payment_method=str(action.get("payment_method") or "cash"),
+                       collected_by=user_id, receipt_number=rno,
+                       notes=str(action.get("notes") or "").strip() or None)
+        db.session.add(p); db.session.flush()
+        db.session.add(Receipt(fee_payment_id=p.id, receipt_number=rno))
+        audit(user_id, "collect_fee", "fee_payment", p.id,
+              f"{rno}; payment={_money(amount)}; discount={_money(discount)}")
+        db.session.commit()
+        remaining = max(Decimal("0.00"), oldest_balance - amount - discount)
+        if discount > 0 and amount <= 0:
+            return {"reply": f"✅ Applied {_money(discount)} discount/waiver to **{s.name}** for **{m.strftime('%B %Y')}**. Remaining balance: **{_money(remaining)}**.",
+                    "data": {"receipt_number": rno, "student": s.name, "discount": float(discount), "remaining": float(remaining)}}
+        return {"reply": f"✅ Recorded {_money(amount)} payment for **{s.name}** plus {_money(discount)} discount. Remaining balance: **{_money(remaining)}**. Receipt: **{rno}**.",
+                "data": {"receipt_number": rno, "student": s.name, "amount": float(amount), "discount": float(discount), "remaining": float(remaining)}}
     if kind == "reschedule":
         c = Class.query.get(int(action["class_id"]))
         tc = TeacherClass.query.get(int(action["allocation_id"]))
@@ -380,8 +436,110 @@ def _execute_confirm(action, user_id):
     return {"reply": "I don't have a safe action for that request yet."}
 
 
-def assistant_handle(message, confirm_action=None, user_id=None):
+
+def _gemini_request(contents, system_instruction=None, response_json=False):
+    """Call Gemini server-side. Never expose the API key to the browser."""
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return None
+    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    payload = {"contents": contents}
+    if system_instruction:
+        payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+    generation = {"temperature": 0.25, "maxOutputTokens": 1000}
+    if response_json:
+        generation.update({
+            "responseMimeType": "application/json",
+            "responseSchema": {
+                "type": "OBJECT",
+                "properties": {
+                    "canonical_request": {"type": "STRING"},
+                    "needs_clarification": {"type": "BOOLEAN"},
+                    "clarification": {"type": "STRING"}
+                },
+                "required": ["canonical_request", "needs_clarification", "clarification"]
+            }
+        })
+    payload["generationConfig"] = generation
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        parts = (((data.get("candidates") or [{}])[0]).get("content") or {}).get("parts") or []
+        text = "".join(str(part.get("text") or "") for part in parts).strip()
+        return text or None
+    except Exception:
+        return None
+
+
+def _gemini_canonicalize(message, history=None):
+    """Translate natural admin language into a concise request understood by the
+    existing RMCTI action/tool router. Gemini only interprets; it never writes DB data."""
+    compact = []
+    for item in (history or [])[-12:]:
+        role = str(item.get("role") or "").strip().lower()
+        content = str(item.get("content") or item.get("text") or "").strip()
+        if role in ("user", "assistant") and content:
+            compact.append({"role": "user" if role == "user" else "model", "parts": [{"text": content[:3000]}]})
+    compact.append({"role": "user", "parts": [{"text": str(message or "").strip()}]})
+    system = """You are the natural-language understanding layer for RMCTI's admin assistant.
+Understand the administrator's words, spelling mistakes, shorthand, references to earlier messages,
+and conversational follow-ups. Preserve names, IDs, dates, months, amounts, percentages, times,
+subjects, courses and requested actions exactly. Resolve references such as 'him', 'that student',
+'next month', 'same class', or 'do it' from recent conversation when possible.
+Convert the request into ONE concise canonical admin command that RMCTI's existing safe tool router
+can understand. Do not invent facts. If essential information is missing, set needs_clarification=true
+and ask a short question. Never claim that an action was performed."""
+    raw = _gemini_request(compact, system_instruction=system, response_json=True)
+    if not raw:
+        return None
+    try:
+        obj = json.loads(raw)
+        if obj.get("needs_clarification") and obj.get("clarification"):
+            return {"clarification": str(obj["clarification"]).strip()}
+        command = str(obj.get("canonical_request") or "").strip()
+        return {"canonical_request": command} if command else None
+    except Exception:
+        return None
+
+
+def _gemini_answer(message, history=None, result=None):
+    """Turn the authoritative RMCTI tool result into a natural, non-repetitive reply."""
+    compact = []
+    for item in (history or [])[-10:]:
+        role = str(item.get("role") or "").strip().lower()
+        content = str(item.get("content") or item.get("text") or "").strip()
+        if role in ("user", "assistant") and content:
+            compact.append({"role": "user" if role == "user" else "model", "parts": [{"text": content[:3000]}]})
+    router_text = json.dumps(result or {}, ensure_ascii=False, default=str)
+    compact.append({"role": "user", "parts": [{"text": str(message or "").strip()}]})
+    compact.append({"role": "user", "parts": [{"text": "AUTHORITATIVE RMCTI TOOL RESULT:\n" + router_text}]})
+    system = """You are RMCTI's admin AI assistant. Answer naturally and specifically, without repetitive
+stock phrases. The authoritative tool result is the source of truth: never claim a database change,
+payment, discount, deletion, schedule change, or other action happened unless the result says it did.
+Use the actual names, IDs, dates and amounts returned. If a confirmation is still required, clearly
+ask for confirmation. Keep replies concise but helpful. You are allowed to explain RMCTI features,
+admin workflows, fees, students, teachers, classes, schedules, attendance and reports."""
+    return _gemini_request(compact, system_instruction=system, response_json=False)
+
+def assistant_handle(message, confirm_action=None, user_id=None, history=None):
     raw = str(message or "").strip()
+    # Let the LLM understand natural language and multi-turn references, then
+    # hand the canonical request to the existing safe database router.
+    if not confirm_action:
+        understood = _gemini_canonicalize(raw, history=history)
+        if understood:
+            if understood.get("clarification"):
+                return {"reply": understood["clarification"], "needs_input": "ai_clarification"}
+            canonical = understood.get("canonical_request")
+            if canonical and _norm(canonical) != _norm(raw):
+                raw = canonical
     t = _norm(raw)
     if not t:
         return {"reply": "Hi! I’m the RMCTI admin assistant. Ask me about students, teachers, fees, attendance, classes, schedules, or ask me to make an admin change."}
@@ -435,6 +593,37 @@ def assistant_handle(message, confirm_action=None, user_id=None):
         if _has(t, "analytics", "analysis", "percentage", "report", "performance", "overall", "summary"):
             return {"reply": f"### Attendance analytics\nPresent: **{a['present']}** · Absent: **{a['absent']}** · Total records: **{a['total']}** · Overall attendance: **{a['percent']}%**", "data": a}
         return {"reply": f"Attendance summary: **{a['percent']}%** overall ({a['present']} present, {a['absent']} absent across {a['total']} records). Ask `attendance Rahul` for a student's attendance or `attendance analytics` for the overall report.", "data": a}
+
+    # Fee collection / discount actions. Always confirm before changing money.
+    if _has(t, "discount", "waive", "fee waiver", "reduce fee", "reduce the fee"):
+        student = _find_student(raw)
+        discount = _parse_money(raw, ("discount", "waive", "waiver", "reduce"))
+        if not student:
+            return {"reply": "Which student should receive the discount? Give the student's name or ID."}
+        if discount is None or discount <= 0:
+            return {"reply": f"How much should I discount for **{student.name}**? For example: `discount Rahul by 200`."}
+        month = _parse_date(raw)
+        month_key = month.strftime("%Y-%m") if month and ("month" in t or re.search(r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)", t)) else None
+        oldest, balance = __import__("backend.routes", fromlist=["oldest_due_month"]).oldest_due_month(student.id)
+        if not oldest:
+            return {"reply": f"**{student.name}** has no outstanding fee balance."}
+        month_key = month_key or oldest.strftime("%Y-%m")
+        return {"reply": f"I can apply a **{_money(discount)}** fee discount/waiver to **{student.name}** for **{month_key}**. This changes the fee balance and creates an auditable receipt record. Shall I apply it?",
+                "confirm": True,
+                "action": {"type":"discount_fee","student_id":student.id,"month":month_key,"amount":0,"discount":float(discount),"payment_method":"cash"}}
+    if _has(t, "collect fee", "collect the fee", "take payment", "record payment", "receive fee", "paid"):
+        student = _find_student(raw)
+        amount = _parse_money(raw, ("amount", "payment", "paid", "pay", "collect"))
+        if not student:
+            return {"reply": "Which student is making the payment? Give the student's name or ID."}
+        if amount is None or amount <= 0:
+            return {"reply": f"How much did **{student.name}** pay?"}
+        oldest, balance = __import__("backend.routes", fromlist=["oldest_due_month"]).oldest_due_month(student.id)
+        if not oldest:
+            return {"reply": f"**{student.name}** has no outstanding fee balance."}
+        return {"reply": f"I can record **{_money(amount)}** from **{student.name}** against **{oldest.strftime('%B %Y')}**. Shall I save it?",
+                "confirm": True,
+                "action": {"type":"collect_fee","student_id":student.id,"month":oldest.strftime("%Y-%m"),"amount":float(amount),"discount":0,"payment_method":"cash"}}
 
     # Common admin mutations.
     if _has(t, "delete student", "remove student"):

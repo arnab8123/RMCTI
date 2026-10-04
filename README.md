@@ -285,3 +285,14 @@ This transfers legacy notice/classwork/photo BLOBs to Cloudinary, updates photo 
 
 ### Fee discount
 Admin → Collect Fee now has **Discount / Fee Waiver**. The server records the discount separately from cash/UPI/bank payment. The student's balance is reduced by `payment + discount`, while collection reports continue to count only actual money collected.
+
+
+## RMCTI AI Assistant configuration
+
+The admin AI now uses the server-side Google Gemini API when `GEMINI_API_KEY` is configured. Gemini interprets natural-language requests, conversation context, and follow-ups, while RMCTI's local admin/database tool router remains authoritative for reads and changes. Mutating actions still require the existing confirmation flow.
+
+Set these environment variables in Render (never in frontend code):
+- `GEMINI_API_KEY` — your Google AI Studio Gemini API key
+- `GEMINI_MODEL` — defaults to `gemini-2.5-flash-lite`
+
+Without `GEMINI_API_KEY`, the existing deterministic RMCTI assistant still works for its supported commands.

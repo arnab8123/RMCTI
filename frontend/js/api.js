@@ -5,13 +5,13 @@ const API = ((window.location.hostname === 'localhost' || window.location.hostna
 const Api = {
   async req(path, opt = {}) {
     const h = {"Content-Type":"application/json", ...(opt.headers || {})};
-    const t = sessionStorage.getItem("token");
+    const t = localStorage.getItem("rmcti_token") || sessionStorage.getItem("token");
     if (t) h.Authorization = "Bearer " + t;
     const r = await fetch(API + path, {...opt, headers:h});
     let d = {};
     try { d = await r.json(); } catch {}
     if (r.status === 401) {
-      sessionStorage.clear();
+      sessionStorage.clear(); localStorage.removeItem("rmcti_token"); localStorage.removeItem("rmcti_user");
       location.href = "../login.html";
       throw Error("Session expired");
     }
@@ -24,7 +24,7 @@ const Api = {
   },
   post(p, b) { return this.req(p, {method:"POST", body:JSON.stringify(b)}); },
   upload(p, file, field="photo") {
-    const h = {}, t = sessionStorage.getItem("token");
+    const h = {}, t = localStorage.getItem("rmcti_token") || sessionStorage.getItem("token");
     if (t) h.Authorization = "Bearer " + t;
     const fd = new FormData();
     fd.append(field, file);
@@ -33,6 +33,7 @@ const Api = {
       try { d = await r.json(); } catch {}
       if (r.status === 401) {
         sessionStorage.clear();
+        localStorage.removeItem("rmcti_token"); localStorage.removeItem("rmcti_user");
         location.href = "../login.html";
         throw Error("Session expired");
       }
@@ -41,7 +42,7 @@ const Api = {
     });
   },
   uploadFields(p, fields = {}) {
-    const h = {}, t = sessionStorage.getItem("token");
+    const h = {}, t = localStorage.getItem("rmcti_token") || sessionStorage.getItem("token");
     if (t) h.Authorization = "Bearer " + t;
     const fd = new FormData();
     Object.entries(fields).forEach(([k,v]) => {
@@ -51,7 +52,7 @@ const Api = {
     });
     return fetch(API + p, {method:"POST", headers:h, body:fd}).then(async r => {
       let d = {}; try { d = await r.json(); } catch {}
-      if (r.status === 401) { sessionStorage.clear(); location.href = "../login.html"; throw Error("Session expired"); }
+      if (r.status === 401) { sessionStorage.clear(); localStorage.removeItem("rmcti_token"); localStorage.removeItem("rmcti_user"); location.href = "../login.html"; throw Error("Session expired"); }
       if (!r.ok || d.success === false) throw Error(d.message || "Upload failed");
       return d.data;
     });

@@ -200,8 +200,12 @@ def login():
     if not u or not u.is_active or not cp(password,u.password_hash):
         return err("Invalid username or password",401)
     # Keep authorization state in the database. The JWT contains identity only.
-    token=create_access_token(identity=str(u.id))
-    return ok({"token":token,"user":user_profile(u)},"Login successful")
+    # The web client asks for a persistent login by default; logout still
+    # revokes the token through the normal blocklist.
+    remember = bool(b.get("remember", True))
+    expires = timedelta(days=current_app.config.get("JWT_REMEMBER_ME_DAYS", 30)) if remember else current_app.config["JWT_ACCESS_TOKEN_EXPIRES"]
+    token=create_access_token(identity=str(u.id), expires_delta=expires)
+    return ok({"token":token,"user":user_profile(u),"remember":remember},"Login successful")
 
 @api.post("/auth/logout")
 @jwt_required()
@@ -845,7 +849,18 @@ def admin_assistant():
     b = request.get_json(silent=True) or {}
     message = str(b.get("message", "")).strip()
     confirm_action = b.get("confirm_action")
-    result = assistant_handle(message, confirm_action=confirm_action, user_id=current_user().id)
+    history = b.get("history") if isinstance(b.get("history"), list) else []
+    result = assistant_handle(message, confirm_action=confirm_action, user_id=current_user().id, history=history)
+    # The database/tool router remains authoritative. The LLM only improves
+    # understanding and phrasing; it cannot directly write to the database.
+    if not result.get("confirm") and not result.get("needs_input"):
+        try:
+            from .assistant import _gemini_answer
+            natural = _gemini_answer(message, history=history, result=result)
+            if natural:
+                result["reply"] = natural
+        except Exception:
+            pass
     return ok(result)
 
 @api.get("/admin/dashboard")
@@ -901,6 +916,9 @@ def admin_dashboard():
 
     collection = (db.session.query(func.coalesce(func.sum(FeePayment.amount), 0))
         .filter(FeePayment.fee_month == month).scalar()) or Decimal("0.00")
+    discount_total = (db.session.query(func.coalesce(func.sum(FeePayment.discount_amount), 0))
+        .filter(FeePayment.fee_month == month).scalar()) or Decimal("0.00")
+    credited_total = collection + discount_total
 
     # Build the actual schedule for today from the existing effective-schedule
     # engine, preserving reschedules/extras/weekly-only changes.
@@ -993,6 +1011,8 @@ def admin_dashboard():
         "student_id": recent_students.get(p.student_id).student_id if recent_students.get(p.student_id) else "",
         "month": p.fee_month.strftime("%B %Y"),
         "amount": float(p.amount),
+        "discount": float(p.discount_amount or 0),
+        "credited": float(p.amount + (p.discount_amount or 0)),
         "method": p.payment_method,
         "payment_date": iso_ist(p.payment_date),
     } for p in recent_payment_rows]
@@ -1011,6 +1031,8 @@ def admin_dashboard():
         "active_teachers": total_teachers,
         "active_classes": total_classes,
         "this_month_collection": float(collection),
+        "this_month_discount": float(discount_total),
+        "this_month_credited": float(credited_total),
         "pending_fees": float(pending_amount),
         "partial_fees": float(partial_amount),
         "fine": float(fine_amount),
@@ -1097,6 +1119,9 @@ def admin_report_summary():
 
     collection = (db.session.query(func.coalesce(func.sum(FeePayment.amount), 0))
         .filter(FeePayment.fee_month == month).scalar()) or Decimal("0.00")
+    discount_total = (db.session.query(func.coalesce(func.sum(FeePayment.discount_amount), 0))
+        .filter(FeePayment.fee_month == month).scalar()) or Decimal("0.00")
+    credited_total = collection + discount_total
 
     active_students = Student.query.filter_by(status="active").all()
     balances_by_student = _fee_month_balances_bulk([x.id for x in active_students])
@@ -1161,6 +1186,8 @@ def admin_report_summary():
         "month": month.strftime("%Y-%m"),
         "fees": {
             "collected": float(collection),
+            "discount": float(discount_total),
+            "credited": float(credited_total),
             "pending": float(pending_amount),
             "partial_balance": float(sum(
                 (x["balance"] for rows in balances_by_student.values() for x in rows
@@ -1192,10 +1219,14 @@ def admin_analytics():
     months = sorted(months)
 
     month_labels = [m.strftime("%b") for m in months]
-    collection_rows = (db.session.query(FeePayment.fee_month, func.coalesce(func.sum(FeePayment.amount), 0))
+    collection_rows = (db.session.query(FeePayment.fee_month,
+            func.coalesce(func.sum(FeePayment.amount), 0),
+            func.coalesce(func.sum(FeePayment.discount_amount), 0))
         .filter(FeePayment.fee_month.in_(months)).group_by(FeePayment.fee_month).all())
-    collection_map = {m: Decimal(str(v or 0)) for m, v in collection_rows}
-    collections = [float(collection_map.get(m, Decimal("0.00"))) for m in months]
+    collection_map = {m: (Decimal(str(v or 0)), Decimal(str(d or 0))) for m, v, d in collection_rows}
+    collections = [float(collection_map.get(m, (Decimal("0.00"), Decimal("0.00")))[0]) for m in months]
+    discounts = [float(collection_map.get(m, (Decimal("0.00"), Decimal("0.00")))[1]) for m in months]
+    credited = [collections[i] + discounts[i] for i in range(len(months))]
 
     growth_rows=(db.session.query(Student.admission_date,func.count(Student.id))
         .filter(Student.status=="active",Student.admission_date.isnot(None))
@@ -1228,6 +1259,8 @@ def admin_analytics():
     return ok({
         "months": month_labels,
         "collection": collections,
+        "discount": discounts,
+        "credited": credited,
         "student_growth": student_growth,
         "attendance": attendance,
     })
@@ -2371,11 +2404,21 @@ def _fee_month_balances_bulk(student_ids):
             paid = min(incoming, due)
             running_credit = max(Decimal("0.00"), incoming - due)
 
+            month_payments = p_by_month.get(m, ())
+            cash_paid = sum((Decimal(str(p.amount)) for p in month_payments), Decimal("0.00"))
+            discount_total = sum((Decimal(str(p.discount_amount or 0)) for p in month_payments), Decimal("0.00"))
+            credited = min(due, cash_paid + discount_total)
             months.append({
                 "month": m,
                 "base": base,
                 "due": due,
-                "paid": paid,
+                # Keep "paid" backward-compatible as total credited toward the
+                # month's balance, while exposing cash and discount separately.
+                "paid": credited,
+                "cash_paid": min(cash_paid, due),
+                "discount": min(discount_total, due),
+                "credited": credited,
+                "net_due": max(Decimal("0.00"), due - min(discount_total, due)),
                 "credit": Decimal("0.00"),
             })
 
@@ -2426,11 +2469,16 @@ def history(sid):
     out=[]
     for x in selected:
         latest=(payment_map.get(x["month"]) or [None])[0]
+        cash_paid = sum((Decimal(str(p.amount)) for p in (payment_map.get(x["month"]) or ())), Decimal("0.00"))
+        discount_total = sum((Decimal(str(p.discount_amount or 0)) for p in (payment_map.get(x["month"]) or ())), Decimal("0.00"))
         out.append({"month":x["month"].strftime("%Y-%m"),"month_label":x["month"].strftime("%B %Y"),
-                    "amount":float(x["due"]),"due_amount":float(x["balance"]),"base_fee":float(x["base"]),
+                    "amount":float(x["due"]),"original_due":float(x["due"]),"net_due":float(max(Decimal("0.00"),x["due"]-discount_total)),
+                    "due_amount":float(x["balance"]),"base_fee":float(x["base"]),
                     "fine_amount":float(max(Decimal("0.00"),x["due"]-x["base"])),
                     "fine_cycles":int(max(Decimal("0.00"),x["due"]-x["base"]) / Decimal("50.00")),
-                    "paid_amount":float(x["paid"]),"payment_amount":float(sum((Decimal(str(p.amount)) for p in (payment_map.get(x["month"]) or ())),Decimal("0.00"))),"discount_amount":float(sum((Decimal(str(p.discount_amount or 0)) for p in (payment_map.get(x["month"]) or ())),Decimal("0.00"))),"credit":float(x.get("credit",0)),
+                    "paid_amount":float(cash_paid),"payment_amount":float(cash_paid),
+                    "discount_amount":float(discount_total),"credited_amount":float(min(x["due"],cash_paid+discount_total)),
+                    "credit":float(x.get("credit",0)),
                     "status":x["status"],"payment_date":iso_ist(latest.payment_date) if latest else None,
                     "receipt_number":latest.receipt_number if latest else None})
     return out
@@ -2487,6 +2535,12 @@ def student_fees(id):
     oldest_month,oldest_amount=oldest_due_month(s.id)
     rows=_fee_rows_for_student(s.id)
     actual_fee=_fee_base_for_month(rows,today_ist().replace(day=1))
+    fee_history = history(s.id)
+    total_due = sum((Decimal(str(x["due_amount"])) for x in fee_history), Decimal("0.00"))
+    total_paid = sum((Decimal(str(x["paid_amount"])) for x in fee_history), Decimal("0.00"))
+    total_discount = sum((Decimal(str(x["discount_amount"])) for x in fee_history), Decimal("0.00"))
+    total_credited = sum((Decimal(str(x["credited_amount"])) for x in fee_history), Decimal("0.00"))
+    total_remaining = sum((Decimal(str(x["due_amount"])) for x in fee_history), Decimal("0.00"))
     return ok({
         "student":student_obj(s,private=u.role=="admin"),
         "current_monthly_fee":float(actual_fee),
@@ -2494,7 +2548,12 @@ def student_fees(id):
         "oldest_due_month":oldest_month.strftime("%Y-%m") if oldest_month else None,
         "oldest_due_amount":float(oldest_amount) if oldest_amount is not None else 0,
         "minimum_payment":float(actual_fee),
-        "history":history(s.id)
+        "total_due":float(total_due),
+        "total_paid":float(total_paid),
+        "total_discount":float(total_discount),
+        "total_credited":float(total_credited),
+        "total_remaining":float(total_remaining),
+        "history":fee_history
     })
 @api.post("/fees/payment")
 @roles("admin")
@@ -2530,10 +2589,14 @@ def pay_fee():
         audit(current_user().id,"collect_fee","fee_payment",p.id,f"{rno}; payment=₹{amount:.2f}; discount=₹{discount:.2f}"); db.session.commit()
         a=Admin.query.filter_by(user_id=current_user().id).first()
         sobj=student_obj(s); first=sobj["classes"][0] if sobj["classes"] else {}
+        month_balance = next((x for x in _fee_month_balances(sid) if x["month"] == m), None)
+        gross_due = month_balance["due"] if month_balance else oldest_balance
         receipt_data={"receipt_number":rno,"student":s.name,"student_id":s.student_id,"class":first.get("class_name",""),
                       "teacher":first.get("teacher_name",""),"fee_month":m.strftime("%B %Y"),"amount":float(p.amount),
-                      "discount":float(p.discount_amount or 0),"total_adjustment":float(p.amount+(p.discount_amount or 0)),
-                      "payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),oldest_balance-amount-discount))}
+                      "discount":float(p.discount_amount or 0),"gross_due":float(gross_due),
+                      "net_due":float(max(Decimal("0.00"),gross_due-discount)),
+                      "total_adjustment":float(p.amount+(p.discount_amount or 0)),
+                      "payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(month_balance["balance"] if month_balance else max(Decimal("0.00"),oldest_balance-amount-discount))}
         return ok({"id":p.id,"receipt_id":r.id,"receipt_number":rno,"receipt":receipt_data},"Fee payment recorded",201)
     except IntegrityError:
         db.session.rollback();return err("Payment could not be recorded because of a database constraint. Run the fee-payment migration included with this update.",409)
@@ -2555,7 +2618,14 @@ def receipts():
         p=payments.get(r.fee_payment_id);st=students.get(p.student_id) if p else None
         if not p or not st:continue
         if q and q not in f"{r.receipt_number} {st.student_id} {st.name}".lower():continue
-        out.append({"id":r.id,"receipt_number":r.receipt_number,"student_name":st.name,"student_id":st.student_id, "month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"discount":float(p.discount_amount or 0),"total_adjustment":float(p.amount+(p.discount_amount or 0)),"method":p.payment_method,"generated_at":iso_ist(r.generated_at)})
+        month_balance = next((x for x in _fee_month_balances(p.student_id) if x["month"] == p.fee_month.replace(day=1)), None)
+        gross_due = month_balance["due"] if month_balance else Decimal("0.00")
+        out.append({"id":r.id,"receipt_number":r.receipt_number,"student_name":st.name,"student_id":st.student_id,
+                    "month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),
+                    "discount":float(p.discount_amount or 0),"gross_due":float(gross_due),
+                    "net_due":float(max(Decimal("0.00"),gross_due-Decimal(str(p.discount_amount or 0)))),
+                    "total_adjustment":float(p.amount+(p.discount_amount or 0)),
+                    "method":p.payment_method,"generated_at":iso_ist(r.generated_at)})
     return ok(out)
 @api.get("/receipts/<int:id>")
 @roles("admin")
@@ -2569,7 +2639,15 @@ def receipt(id):
     balances=_fee_month_balances(p.student_id)
     month_balance=next((x for x in balances if x["month"]==p.fee_month.replace(day=1)), None)
     remaining=month_balance["balance"] if month_balance else Decimal("0.00")
-    return ok({"receipt_number":r.receipt_number,"student":s.name if s else "","student_id":s.student_id if s else "","class":first.get("class_name", ""),"teacher":first.get("teacher_name", ""),"fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),"discount":float(p.discount_amount or 0),"total_adjustment":float(p.amount+(p.discount_amount or 0)),"payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),"collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),remaining))})
+    gross_due = month_balance["due"] if month_balance else Decimal("0.00")
+    return ok({"receipt_number":r.receipt_number,"student":s.name if s else "","student_id":s.student_id if s else "",
+               "class":first.get("class_name", ""),"teacher":first.get("teacher_name", ""),
+               "fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),
+               "discount":float(p.discount_amount or 0),"gross_due":float(gross_due),
+               "net_due":float(max(Decimal("0.00"),gross_due-Decimal(str(p.discount_amount or 0)))),
+               "total_adjustment":float(p.amount+(p.discount_amount or 0)),
+               "payment_method":p.payment_method,"payment_date":iso_ist(p.payment_date),
+               "collected_by":a.name if a else "Admin","remaining":float(max(Decimal("0.00"),remaining))})
 
 def teacher_for_user():
     return Teacher.query.filter_by(user_id=current_user().id).first()

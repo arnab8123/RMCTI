@@ -2,10 +2,13 @@ const Notifications = { refresh: async () => {} };
 
 const Auth = {
   async role(role) {
-    if (!sessionStorage.getItem('token')) {
+    const token = localStorage.getItem('rmcti_token') || sessionStorage.getItem('token');
+    if (!token) {
       location.href = '../login.html';
       return null;
     }
+    // Keep the active token available to Api without exposing it in the URL.
+    sessionStorage.setItem('token', token);
     try {
       const user = await Api.get('/auth/me');
       if (user.role !== role) {
@@ -22,6 +25,8 @@ const Auth = {
           event.preventDefault(); event.stopPropagation();
           try { await Api.post('/auth/logout', {}); } catch (_) {}
           sessionStorage.clear();
+          localStorage.removeItem('rmcti_token');
+          localStorage.removeItem('rmcti_user');
           location.href = '../login.html';
         }, { once: true });
       }

@@ -17,8 +17,9 @@ class Config:
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
 
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(
-        minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "30"))
+        minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "120"))
     )
+    JWT_REMEMBER_ME_DAYS = int(os.getenv("JWT_REMEMBER_ME_DAYS", "30"))
     JWT_TOKEN_LOCATION = ["headers"]
     JWT_ERROR_MESSAGE_KEY = "message"
 

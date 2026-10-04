@@ -150,7 +150,7 @@ const Page = (() => {
       fill(q('[data-recent-payments]'), (d.recent_payments||[]).map(p=>`
         <div class="dashboard-list-row">
           <div><b>${U.esc(p.student_name)}</b><small>${U.esc(p.receipt_number)} · ${U.esc(p.month)}</small></div>
-          <strong>${U.money(p.amount)}</strong>
+          <strong>${U.money(p.amount)}${Number(p.discount||0)>0?`<small style="display:block;color:var(--muted);font-weight:500">Discount ${U.money(p.discount)}</small>`:''}</strong>
         </div>`).join('') || '<div class="empty-card"><b>No recent payments</b><span>Fee payments will appear here after collection.</span></div>');
 
       fill(q('[data-pending-fees]'), (d.pending_students||[]).map(s=>`
@@ -1446,15 +1446,16 @@ const Page = (() => {
     const feeSummary = async () => {
       try {
         const d = await Api.get('/admin/dashboard');
-        const map = {collected:d.this_month_collection, pending:d.pending_fees, partial:d.partial_fees, fine:d.fine};
+        const map = {collected:d.this_month_collection, discount:d.this_month_discount, pending:d.pending_fees, partial:d.partial_fees, fine:d.fine};
         const nodes = {
           collected:q('[data-fee-summary-collected]'), pending:q('[data-fee-summary-pending]'),
-          partial:q('[data-fee-summary-partial]'), fine:q('[data-fee-summary-fine]')
+          partial:q('[data-fee-summary-partial]'), fine:q('[data-fee-summary-fine]'), discount:q('[data-fee-summary-discount]')
         };
         nodes.collected && (nodes.collected.textContent=U.money(map.collected||0));
         nodes.pending && (nodes.pending.textContent=U.money(map.pending||0));
         nodes.partial && (nodes.partial.textContent=U.money(map.partial||0));
         nodes.fine && (nodes.fine.textContent=U.money(map.fine||0));
+        nodes.discount && (nodes.discount.textContent=U.money(map.discount||0));
       } catch (_) {}
     };
     feeSummary();
@@ -1478,7 +1479,7 @@ const Page = (() => {
     const load = async () => {
       if (!studentSelect?.value) { currentFeeData=null; fill(q('[data-history]'), '<div class="empty">No student selected.</div>'); if(monthInput) monthInput.value=''; if(amountInput) amountInput.value=''; if(discountInput) discountInput.value='0'; return; }
       const d = await Api.get(`/fees/student/${studentSelect.value}`); currentFeeData=d;
-      fill(q('[data-history]'), `<div class="fee-timeline">${(d.history || []).map((h) => `<div class="fee-timeline-item ${String(h.status||'').toLowerCase()}"><div class="fee-timeline-marker">${h.status === 'PAID' ? '✓' : h.status === 'PARTIAL' ? '◐' : '!'}</div><div class="fee-timeline-main"><div class="fee-timeline-head"><b>${U.esc(h.month_label)}</b><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'PARTIAL' ? 'partial' : h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></div><div class="fee-timeline-amounts"><span>Due <b>${U.money(h.amount)}</b></span><span>Paid <b>${U.money(h.paid_amount)}</b></span><span>Remaining <b>${U.money(h.due_amount)}</b></span></div>${h.payment_date?`<small>Last payment: ${U.esc(U.datetime(h.payment_date))}${h.receipt_number?` · Receipt ${U.esc(h.receipt_number)}`:''}</small>`:''}<button type="button" class="btn secondary small fee-detail-btn" data-fee-detail="${U.esc(h.month)}">View fee calculation</button></div></div>`).join('') || '<div class="empty-card"><b>No fee history</b><span>No fee records are available for this student.</span></div>'}</div>`);
+      fill(q('[data-history]'), `<div class="fee-timeline">${(d.history || []).map((h) => `<div class="fee-timeline-item ${String(h.status||'').toLowerCase()}"><div class="fee-timeline-marker">${h.status === 'PAID' ? '✓' : h.status === 'PARTIAL' ? '◐' : '!'}</div><div class="fee-timeline-main"><div class="fee-timeline-head"><b>${U.esc(h.month_label)}</b><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'PARTIAL' ? 'partial' : h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></div><div class="fee-timeline-amounts"><span>Original <b>${U.money(h.original_due ?? h.amount)}</b></span><span>Paid <b>${U.money(h.paid_amount)}</b></span><span>Discount <b>${U.money(h.discount_amount||0)}</b></span><span>Remaining <b>${U.money(h.due_amount)}</b></span></div>${h.payment_date?`<small>Last payment: ${U.esc(U.datetime(h.payment_date))}${h.receipt_number?` · Receipt ${U.esc(h.receipt_number)}`:''}</small>`:''}<button type="button" class="btn secondary small fee-detail-btn" data-fee-detail="${U.esc(h.month)}">View fee calculation</button></div></div>`).join('') || '<div class="empty-card"><b>No fee history</b><span>No fee records are available for this student.</span></div>'}</div>`);
       if(monthInput){monthInput.value=d.oldest_due_month || U.today().slice(0,7);monthInput.readOnly=true;monthInput.title=d.oldest_due_month?'Oldest due month is selected automatically':'No unpaid month is due; current month is selected.';}
       if(amountInput) { amountInput.value=d.oldest_due_amount>0?d.oldest_due_amount:''; amountInput.min='0'; amountInput.max=d.oldest_due_amount>0?String(d.oldest_due_amount):'0'; amountInput.title=`Payment + discount cannot exceed ₹${Number(d.oldest_due_amount||0).toFixed(2)}.`; } if(discountInput){discountInput.value='0';discountInput.max=d.oldest_due_amount>0?String(d.oldest_due_amount):'0';}
     };
@@ -1496,8 +1497,10 @@ const Page = (() => {
         <p><b>Applicable fine cycles:</b> ${cycles}</p>
         <p><b>Fine:</b> ${U.money(fine)}</p>
         <hr style="border:0;border-top:1px solid var(--border)">
-        <p><b>Total for ${U.esc(h.month_label)} including fine:</b> ${U.money(h.amount)}</p>
-        <p><b>Already paid:</b> ${U.money(h.paid_amount)}</p>
+        <p><b>Original total including fine:</b> ${U.money(h.original_due ?? h.amount)}</p>
+        <p><b>Discount / waiver:</b> ${U.money(h.discount_amount||0)}</p>
+        <p><b>Net fee after discount:</b> ${U.money(h.net_due ?? Math.max(0, Number(h.amount)-Number(h.discount_amount||0)))}</p>
+        <p><b>Actually paid:</b> ${U.money(h.paid_amount)}</p>
         <p><b>Remaining:</b> ${U.money(h.due_amount)}</p>
       </div>`);
     });
@@ -1537,7 +1540,7 @@ const Page = (() => {
     return `<div class="receipt-doc" data-receipt-capture style="border:1px solid #d6dde6;border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.08)">
       <div style="padding:22px 26px;background:#0f3d5e;color:#fff;display:flex;justify-content:space-between;gap:20px;align-items:center"><div style="display:flex;gap:14px;align-items:center"><img crossorigin="anonymous" src="${U.photoUrl('/asset/image.jpeg')}" style="width:54px;height:54px;border-radius:10px;background:#fff;padding:4px;object-fit:contain"><div><div style="font-size:22px;font-weight:800;letter-spacing:.02em">RMCTI</div><div style="font-size:12px;opacity:.86">Ratna's Modern Computer Training Institute</div></div></div><div style="text-align:right"><div style="font-size:11px;opacity:.78;text-transform:uppercase;letter-spacing:.1em">Official Fee Receipt</div><div style="font-size:18px;font-weight:800;margin-top:4px">${U.esc(r.receipt_number)}</div></div></div>
       <div style="padding:24px 26px"><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 28px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Student</div><div style="font-weight:800;font-size:17px;margin-top:5px">${U.esc(r.student)}</div><div class="muted" style="margin-top:3px">${U.esc(r.student_id)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Course</div><div style="font-weight:700;margin-top:5px">${U.esc(r.class||'—')}</div>${r.teacher?`<div class="muted" style="margin-top:3px">Teacher: ${U.esc(r.teacher)}</div>`:''}</div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Fee Month</div><div style="font-weight:700;margin-top:5px">${U.esc(r.fee_month)}</div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Date</div><div style="font-weight:700;margin-top:5px">${U.datetime(r.payment_date)}</div></div></div>
-      <div style="margin:24px 0;border-top:1px solid #e2e8f0"></div><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Method</div><div style="font-weight:700;margin-top:5px;text-transform:capitalize">${U.esc(String(r.payment_method||'').replace('_',' '))}</div></div><div style="display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:18px;text-align:right"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Amount Paid</div><div style="font-size:26px;font-weight:900;margin-top:2px;color:#0f3d5e">${U.money(r.amount)}</div>${Number(r.discount||0)>0?`<div class="muted" style="margin-top:5px">Discount / waiver: ${U.money(r.discount)}</div>`:""}</div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Total Remaining Due</div><div style="font-size:22px;font-weight:900;margin-top:4px;color:#b45309">${U.money(r.remaining||0)}</div></div></div></div>
+      <div style="margin:24px 0;border-top:1px solid #e2e8f0"></div><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Payment Method</div><div style="font-weight:700;margin-top:5px;text-transform:capitalize">${U.esc(String(r.payment_method||'').replace('_',' '))}</div></div><div style="display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:18px;text-align:right"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Original Fee</div><div style="font-size:22px;font-weight:900;margin-top:2px;color:#334155">${U.money(r.gross_due||0)}</div><div style="margin-top:5px">Paid: <b>${U.money(r.amount)}</b></div>${Number(r.discount||0)>0?`<div style="margin-top:3px">Discount / waiver: <b>${U.money(r.discount)}</b></div>`:""}<div style="margin-top:3px">Net fee after discount: <b>${U.money(r.net_due||0)}</b></div></div><div><div class="muted" style="font-size:11px;text-transform:uppercase">Remaining Due</div><div style="font-size:22px;font-weight:900;margin-top:4px;color:#b45309">${U.money(r.remaining||0)}</div></div></div></div>
       <div style="margin-top:28px;padding-top:14px;border-top:1px dashed #cbd5e1;display:flex;justify-content:space-between;gap:20px;font-size:11px;color:#64748b"><span>Collected by: ${U.esc(r.collected_by||'Admin')}</span><span>System generated receipt</span></div></div></div>`;
   }
 
@@ -1568,7 +1571,9 @@ const Page = (() => {
           monthLabel.textContent = dt.toLocaleDateString('en-IN', {month:'long', year:'numeric'});
         }
         fill(summary, `
-          <div class="report-kpi"><span>Collected</span><strong>${U.money(f.collected)}</strong></div>
+          <div class="report-kpi"><span>Collected (cash)</span><strong>${U.money(f.collected)}</strong></div>
+          <div class="report-kpi"><span>Discount / waiver</span><strong>${U.money(f.discount||0)}</strong></div>
+          <div class="report-kpi"><span>Total credited</span><strong>${U.money(f.credited||((f.collected||0)+(f.discount||0)))}</strong></div>
           <div class="report-kpi"><span>Pending</span><strong>${U.money(f.pending)}</strong></div>
           <div class="report-kpi"><span>Partial</span><strong>${U.money(f.partial_balance)}</strong></div>
           <div class="report-kpi"><span>Fine</span><strong>${U.money(f.fine)}</strong></div>
@@ -1603,7 +1608,7 @@ const Page = (() => {
       const m=latest.month;
       const rows=[
         ['Section','Metric','Value'],
-        ['Fees','Collected',latest.fees.collected],['Fees','Pending',latest.fees.pending],['Fees','Partial',latest.fees.partial_balance],['Fees','Fine',latest.fees.fine],
+        ['Fees','Collected (cash)',latest.fees.collected],['Fees','Discount / waiver',latest.fees.discount||0],['Fees','Total credited',latest.fees.credited||0],['Fees','Pending',latest.fees.pending],['Fees','Partial',latest.fees.partial_balance],['Fees','Fine',latest.fees.fine],
         ...latest.attendance.map(x=>['Attendance',x.subject,`${x.attendance_percent}%`]),
         ...latest.teacher_workload.map(x=>['Teacher workload',x.name,x.classes])
       ];
@@ -1621,7 +1626,7 @@ const Page = (() => {
       const d = await Api.get('/admin/analytics');
       const maxC = Math.max(...(d.collection || [0]), 1);
       const maxG = Math.max(...(d.student_growth || [0]), 1);
-      fill(collections, (d.months || []).map((m, i) => `<div class="analytics-bar-row"><span>${U.esc(m)}</span><div class="analytics-bar-track"><i style="width:${Math.round((d.collection[i]||0)/maxC*100)}%"></i></div><b>${U.money(d.collection[i]||0)}</b></div>`).join('') || '<div class="empty-card"><b>No collection data</b><span>Payments will appear here as they are recorded.</span></div>');
+      fill(collections, (d.months || []).map((m, i) => `<div class="analytics-bar-row"><span>${U.esc(m)}</span><div class="analytics-bar-track"><i style="width:${Math.round((d.collection[i]||0)/maxC*100)}%"></i></div><b>${U.money(d.collection[i]||0)}${Number(d.discount?.[i]||0)>0?`<small style="display:block;color:var(--muted);font-weight:500">Discount ${U.money(d.discount[i])}</small>`:''}</b></div>`).join('') || '<div class="empty-card"><b>No collection data</b><span>Payments will appear here as they are recorded.</span></div>');
       fill(growth, (d.months || []).map((m, i) => `<div class="analytics-bar-row"><span>${U.esc(m)}</span><div class="analytics-bar-track"><i style="width:${Math.round((d.student_growth[i]||0)/maxG*100)}%"></i></div><b>${d.student_growth[i]||0}</b></div>`).join('') || '<div class="empty-card"><b>No student growth data</b><span>Admission dates are used for this trend.</span></div>');
       fill(attendance, (d.attendance || []).slice(0,12).map(x => `<div class="analytics-bar-row"><span>${U.esc(x.name)}</span><div class="analytics-bar-track"><i style="width:${Math.max(0,Math.min(100,x.attendance_percent||0))}%"></i></div><b>${x.attendance_percent||0}%</b></div>`).join('') || '<div class="empty-card"><b>No attendance data</b><span>Attendance records will appear here.</span></div>');
     } catch (e) { U.toast(e.message || 'Could not load analytics', 'error'); }
@@ -2092,7 +2097,7 @@ const Page = (() => {
     const d = await Api.get('/student/dashboard'); const f = await Api.get(`/fees/student/${d.student.id}`);
     const totalDue=Number(f.total_due||0);
     const totalPaid=Number(f.total_paid||0);
-    fill(q('[data-fees]'), `<div class="g3"><div><div class="muted">Current monthly fee</div><div class="statv">${U.money(f.current_monthly_fee)}</div></div><div><div class="muted">Total Paid</div><div class="statv">${U.money(totalPaid)}</div><small class="muted">All recorded fee payments</small></div><div><div class="muted">Total Due</div><div class="statv">${U.money(totalDue)}</div><small class="muted">All unpaid months + applicable fines</small></div></div><div class="table" style="margin-top:18px"><table><tr><th>Month</th><th>Total Amount</th><th>Paid</th><th>Remaining</th><th>Status</th><th>Payment Date</th><th>Receipt</th></tr>${(f.history || []).map((h) => `<tr><td>${U.esc(h.month_label)}</td><td>${U.money(h.amount)}</td><td>${U.money(h.paid_amount)}</td><td><b>${U.money(h.due_amount)}</b></td><td><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'PARTIAL' ? 'partial' : h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></td><td>${h.payment_date ? U.date(h.payment_date) : '—'}</td><td>${U.esc(h.receipt_number || '—')}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No fee history.</td></tr>'}</table></div>`);
+    fill(q('[data-fees]'), `<div class="g3"><div><div class="muted">Current monthly fee</div><div class="statv">${U.money(f.current_monthly_fee)}</div></div><div><div class="muted">Total Paid</div><div class="statv">${U.money(f.total_paid ?? totalPaid)}</div><small class="muted">Actual cash received</small></div><div><div class="muted">Total Discount</div><div class="statv">${U.money(f.total_discount||0)}</div><small class="muted">Fee waivers / discounts</small></div><div><div class="muted">Total Remaining</div><div class="statv">${U.money(f.total_remaining ?? totalDue)}</div><small class="muted">After payments and discounts</small></div></div><div class="table" style="margin-top:18px"><table><thead><tr><th>Month</th><th>Original Fee</th><th>Paid</th><th>Discount</th><th>Remaining</th><th>Status</th><th>Payment Date</th><th>Receipt</th></tr></thead><tbody>${(f.history || []).map((h) => `<tr><td>${U.esc(h.month_label)}</td><td>${U.money(h.original_due ?? h.amount)}</td><td>${U.money(h.paid_amount)}</td><td>${U.money(h.discount_amount||0)}</td><td><b>${U.money(h.due_amount)}</b></td><td><span class="badge ${h.status === 'PAID' ? 'paid' : h.status === 'PARTIAL' ? 'partial' : h.status === 'DUE' ? 'due' : 'inactive'}">${U.esc(h.status)}</span></td><td>${h.payment_date ? U.date(h.payment_date) : '—'}</td><td>${U.esc(h.receipt_number || '—')}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No fee history.</td></tr>'}</tbody></table></div>`);
   }
 
 
@@ -2151,9 +2156,11 @@ const Page = (() => {
       chat.appendChild(typing);
       chat.scrollTop = chat.scrollHeight;
       try {
-        const result = await Api.post('/admin/assistant', pendingAction
-          ? {message, confirm_action: pendingAction}
-          : {message});
+        const history = messages.slice(0, -1).slice(-12).map(m => ({role:m.role, content:m.text}));
+        const payload = pendingAction
+          ? {message, confirm_action: pendingAction, history}
+          : {message, history};
+        const result = await Api.post('/admin/assistant', payload);
         typing.remove();
         pendingAction = result.action || null;
         add('assistant', result.reply || 'Done.');
