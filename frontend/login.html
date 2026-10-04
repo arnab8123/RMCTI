@@ -1,15 +1,20 @@
 <!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RMCTI Login</title><link rel="stylesheet" href="css/variables.css?v=20260926"><link rel="stylesheet" href="css/global.css?v=20260926"><style>
-.password-field{position:relative}.password-field .input{padding-right:48px}
-.password-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--muted);cursor:pointer;padding:8px;font-size:16px}
-.password-toggle:hover{color:var(--text)}.remember-row{display:flex;align-items:center;gap:8px;margin:12px 0 16px;font-size:.9rem;color:var(--muted)}
+.password-field{position:relative}.password-field .input{padding-right:50px}
+.password-toggle{position:absolute;right:7px;top:50%;transform:translateY(-50%);width:38px;height:38px;border:0;border-radius:10px;background:transparent;color:var(--muted);cursor:pointer;padding:7px;display:flex;align-items:center;justify-content:center;transition:all .2s ease}
+.password-toggle:hover{color:var(--primary);background:rgba(0,75,135,.08)}
+.password-toggle:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.password-toggle svg{width:20px;height:20px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.remember-row{display:flex;align-items:center;gap:8px;margin:12px 0 16px;font-size:.9rem;color:var(--muted)}
 </style></head>
 <body data-login>
 <main class="login-page"><section class="card pad login-card"><div class="brand"><img class="brandlogo" src="asset/image.jpeg" alt="RMCTI logo" loading="lazy" decoding="async"> <span>RMCTI</span></div><h1>Sign in</h1><p class="muted">Admin, teacher and student portal access.</p><form id="login"><label class="label">Username</label><input class="input" name="username" autocomplete="username" required><label class="label">Password</label>
 <div class="password-field">
 <input class="input" id="login-password" type="password" name="password" autocomplete="current-password" required>
-<button type="button" class="password-toggle" data-toggle-password aria-label="Show password" title="Show password">◉</button>
+<button type="button" class="password-toggle" data-toggle-password aria-label="Show password" title="Show password">
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>
+</button>
 </div>
 <label class="remember-row"><input type="checkbox" name="remember" value="1" checked> <span>Keep me signed in on this device</span></label><button class="btn primary" type="submit">Sign in</button></form><p id="err" class="error-text" aria-live="polite"></p></section></main>
 <script src="js/api.js?v=20260926"></script><script src="js/utils.js?v=20260926"></script><script src="js/login.js?v=20261004"></script>

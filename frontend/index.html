@@ -173,7 +173,7 @@
 
         header {
             background-color: var(--header-bg);
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            box-shadow: 0 10px 30px rgba(0, 43, 82, 0.48);
             backdrop-filter: blur(10px);
             animation: slideDown 0.8s ease forwards;
             animation-delay: 0.7s;
@@ -780,6 +780,12 @@
             
             <div class="text-center text-gray-500 text-sm border-t border-gray-800 pt-8">
                 <p>&copy; 2026 Ratna's Modern Computer Training Institute. All rights reserved.</p>
+                <a href="https://orvina.vercel.app/" target="_blank" rel="noopener noreferrer"
+                   aria-label="Created by Orvina"
+                   class="inline-flex items-center gap-2 mt-4 text-gray-400 hover:text-white transition-colors group">
+                    <span class="flex items-center justify-center w-6 h-6 rounded-full bg-white/10 border border-white/20 text-[10px] font-black tracking-tight group-hover:bg-rmcti-blue group-hover:border-rmcti-blue transition-colors">O</span>
+                    <span>Created by <span class="font-semibold text-gray-300 group-hover:text-white">Orvina</span></span>
+                </a>
             </div>
         </footer>
     </div>
@@ -1151,6 +1157,10 @@ document.querySelectorAll('[data-certificate]').forEach(btn => {
     let currentAdIndex = 0;
     let adInterval;
 
+    // Destination opened when the visitor clicks anywhere on the advertisement.
+    // Change this URL if the advertisement should point to another website.
+    const AD_DESTINATION_URL = 'https://orvina.vercel.app/';
+
     // Create the popup container
     const adPopup = document.createElement('div');
     adPopup.id = 'floatingAdPopup';
@@ -1162,13 +1172,23 @@ document.querySelectorAll('[data-certificate]').forEach(btn => {
     closeBtn.setAttribute('aria-label', 'Close Ad');
     closeBtn.style.cssText = 'position:absolute;top:-12px;right:-12px;width:32px;height:32px;background:#b81d24;color:#fff;border:none;border-radius:50%;font-size:22px;cursor:pointer;font-weight:bold;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 10px rgba(0,0,0,0.2);z-index:10;';
 
+    // Make the complete advertisement a clickable button/link.
+    const adLink = document.createElement('a');
+    adLink.href = AD_DESTINATION_URL;
+    adLink.target = '_blank';
+    adLink.rel = 'noopener noreferrer';
+    adLink.setAttribute('aria-label', 'Open advertisement');
+    adLink.style.cssText = 'display:block;cursor:pointer;outline:none;border-radius:8px;';
+
     // Create the image element
     const imgElement = document.createElement('img');
     imgElement.src = adImages[currentAdIndex];
+    imgElement.alt = 'Advertisement';
     imgElement.style.cssText = 'display:block;width:auto;height:auto;max-width:100%;max-height:60vh;object-fit:contain;border-radius:8px;transition:opacity 0.3s ease;';
 
+    adLink.appendChild(imgElement);
     adPopup.appendChild(closeBtn);
-    adPopup.appendChild(imgElement);
+    adPopup.appendChild(adLink);
     document.body.appendChild(adPopup);
 
     // Trigger popup exactly 10 seconds after load

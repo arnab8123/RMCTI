@@ -10,7 +10,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!password) return;
     const showing = password.type === 'text';
     password.type = showing ? 'password' : 'text';
-    toggle.textContent = showing ? '◉' : '◌';
+    toggle.innerHTML = showing
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"></path><path d="M10.6 6.2A10.7 10.7 0 0 1 12 6c6.5 0 10 6 10 6a18.5 18.5 0 0 1-3.4 3.9"></path><path d="M6.6 6.7C3.6 8.5 2 12 2 12s3.5 6 10 6c1.5 0 2.8-.3 4-.8"></path><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"></path></svg>';
     toggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
     toggle.title = showing ? 'Show password' : 'Hide password';
   });
