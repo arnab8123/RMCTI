@@ -17,6 +17,7 @@ const Auth = {
       }
       sessionStorage.setItem('user', JSON.stringify(user));
       document.querySelectorAll('[data-user]').forEach((el) => { el.textContent = user.name || user.username || ''; });
+      document.querySelectorAll('[data-admin-name]').forEach((el) => { el.textContent = user.name || user.username || 'Admin'; });
 
       const logout = document.querySelector('[data-logout]');
       if (logout) {

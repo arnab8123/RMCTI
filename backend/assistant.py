@@ -523,7 +523,11 @@ def _gemini_request(contents, system_instruction=None, response_json=False, tool
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         raise GeminiRequestError("Gemini is not configured yet. Add GEMINI_API_KEY to your local .env file or Render environment variables, then restart/redeploy the backend.")
-    model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip() or "gemini-3.8-flash"
+    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+    # Older deployments may still define the unavailable flash-lite model.
+    # Normalize that legacy setting so the chat does not fail before first use.
+    if model == "gemini-2.5-flash-lite":
+        model = "gemini-2.5-flash"
     if not re.fullmatch(r"[A-Za-z0-9._-]{2,100}", model):
         raise GeminiRequestError("GEMINI_MODEL is invalid. Use a model name supported by the Gemini API.")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
