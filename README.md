@@ -289,14 +289,13 @@ Admin → Collect Fee now has **Discount / Fee Waiver**. The server records the 
 
 ## RMCTI AI Assistant configuration
 
-The admin assistant uses the server-side Google Gemini API for conversation, intent understanding, and RMCTI tool selection. The backend remains the source of truth for live student, teacher, class, fee, attendance, schedule, receipt, complaint, enquiry, and audit data. The browser never receives the Gemini API key. If the key is missing or the provider is unavailable, the chat displays a setup/API error instead of silently reverting to a canned keyword bot. A singular request such as “mark Anova's fee paid” proposes the oldest outstanding month; use “mark all Anova's dues paid” or “settle Anova's full balance” when you mean every outstanding month.
+The admin AI now uses the server-side Google Gemini API when `GEMINI_API_KEY` is configured. Gemini interprets natural-language requests, conversation context, and follow-ups, while RMCTI's local admin/database tool router remains authoritative for reads and changes. Mutating actions still require the existing confirmation flow.
 
-1. Create an API key in Google AI Studio.
-2. For local development, add it to your untracked `.env` file as `GEMINI_API_KEY=your_key_here`.
-3. For Render, open the backend web service → **Environment** and add `GEMINI_API_KEY` with your key, plus `GEMINI_MODEL=gemini-3.8-flash` (recommended; if an older configured model returns 404, the backend retries current stable models automatically). Save and redeploy/restart the service.
-4. Sign in as Admin → AI Assistant. The status badge reports whether the backend has a key configured.
+Set these environment variables in Render (never in frontend code):
+- `GEMINI_API_KEY` — your Google AI Studio Gemini API key
+- `GEMINI_MODEL` — defaults to `gemini-2.5-flash-lite`
 
-Do not put the key in frontend JavaScript, HTML, or CSS, and never commit `.env` to Git. The assistant supports natural-language lookup/list requests for students, teachers, classes, fee balances, attendance, schedules, receipts, complaints, enquiries, and recent audit history. Common writes (student/teacher registration, fee collection/waivers, student-to-class assignment, student deletion, and schedule changes) are presented for confirmation and then validated by the backend. Requests outside the wired operation set will be clarified rather than falsely reported as complete.
+Without `GEMINI_API_KEY`, the existing deterministic RMCTI assistant still works for its supported commands.
 
 
 ### Recent improvements (2026-10-10)
@@ -304,3 +303,39 @@ Do not put the key in frontend JavaScript, HTML, or CSS, and never commit `.env`
 - Admin can permanently delete complaints and enquiries. Records older than 10 days are purged automatically during API traffic (the free Render service does not provide a continuously running background scheduler).
 - The browser makes a lightweight `/health` request every 3 minutes while the RMCTI tab is visible to reduce idle spin-down; Render may still apply platform-level limits.
 - The Gemini assistant uses `GEMINI_API_KEY` and `GEMINI_MODEL` on the backend only. Add the key in Render → Environment; never place it in frontend JavaScript or commit it to Git. Commands that change fees, schedules, or records remain subject to server validation and confirmation.
+
+
+## AI Assistant (Admin → ✦ AI Assistant)
+
+A real Gemini-powered assistant for the admin portal. The admin types in plain words
+(English, Hinglish, typos and all) and the AI looks things up or does the work.
+
+Examples: *"give me all teachers"*, *"who hasn't paid this month?"*, *"Rahul Das paid 500"*,
+*"mark Priya paid in full"*, *"register student Ananya Roy phone 98xxxxxx in Class 10"*,
+*"move Class 10 Maths tomorrow to 6 pm"*, *"change Class 9 fee to 900 from November"*.
+
+### Setup
+1. Create a key in Google AI Studio and put it in `.env` / your host's environment as `GEMINI_API_KEY`.
+2. Restart the server. The AI page shows **Gemini connected** when the key works.
+3. No new Python packages are required. On Render use `gunicorn ... --timeout 60`.
+
+### How it works
+- **Function calling:** Gemini chooses from ~30 typed tools (students, teachers, courses, fees, attendance,
+  schedules, receipts, complaints, enquiries). Names are matched fuzzily (typos OK); near-identical IDs and
+  phone numbers are never guessed.
+- **Same rules as the UI:** every read/write calls the existing `/api` routes with the admin's own token, so
+  validation, fee rules and audit history are identical and the AI can never do more than the admin UI can.
+- **Confirm before risky actions:** fee collection/discounts, fee changes, deletions, removals and schedule
+  changes show a Confirm card first. Confirmations are signed, expire after 15 minutes, are single-use, and a
+  payment is refused if the balance changed since it was prepared (no double payments).
+  Set `AI_CONFIRM_RISKY=0` to run them immediately.
+- **Privacy:** student/teacher data needed to answer a question is sent to Google's Gemini API. Aadhaar numbers
+  and photos are never sent. Use a paid Gemini tier if your policy requires that prompts are not used for
+  product improvement.
+- Text written by students/public (complaints, enquiries) is treated as untrusted data, not instructions.
+
+### Tests (no database or network needed)
+```bash
+python -m unittest discover -s tests -t .
+node tests/ai-markdown.test.js
+```

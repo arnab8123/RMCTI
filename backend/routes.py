@@ -857,42 +857,29 @@ def public_stats():
         "total_teachers": Teacher.query.filter_by(status="active").count(),
     })
 
+@api.post("/admin/assistant")
+@_request_limit("40 per minute", scope="admin_assistant")
+@roles("admin")
+def admin_assistant():
+    """Admin AI assistant (Gemini function-calling agent, see backend/assistant.py).
+
+    Body: {message, history:[{role,content}]} for a chat turn, or {confirm_token} to
+    run an action the admin approved on a Confirm card. The assistant calls this app's
+    own /api routes with the admin's JWT, so it can never do more than the admin UI can.
+    """
+    from .assistant import assistant_chat, assistant_confirm
+    b = request.get_json(silent=True) or {}
+    user = current_user()
+    if b.get("confirm_token"):
+        return ok(assistant_confirm(str(b["confirm_token"]), user))
+    history = b.get("history") if isinstance(b.get("history"), list) else []
+    return ok(assistant_chat(b.get("message"), history, user))
+
 @api.get("/admin/assistant/status")
 @roles("admin")
 def admin_assistant_status():
-    """Return non-secret readiness metadata for the admin assistant UI."""
-    configured_model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip() or "gemini-3.8-flash"
-    return ok({
-        "configured": bool(os.getenv("GEMINI_API_KEY", "").strip()),
-        "model": configured_model,
-        "fallback_model": "gemini-3.8-flash",
-        "fallback_enabled": True,
-        "provider": "Google Gemini",
-    })
-
-
-@api.post("/admin/assistant")
-@_request_limit("60 per minute", scope="admin_assistant")
-@roles("admin")
-def admin_assistant():
-    """Gemini-powered admin assistant and allow-listed RMCTI tool router.
-
-    The assistant never bypasses the existing admin JWT. Read requests query the
-    same models used by the admin UI; sensitive writes are only committed after
-    an explicit confirmation and server-side validation.
-    """
-    from .assistant import assistant_handle
-    b = request.get_json(silent=True) or {}
-    message = str(b.get("message", "")).strip()
-    confirm_action = b.get("confirm_action")
-    history = b.get("history") if isinstance(b.get("history"), list) else []
-    # assistant_handle now runs the full Gemini agent loop when GEMINI_API_KEY is
-    # configured: understand the conversation, call the RMCTI tool when needed,
-    # execute/validate it on the server, and let Gemini formulate the final reply.
-    # There is deliberately no second "rewrite" call here; doing that used to
-    # turn the assistant back into a repetitive canned-answer bot.
-    result = assistant_handle(message, confirm_action=confirm_action, user_id=current_user().id, history=history)
-    return ok(result)
+    from .assistant import assistant_status
+    return ok(assistant_status())
 
 @api.get("/admin/dashboard")
 @roles("admin")
@@ -2667,7 +2654,7 @@ def pay_fee():
 @api.get("/receipts")
 @roles("admin")
 def receipts():
-    q=request.args.get("q","").strip()
+    q=request.args.get("q","").strip().lower()
     query=Receipt.query.join(FeePayment,FeePayment.id==Receipt.fee_payment_id).join(Student,Student.id==FeePayment.student_id)
     if q:
         term=f"%{q}%"

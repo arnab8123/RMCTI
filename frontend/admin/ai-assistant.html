@@ -1,91 +1,33 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#101a2e">
-  <title>RMCTI · AI Assistant</title>
-  <link rel="stylesheet" href="../css/variables.css?v=20261010-ai4">
-  <link rel="stylesheet" href="../css/global.css?v=20261010-ai4">
-  <link rel="stylesheet" href="../css/components.css?v=20261010-ai4">
-  <link rel="stylesheet" href="../css/admin.css?v=20261010-ai4">
-  <link rel="stylesheet" href="../css/ai-assistant.css?v=20261010-ai4">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RMCTI AI Assistant</title>
+<link rel="stylesheet" href="../css/variables.css?v=20260926"><link rel="stylesheet" href="../css/global.css?v=20260926"><link rel="stylesheet" href="../css/components.css?v=20260926"><link rel="stylesheet" href="../css/admin.css?v=20261010"><link rel="stylesheet" href="../css/ai-assistant.css?v=20261011">
 </head>
 <body data-role="admin" data-page="assistant">
 <div class="app">
-  <aside class="side">
-    <div class="brand"><img class="brandlogo" src="../asset/image.jpeg" alt="RMCTI logo"><span>RMCTI</span></div>
-    <nav class="nav">
-      <a href="dashboard.html">⌂ Dashboard</a><a href="ai-assistant.html" class="active">✦ AI Assistant</a>
-      <a href="teachers.html">♙ Teachers</a><a href="register-teacher.html">＋ Register Teacher</a><a href="teacher-classes.html">▦ Allot Classes</a><a href="all-classes.html">▣ All Classes</a>
-      <a href="students.html">♧ Students</a><a href="register-student.html">＋ Register Student</a><a href="fee-structure.html">₹ Fee Structure</a><a href="fee-payment.html">₹ Collect Fee</a>
-      <a href="receipts.html">▤ Receipts</a><a href="attachments.html">📎 Attach File</a><a href="audit-logs.html">◷ Audit History</a><a href="reports.html">▤ Reports</a><a href="analytics.html">◈ Analytics</a>
-      <a href="complaints.html">⚠ Complaints</a><a href="enquiries.html">✉ Enquire</a><button type="button" data-theme>◐ Theme</button><button type="button" data-logout>↪ Logout</button>
-    </nav>
-  </aside>
-  <main class="main">
-    <header class="top"><div><button type="button" class="btn secondary menu" data-menu aria-label="Open navigation">☰</button> <b>AI Assistant</b></div><span class="muted" data-user></span></header>
-    <section class="content ai-content">
-      <header class="ai-hero">
-        <div class="ai-hero-copy">
-          <div class="ai-eyebrow"><span class="ai-spark">✦</span> RMCTI INTELLIGENCE</div>
-          <h1>RMCTI Assistant</h1>
-          <p>Ask a question or tell me what you need done.</p>
-        </div>
-        <div class="ai-engine-card">
-          <div class="ai-engine-mark">G</div>
-          <div class="ai-engine-copy"><strong>Google Gemini</strong><span data-ai-model>Checking model…</span></div>
-          <span class="ai-status-pill" data-ai-status><i></i><span>Checking</span></span>
-        </div>
-      </header>
-
-      <div class="ai-workspace">
-        <aside class="ai-quick-panel">
-          <div class="ai-panel-heading"><span class="ai-section-icon">✦</span><div><h2>Quick actions</h2></div></div>
-          <div class="ai-prompt-list">
-            <button type="button" data-ai-prompt="List all active students and their IDs"><span class="ai-prompt-icon students-icon">♧</span><span><b>Student directory</b><small>Names and student IDs</small></span><span class="ai-prompt-arrow">↗</span></button>
-            <button type="button" data-ai-prompt="List all active teachers and their IDs"><span class="ai-prompt-icon teachers-icon">♙</span><span><b>Teacher directory</b><small>Names and contact details</small></span><span class="ai-prompt-arrow">↗</span></button>
-            <button type="button" data-ai-prompt="Show all outstanding student fees, including fines and partial payments"><span class="ai-prompt-icon fees-icon">₹</span><span><b>Fee overview</b><small>Outstanding balances</small></span><span class="ai-prompt-arrow">↗</span></button>
-            <button type="button" data-ai-prompt="Show today's class schedule with teacher, room, and time"><span class="ai-prompt-icon schedule-icon">▦</span><span><b>Today's schedule</b><small>Classes, teachers, and rooms</small></span><span class="ai-prompt-arrow">↗</span></button>
-            <button type="button" data-ai-prompt="Show the overall attendance summary and percentage"><span class="ai-prompt-icon attendance-icon">◷</span><span><b>Attendance summary</b><small>Present and absent totals</small></span><span class="ai-prompt-arrow">↗</span></button>
-          </div>
-          
-        </aside>
-
-        <section class="ai-chat-shell" aria-label="Chat with the RMCTI AI assistant">
-          <div class="ai-chat-topbar">
-            <div class="ai-chat-identity"><div class="ai-avatar-brand">✦</div><div><strong>RMCTI Assistant</strong><span><i></i> Connected to your admin workspace</span></div></div>
-            <button type="button" class="ai-clear" data-ai-clear title="Start a new conversation"><span>＋</span> New chat</button>
-          </div>
-          <div class="ai-chat" data-ai-chat aria-live="polite" aria-relevant="additions">
-            <div class="ai-welcome" data-ai-welcome>
-              <div class="ai-welcome-orb"><span>✦</span><i></i></div>
-              <div class="ai-welcome-label">YOUR RMCTI COPILOT</div>
-              <h2>What can I help you take care of?</h2>
-              <p>Ask a question, find a record, or describe an admin task the way you would say it to a colleague.</p>
-              <div class="ai-welcome-prompts">
-                <button type="button" data-ai-prompt="Find student Anova and show the student's details">Find a student <span>↗</span></button>
-                <button type="button" data-ai-prompt="Show Anova's complete fee balance and fee history">Check a fee balance <span>↗</span></button>
-                <button type="button" data-ai-prompt="Create a student named Anova">Register a student <span>↗</span></button>
-              </div>
-            </div>
-          </div>
-          
-          <form class="ai-composer" data-ai-form>
-            <div class="ai-input-wrap"><textarea data-ai-input rows="1" placeholder="Message RMCTI Assistant…" autocomplete="off" aria-label="Message RMCTI Assistant"></textarea><div class="ai-input-hint"><span>Enter to send</span><span>Shift + Enter for a new line</span></div></div>
-            <button class="ai-send" data-ai-send type="submit" aria-label="Send message"><span>Send</span><b>↑</b></button>
-          </form>
-          
-        </section>
-      </div>
-    </section>
-  </main>
+<aside class="side"><div class="brand"><img class="brandlogo" src="../asset/image.jpeg" alt="RMCTI logo"> <span>RMCTI</span></div>
+<nav class="nav">
+<a href="dashboard.html">⌂ Dashboard</a><a href="ai-assistant.html" class="active">✦ AI Assistant</a>
+<a href="teachers.html">♙ Teachers</a><a href="register-teacher.html">＋ Register Teacher</a><a href="teacher-classes.html">▦ Allot Classes</a><a href="all-classes.html">▣ All Classes</a>
+<a href="students.html">♧ Students</a><a href="register-student.html">＋ Register Student</a><a href="fee-structure.html">₹ Fee Structure</a><a href="fee-payment.html">₹ Collect Fee</a>
+<a href="receipts.html">▤ Receipts</a><a href="attachments.html">📎 Attach File</a><a href="audit-logs.html">◷ Audit History</a><a href="reports.html">▤ Reports</a><a href="analytics.html">◈ Analytics</a>
+<a href="complaints.html">⚠ Complaints</a><a href="enquiries.html">✉ Enquire</a><button type="button" data-theme>◐ Theme</button><button type="button" data-logout>↪ Logout</button>
+</nav></aside>
+<main class="main"><header class="top"><div><button type="button" class="btn secondary menu" data-menu>☰</button> <b>AI Assistant</b></div><span class="muted" data-user></span></header>
+<section class="content ai-content">
+<div class="ai-shell">
+  <header class="ai-head">
+    <div class="ai-brand"><div class="ai-logo">✦</div><div><b>RMCTI AI</b><span>Your institute assistant · powered by Gemini</span></div></div>
+    <div class="ai-head-actions"><span class="ai-pill" data-ai-status><i></i>Checking…</span><button type="button" class="ai-btn ghost" data-ai-new aria-label="New chat">＋<span class="ai-new-label"> New chat</span></button></div>
+  </header>
+  <div class="ai-chat" data-ai-chat aria-live="polite"></div>
+  <form class="ai-composer" data-ai-form>
+    <div class="ai-input-wrap"><textarea data-ai-input rows="1" placeholder="Ask in plain words, e.g. “Rahul Das paid 500” or “show all teachers”" autocomplete="off"></textarea>
+    <button class="ai-send" data-ai-send type="submit" aria-label="Send message"><span>➤</span></button></div>
+    <p class="ai-hint">AI can make mistakes. Money, deletions and schedule changes always ask you to confirm first.</p>
+  </form>
 </div>
-<script src="../js/theme.js?v=20261010-ai4"></script>
-<script src="../js/api.js?v=20261010-ai4"></script>
-<script src="../js/utils.js?v=20261010-ai4"></script>
-<script src="../js/auth.js?v=20261010-ai4"></script>
-<script src="../js/pages.js?v=20261010-gemini-fix2"></script>
-<script src="../js/app.js?v=20261010-ai4"></script>
-</body>
-</html>
+</section></main></div>
+<script src="../js/theme.js?v=20260926"></script><script src="../js/api.js?v=20260926"></script><script src="../js/utils.js?v=20260926"></script><script src="../js/auth.js?v=20260926"></script><script src="../js/ai-markdown.js?v=20261011"></script><script src="../js/ai-assistant.js?v=20261011"></script><script src="../js/pages.js?v=20261011"></script><script src="../js/app.js?v=20261011"></script>
+</body></html>
