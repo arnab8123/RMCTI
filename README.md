@@ -289,13 +289,14 @@ Admin → Collect Fee now has **Discount / Fee Waiver**. The server records the 
 
 ## RMCTI AI Assistant configuration
 
-The admin AI now uses the server-side Google Gemini API when `GEMINI_API_KEY` is configured. Gemini interprets natural-language requests, conversation context, and follow-ups, while RMCTI's local admin/database tool router remains authoritative for reads and changes. Mutating actions still require the existing confirmation flow.
+The admin assistant uses the server-side Google Gemini API for conversation, intent understanding, and RMCTI tool selection. The backend remains the source of truth for live student, teacher, class, fee, attendance, schedule, receipt, complaint, enquiry, and audit data. The browser never receives the Gemini API key. If the key is missing or the provider is unavailable, the chat displays a setup/API error instead of silently reverting to a canned keyword bot. A singular request such as “mark Anova's fee paid” proposes the oldest outstanding month; use “mark all Anova's dues paid” or “settle Anova's full balance” when you mean every outstanding month.
 
-Set these environment variables in Render (never in frontend code):
-- `GEMINI_API_KEY` — your Google AI Studio Gemini API key
-- `GEMINI_MODEL` — defaults to `gemini-2.5-flash-lite`
+1. Create an API key in Google AI Studio.
+2. For local development, add it to your untracked `.env` file as `GEMINI_API_KEY=your_key_here`.
+3. For Render, open the backend web service → **Environment** and add `GEMINI_API_KEY` with your key, plus `GEMINI_MODEL=gemini-3.8-flash` (or another model enabled for your key). Save and redeploy/restart the service.
+4. Sign in as Admin → AI Assistant. The status badge reports whether the backend has a key configured.
 
-Without `GEMINI_API_KEY`, the existing deterministic RMCTI assistant still works for its supported commands.
+Do not put the key in frontend JavaScript, HTML, or CSS, and never commit `.env` to Git. The assistant supports natural-language lookup/list requests for students, teachers, classes, fee balances, attendance, schedules, receipts, complaints, enquiries, and recent audit history. Common writes (student/teacher registration, fee collection/waivers, student-to-class assignment, student deletion, and schedule changes) are presented for confirmation and then validated by the backend. Requests outside the wired operation set will be clarified rather than falsely reported as complete.
 
 
 ### Recent improvements (2026-10-10)

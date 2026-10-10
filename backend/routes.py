@@ -857,15 +857,26 @@ def public_stats():
         "total_teachers": Teacher.query.filter_by(status="active").count(),
     })
 
+@api.get("/admin/assistant/status")
+@roles("admin")
+def admin_assistant_status():
+    """Return non-secret readiness metadata for the admin assistant UI."""
+    return ok({
+        "configured": bool(os.getenv("GEMINI_API_KEY", "").strip()),
+        "model": os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip() or "gemini-3.8-flash",
+        "provider": "Google Gemini",
+    })
+
+
 @api.post("/admin/assistant")
 @_request_limit("60 per minute", scope="admin_assistant")
 @roles("admin")
 def admin_assistant():
-    """Zero-cost admin AI assistant/tool router.
+    """Gemini-powered admin assistant and allow-listed RMCTI tool router.
 
     The assistant never bypasses the existing admin JWT. Read requests query the
-    same models used by the admin UI; write requests are returned as a proposed
-    action and are only committed after an explicit confirmation.
+    same models used by the admin UI; sensitive writes are only committed after
+    an explicit confirmation and server-side validation.
     """
     from .assistant import assistant_handle
     b = request.get_json(silent=True) or {}

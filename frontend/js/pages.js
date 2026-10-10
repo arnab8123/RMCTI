@@ -2121,77 +2121,121 @@ const Page = (() => {
     const form = q('[data-ai-form]');
     const input = q('[data-ai-input]');
     const send = q('[data-ai-send]');
-    const suggestions = q('[data-ai-suggestions]');
-    if (!chat || !form || !input) return;
+    const status = q('[data-ai-status]');
+    const modelLabel = q('[data-ai-model]');
+    const clearButton = q('[data-ai-clear]');
+    if (!chat || !form || !input || !send) return;
 
-    // Start every visit with a completely fresh conversation. Nothing is
-    // restored from localStorage, so previous messages never reappear.
-    const KEY = 'rmcti_admin_ai_chat_v1';
-    try { localStorage.removeItem(KEY); } catch (_) {}
+    // Conversation and pending confirmations are deliberately page-scoped.
+    // No key or private conversation is stored in localStorage.
     let pendingAction = null;
     let messages = [];
+    let welcomeVisible = true;
+    const WELCOME_HTML = chat.querySelector('[data-ai-welcome]')?.outerHTML || '';
+
+    const setStatus = (kind, label) => {
+      if (!status) return;
+      status.classList.remove('is-ready', 'is-error');
+      if (kind === 'ready') status.classList.add('is-ready');
+      if (kind === 'error') status.classList.add('is-error');
+      const labelNode = status.querySelector('span');
+      if (labelNode) labelNode.textContent = label;
+    };
+
+    const refreshStatus = async () => {
+      try {
+        const d = await Api.get('/admin/assistant/status');
+        if (modelLabel) modelLabel.textContent = d.model || 'Gemini model';
+        if (d.configured) {
+          setStatus('ready', 'API ready');
+        } else {
+          setStatus('error', 'API key missing');
+          if (modelLabel) modelLabel.textContent = 'Add GEMINI_API_KEY to backend environment';
+        }
+      } catch (_) {
+        setStatus('error', 'Status unavailable');
+        if (modelLabel) modelLabel.textContent = 'Unable to check Gemini settings';
+      }
+    };
 
     const renderMarkdown = (value) => {
       let html = U.esc(String(value || ''));
       html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
       html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+      html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
       html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
       html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
       html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
       html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-      return html.replace(/\n/g, '<br>');
+      html = html.replace(/\n/g, '<br>');
+      return html;
+    };
+
+    const showTyping = () => {
+      const typing = document.createElement('article');
+      typing.className = 'ai-message ai-assistant ai-typing';
+      typing.innerHTML = '<div class="ai-avatar">✦</div><div class="ai-message-body"><div class="ai-message-meta">RMCTI Assistant <span>thinking</span></div><div class="ai-bubble"><span></span><span></span><span></span></div></div>';
+      chat.appendChild(typing);
+      chat.scrollTop = chat.scrollHeight;
+      return typing;
     };
 
     const add = (role, text, meta = {}) => {
-      messages.push({role, text, ...meta});
+      messages.push({ role, text: String(text || '') });
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const bubble = document.createElement('article');
-      bubble.className = `ai-message ${role === 'user' ? 'ai-user' : 'ai-assistant'}`;
-      bubble.innerHTML = `<div class="ai-avatar">${role === 'user' ? 'You' : '✦'}</div><div class="ai-bubble">${renderMarkdown(text)}</div>`;
+      bubble.className = `ai-message ai-${role}${meta.warning ? ' ai-warning' : ''}`;
+      const safeText = renderMarkdown(text);
+      const confirmation = meta.confirm ? '<div class="ai-confirm-controls"><button type="button" class="ai-confirm-yes" data-ai-confirm="yes">Yes, confirm</button><button type="button" class="ai-confirm-no" data-ai-confirm="cancel">Cancel</button></div>' : '';
+      bubble.innerHTML = `<div class="ai-avatar">${role === 'user' ? 'You' : '✦'}</div><div class="ai-message-body"><div class="ai-message-meta">${role === 'user' ? 'You' : 'RMCTI Assistant'} <span>${time}</span></div><div class="ai-bubble">${safeText}</div>${confirmation}</div>`;
       chat.appendChild(bubble);
       chat.scrollTop = chat.scrollHeight;
+      return bubble;
     };
-
-    // Do not inject a canned chatbot greeting. Gemini handles the conversation itself.
 
     const setBusy = (busy) => {
       input.disabled = busy;
       send.disabled = busy;
-      send.innerHTML = busy ? '<span class="ai-send-spinner"></span>' : 'Send <span>➤</span>';
+      send.innerHTML = busy ? '<span class="ai-send-spinner" aria-label="Thinking"></span>' : '<span>Send</span><b>↑</b>';
+      if (!busy) input.focus();
     };
 
     const ask = async (text) => {
       const message = String(text || '').trim();
-      if (!message) return;
+      if (!message || send.disabled) return;
+      chat.querySelector('[data-ai-welcome]')?.remove();
+      welcomeVisible = false;
       add('user', message);
       setBusy(true);
-      const typing = document.createElement('article');
-      typing.className = 'ai-message ai-assistant ai-typing';
-      typing.innerHTML = '<div class="ai-avatar">✦</div><div class="ai-bubble"><span></span><span></span><span></span></div>';
-      chat.appendChild(typing);
-      chat.scrollTop = chat.scrollHeight;
+      const typing = showTyping();
       try {
-        const history = messages.slice(0, -1).slice(-24).map(m => ({role:m.role, content:m.text}));
+        const history = messages.slice(0, -1).slice(-24).map(m => ({ role: m.role, content: m.text }));
         const payload = pendingAction
-          ? {message, confirm_action: pendingAction, history}
-          : {message, history};
+          ? { message, confirm_action: pendingAction, history }
+          : { message, history };
         const result = await Api.post('/admin/assistant', payload);
         typing.remove();
         pendingAction = result.action || null;
-        add('assistant', result.reply || 'Done.');
-        input.placeholder = result.confirm ? 'Type yes to confirm or no to cancel…' : 'Message RMCTI Assistant…';
+        add('assistant', result.reply || 'Gemini returned an empty reply. Please try again.', {
+          confirm: Boolean(result.confirm && result.action),
+          warning: Boolean(result.error_code)
+        });
+        input.placeholder = result.confirm ? 'Confirm the proposed change or cancel…' : 'Message RMCTI Assistant…';
       } catch (e) {
         typing.remove();
-        add('assistant', `I couldn't complete that request. ${e.message || 'Please try again.'}`);
+        add('assistant', `I couldn't complete that request. ${e.message || 'Please try again.'}`, { warning: true });
       } finally {
         setBusy(false);
-        input.focus();
       }
     };
 
     form.addEventListener('submit', e => {
       e.preventDefault();
       const value = input.value.trim();
+      if (!value) return;
       input.value = '';
+      input.style.height = '';
       ask(value);
     });
 
@@ -2202,11 +2246,40 @@ const Page = (() => {
       }
     });
 
-    suggestions?.addEventListener('click', e => {
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+    });
+
+    document.addEventListener('click', e => {
       const button = e.target.closest('[data-ai-prompt]');
-      if (!button) return;
+      if (!button || !document.body.contains(button)) return;
+      if (!button.closest('.ai-content')) return;
+      e.preventDefault();
       ask(button.dataset.aiPrompt || '');
     });
+
+    chat.addEventListener('click', e => {
+      const button = e.target.closest('[data-ai-confirm]');
+      if (!button) return;
+      ask(button.dataset.aiConfirm === 'yes' ? 'yes, confirm' : 'cancel');
+    });
+
+    clearButton?.addEventListener('click', () => {
+      pendingAction = null;
+      messages = [];
+      chat.innerHTML = WELCOME_HTML || '<div class="ai-empty-chat">Start a new RMCTI conversation using the message box below.</div>';
+      welcomeVisible = Boolean(WELCOME_HTML);
+      input.value = '';
+      input.placeholder = 'Message RMCTI Assistant…';
+      input.style.height = '';
+      chat.scrollTop = 0;
+      input.focus();
+    });
+
+    // Avoid unused-variable warnings in older browsers while keeping welcome state explicit.
+    void welcomeVisible;
+    await refreshStatus();
   }
 
   return { auth, dashboard, teachersPage, studentsPage, allClasses, registerPage, feeStructure, allocationPage, feePayment, receipts, receiptPrint, attachmentsPage, workPage, studentList, studentFees, teacherStudents, teacherClasses, auditLogs, studentDetails, adminComplaints, enquiries, studentComplaints, reportsPage, analyticsPage, assistantPage };

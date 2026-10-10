@@ -1,0 +1,53 @@
+/* A consistent dashboard design system for Admin, Teacher, and Student portals. */
+body[data-page="dashboard"] .content{max-width:1600px;margin:0 auto;padding-top:24px;padding-left:clamp(14px,2vw,28px);padding-right:clamp(14px,2vw,28px)}
+body[data-page="dashboard"] .dashboard-hero{position:relative;overflow:hidden;align-items:center;min-height:132px;margin:0 0 18px;padding:24px 26px;border:1px solid color-mix(in srgb,var(--primary) 19%,var(--border));border-radius:22px;background:radial-gradient(ellipse at 100% -5%,color-mix(in srgb,var(--primary) 13%,transparent),transparent 38%),linear-gradient(125deg,color-mix(in srgb,var(--primary) 7%,var(--surface)),var(--surface) 70%);box-shadow:0 10px 28px rgba(15,23,42,.045)}
+body[data-page="dashboard"] .dashboard-hero:after{content:"";position:absolute;right:-42px;bottom:-112px;width:210px;height:210px;border:1px solid color-mix(in srgb,var(--primary) 15%,transparent);border-radius:50%;box-shadow:0 0 0 22px color-mix(in srgb,var(--primary) 3%,transparent),0 0 0 45px color-mix(in srgb,var(--primary) 2%,transparent);pointer-events:none}
+body[data-page="dashboard"] .dashboard-hero>div{position:relative;z-index:1;min-width:0}
+body[data-page="dashboard"] .dashboard-hero h1{margin:6px 0 6px;font-size:clamp(25px,3vw,34px);line-height:1.12;letter-spacing:-.045em}
+body[data-page="dashboard"] .dashboard-hero p{font-size:13px;line-height:1.6}
+body[data-page="dashboard"] .eyebrow{display:inline-flex;align-items:center;gap:6px;font-size:9px;letter-spacing:.17em;font-weight:900}
+body[data-page="dashboard"] .dashboard-date{font-size:11px;border-radius:999px;padding:10px 13px;background:color-mix(in srgb,var(--surface) 92%,transparent);box-shadow:0 4px 12px rgba(15,23,42,.035)}
+body[data-page="dashboard"] .dashboard-stat-grid,body[data-page="dashboard"] .student-dashboard-stat-grid{gap:13px!important;align-items:stretch}
+body[data-page="dashboard"] .dashboard-stat-grid>.dashboard-stat,body[data-page="dashboard"] .student-dashboard-stat-grid>.student-dashboard-card{position:relative;margin:0!important;min-width:0;min-height:108px;padding:16px;border:1px solid var(--border);border-radius:17px;background:var(--surface);box-shadow:0 7px 22px rgba(15,23,42,.035);transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;overflow:hidden}
+body[data-page="dashboard"] .dashboard-stat-grid>.dashboard-stat:before,body[data-page="dashboard"] .student-dashboard-stat-grid>.student-dashboard-card:before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--stat,var(--primary));opacity:.82}
+body[data-page="dashboard"] .dashboard-stat-grid>.dashboard-stat:hover,body[data-page="dashboard"] .student-dashboard-stat-grid>.student-dashboard-card:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--stat,var(--primary)) 30%,var(--border));box-shadow:0 14px 32px rgba(15,23,42,.085)}
+body[data-page="dashboard"] .dashboard-stat-grid .dashboard-stat .muted{font-size:10px;line-height:1.5;font-weight:800}
+body[data-page="dashboard"] .dashboard-stat-grid .dashboard-stat strong{font-size:clamp(20px,2.1vw,27px);font-weight:900;letter-spacing:-.04em}
+body[data-page="dashboard"] .dashboard-stat-icon{border-radius:11px;width:38px;height:38px;font-size:17px}
+body[data-page="dashboard"] .dashboard-columns{gap:16px;margin-top:16px}
+body[data-page="dashboard"] .dashboard-side-column{gap:16px}
+body[data-page="dashboard"] .dashboard-panel{margin:0!important;padding:19px;border:1px solid var(--border);border-radius:18px;background:var(--surface);box-shadow:0 8px 28px rgba(15,23,42,.04)}
+body[data-page="dashboard"] .panel-heading,body[data-page="dashboard"] .section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}
+body[data-page="dashboard"] .panel-heading h2,body[data-page="dashboard"] .section-head h2{font-size:16px;letter-spacing:-.025em}
+body[data-page="dashboard"] .panel-heading p,body[data-page="dashboard"] .section-head p{font-size:10px;line-height:1.5}
+body[data-page="dashboard"] .today-class-row{grid-template-columns:84px minmax(0,1fr) auto;border-radius:12px;padding:12px;border-color:color-mix(in srgb,var(--border) 80%,var(--primary));background:var(--muted-surface)}
+body[data-page="dashboard"] .dashboard-list-row{padding:12px 0}
+body[data-page="dashboard"] .dashboard-list-row b{font-size:11px}
+body[data-page="dashboard"] .dashboard-list-row small{font-size:9px}
+body[data-page="dashboard"] .dashboard-footer-grid{gap:13px;margin-top:16px}
+body[data-page="dashboard"] .dashboard-footer-grid>.dashboard-mini-panel{margin:0!important;min-width:0;padding:14px;border:1px solid var(--border);border-radius:15px;background:var(--surface);box-shadow:0 6px 20px rgba(15,23,42,.035);transition:transform .17s ease,border-color .17s ease,box-shadow .17s ease}
+body[data-page="dashboard"] .dashboard-footer-grid>.dashboard-mini-panel:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--primary) 35%,var(--border));box-shadow:0 10px 24px rgba(15,23,42,.06)}
+body[data-page="dashboard"] .dashboard-mini-panel .mini-icon{border-radius:9px}
+body[data-page="dashboard"] .dashboard-mini-panel b{font-size:11px}
+body[data-page="dashboard"] .dashboard-mini-panel small{font-size:9px;line-height:1.45}
+body[data-page="dashboard"] .dashboard-mini-panel>strong{font-size:18px;letter-spacing:-.03em}
+body[data-page="dashboard"] .dashboard-two-col{gap:15px!important;align-items:stretch}
+body[data-page="dashboard"] .dashboard-two-col>.dashboard-panel{height:100%;box-sizing:border-box}
+body[data-role="teacher"][data-page="dashboard"] .teacher-hero{min-height:120px}
+body[data-role="teacher"][data-page="dashboard"] .teacher-stat-grid{gap:13px!important}
+body[data-role="teacher"][data-page="dashboard"] .teacher-stat-grid>.dashboard-stat{margin:0!important;min-height:108px}
+body[data-role="teacher"][data-page="dashboard"] .dashboard-two-col{margin-top:16px}
+body[data-role="student"][data-page="dashboard"] .content>h1{margin:3px 0 7px;font-size:clamp(25px,3vw,33px);letter-spacing:-.045em}
+body[data-role="student"][data-page="dashboard"] .content>p.muted{margin:0 0 18px;font-size:11px}
+body[data-role="student"][data-page="dashboard"] .student-dashboard-stat-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:13px!important}
+body[data-role="student"][data-page="dashboard"] .student-dashboard-card{display:flex;flex-direction:column;gap:10px;justify-content:space-between;min-height:145px!important;padding:18px!important;background:radial-gradient(ellipse at 100% 0%,color-mix(in srgb,var(--primary) 8%,transparent),transparent 48%),var(--surface)}
+body[data-role="student"][data-page="dashboard"] .student-dashboard-card>.muted{font-size:10px;font-weight:800}
+body[data-role="student"][data-page="dashboard"] .student-dashboard-card [data-today],body[data-role="student"][data-page="dashboard"] .student-dashboard-card [data-fee],body[data-role="student"][data-page="dashboard"] .student-dashboard-card [data-next-class]{font-size:15px;font-weight:900;line-height:1.5;overflow-wrap:anywhere}
+body[data-role="student"][data-page="dashboard"] .student-dashboard-card .loading{min-height:65px;padding:12px 0}
+body[data-role="student"][data-page="dashboard"] .student-dashboard-card:after{content:"↗";position:absolute;right:14px;bottom:12px;color:var(--primary);font-size:13px;font-weight:900}
+body[data-role="student"][data-page="dashboard"] .content>.card{margin-top:16px!important;padding:19px;border:1px solid var(--border);border-radius:18px;box-shadow:0 8px 28px rgba(15,23,42,.04)}
+body[data-role="student"][data-page="dashboard"] .content>.card h3{margin:0 0 13px;font-size:16px;letter-spacing:-.02em}
+@media(max-width:1100px){body[data-page="dashboard"] .dashboard-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}body[data-page="dashboard"] .dashboard-columns{grid-template-columns:1fr}body[data-role="student"][data-page="dashboard"] .student-dashboard-stat-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:850px){body[data-page="dashboard"] .content{padding-top:14px;padding-left:14px;padding-right:14px}body[data-page="dashboard"] .dashboard-hero{align-items:flex-start;flex-direction:column;padding:21px}.dashboard-date{align-self:flex-start}body[data-page="dashboard"] .dashboard-footer-grid{grid-template-columns:repeat(2,minmax(0,1fr))}body[data-role="student"][data-page="dashboard"] .student-dashboard-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){body[data-page="dashboard"] .dashboard-hero{padding:17px;border-radius:17px;margin-bottom:13px}body[data-page="dashboard"] .dashboard-hero h1{font-size:26px}body[data-page="dashboard"] .dashboard-stat-grid,body[data-role="teacher"][data-page="dashboard"] .teacher-stat-grid,body[data-role="student"][data-page="dashboard"] .student-dashboard-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px!important}body[data-page="dashboard"] .dashboard-stat-grid>.dashboard-stat,body[data-page="dashboard"] .student-dashboard-stat-grid>.student-dashboard-card{padding:12px;min-height:102px}body[data-page="dashboard"] .dashboard-stat-grid .dashboard-stat strong{font-size:19px}body[data-page="dashboard"] .dashboard-stat-icon{width:32px;height:32px;font-size:14px}body[data-page="dashboard"] .dashboard-panel{padding:14px;border-radius:15px}body[data-page="dashboard"] .panel-heading,body[data-page="dashboard"] .section-head{align-items:flex-start}body[data-page="dashboard"] .panel-heading .btn,body[data-page="dashboard"] .section-head .btn{padding:7px;font-size:9px}body[data-page="dashboard"] .today-class-row{grid-template-columns:66px minmax(0,1fr);gap:8px;padding:10px}body[data-page="dashboard"] .today-class-row>.badge{grid-column:2;justify-self:start}body[data-page="dashboard"] .dashboard-footer-grid{gap:9px}body[data-page="dashboard"] .dashboard-footer-grid>.dashboard-mini-panel{padding:11px}body[data-role="student"][data-page="dashboard"] .student-dashboard-card{min-height:120px!important}body[data-role="student"][data-page="dashboard"] .content>.card{padding:15px}}
+@media(max-width:410px){body[data-page="dashboard"] .dashboard-stat-grid,body[data-role="teacher"][data-page="dashboard"] .teacher-stat-grid,body[data-role="student"][data-page="dashboard"] .student-dashboard-stat-grid,body[data-page="dashboard"] .dashboard-footer-grid{grid-template-columns:1fr}body[data-page="dashboard"] .dashboard-stat-grid>.dashboard-stat{min-height:88px}body[data-role="student"][data-page="dashboard"] .student-dashboard-card{min-height:95px!important}body[data-page="dashboard"] .dashboard-mini-panel small{white-space:normal}}
