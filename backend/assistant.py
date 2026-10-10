@@ -519,18 +519,25 @@ def _execute_confirm(action, user_id):
 
 
 def _gemini_request(contents, system_instruction=None, response_json=False, tools=None):
-    """Make a server-side Gemini REST call without exposing the key to browsers."""
+    """Call Gemini server-side, retrying newer supported models when an old ID returns 404."""
+    import logging
+
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
-        raise GeminiRequestError("Gemini is not configured yet. Add GEMINI_API_KEY to your local .env file or Render environment variables, then restart/redeploy the backend.")
-    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
-    # Older deployments may still define the unavailable flash-lite model.
-    # Normalize that legacy setting so the chat does not fail before first use.
-    if model == "gemini-2.5-flash-lite":
-        model = "gemini-2.5-flash"
-    if not re.fullmatch(r"[A-Za-z0-9._-]{2,100}", model):
+        raise GeminiRequestError("Gemini is not configured. Add GEMINI_API_KEY to Render's backend environment, then redeploy.")
+
+    preferred = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip() or "gemini-3.8-flash"
+    if not re.fullmatch(r"[A-Za-z0-9._-]{2,100}", preferred):
         raise GeminiRequestError("GEMINI_MODEL is invalid. Use a model name supported by the Gemini API.")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+    # Render may still have GEMINI_MODEL pinned to Gemini 2.5, whose availability
+    # is now restricted for new API users. Try the configured choice first, then
+    # current stable models when Google explicitly says the model ID is not found.
+    candidates = []
+    for candidate in (preferred, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"):
+        if candidate not in candidates:
+            candidates.append(candidate)
+
     payload = {"contents": contents}
     if system_instruction:
         payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
@@ -539,8 +546,6 @@ def _gemini_request(contents, system_instruction=None, response_json=False, tool
     generation = {
         "maxOutputTokens": max(256, min(int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "2400")), 8192)),
     }
-    # Gemini 3 is designed around the default temperature. Keep this configurable
-    # for other model families, but don't force a low temperature by default.
     configured_temperature = os.getenv("GEMINI_TEMPERATURE", "")
     if configured_temperature:
         try:
@@ -561,42 +566,61 @@ def _gemini_request(contents, system_instruction=None, response_json=False, tool
             }
         })
     payload["generationConfig"] = generation
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if not isinstance(data, dict):
-                raise GeminiRequestError("Gemini returned an unexpected response. Please try again.")
-            return data
-    except urllib.error.HTTPError as exc:
+
+    last_404_model = None
+    for model in candidates:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+            method="POST",
+        )
         try:
-            body = json.loads(exc.read().decode("utf-8", errors="replace"))
-            detail = str((body.get("error") or {}).get("message") or "")
-        except Exception:
-            detail = ""
-        if exc.code in (401, 403):
-            message = "Gemini rejected the API key or its permissions. Check GEMINI_API_KEY in your backend environment."
-        elif exc.code == 429:
-            message = "Gemini rate limit or quota reached. Check your Google AI Studio quota/billing, then try again."
-        elif exc.code == 404:
-            message = f"Gemini model not found. Check GEMINI_MODEL (currently {model}) and use a model enabled for your API key."
-        elif exc.code == 400:
-            message = "Gemini rejected this request format. Check GEMINI_MODEL and update the backend if the model API has changed."
-        else:
-            message = "Gemini is temporarily unavailable. Please try again in a moment."
-        # Keep provider detail only for server logs; never return raw provider data or the request URL/key.
-        raise GeminiRequestError(message, exc.code) from None
-    except urllib.error.URLError:
-        raise GeminiRequestError("The backend couldn't reach Gemini. Check Render's outbound network and try again.") from None
-    except TimeoutError:
-        raise GeminiRequestError("Gemini took too long to respond. Please try a shorter request again.") from None
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        raise GeminiRequestError("Gemini returned an unreadable response. Please try again.") from None
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if not isinstance(data, dict):
+                    raise GeminiRequestError("Gemini returned an unexpected response. Please try again.")
+                return data
+        except urllib.error.HTTPError as exc:
+            try:
+                body = json.loads(exc.read().decode("utf-8", errors="replace"))
+                detail = str((body.get("error") or {}).get("message") or "")
+            except Exception:
+                detail = ""
+            logging.getLogger(__name__).warning(
+                "Gemini request failed: model=%s status=%s detail=%s", model, exc.code, detail[:500]
+            )
+            if exc.code == 404:
+                last_404_model = model
+                continue
+            if exc.code in (401, 403):
+                message = "Gemini rejected the API key or permissions. Check the key in Render and ensure the Gemini API is enabled for its Google Cloud project."
+            elif exc.code == 429:
+                message = "Gemini quota/rate limit reached. Check Google AI Studio usage and billing, then try again."
+            elif exc.code == 400:
+                # Preserve a useful distinction between invalid keys and invalid request payloads.
+                if "API_KEY_INVALID" in detail or "API key not valid" in detail:
+                    message = "The Gemini API key is invalid. Generate a valid key in Google AI Studio and update Render."
+                else:
+                    message = f"Gemini rejected the request for {model}. Check the backend model/API configuration."
+            elif exc.code >= 500:
+                message = "Gemini is temporarily unavailable. Please try again in a moment."
+            else:
+                message = f"Gemini request failed (HTTP {exc.code}). Check the backend logs for details."
+            raise GeminiRequestError(message, exc.code) from None
+        except urllib.error.URLError:
+            raise GeminiRequestError("The backend couldn't reach Gemini. Check Render's outbound network and try again.") from None
+        except TimeoutError:
+            raise GeminiRequestError("Gemini took too long to respond. Please try again.") from None
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise GeminiRequestError("Gemini returned an unreadable response. Please try again.") from None
+
+    tried = ", ".join(candidates)
+    raise GeminiRequestError(
+        f"Gemini could not find any configured model ({tried}). In Render → Environment, remove the old GEMINI_MODEL value or set it to gemini-3.8-flash, then redeploy. Check that the API key belongs to a project with Gemini API access.",
+        404,
+    )
 
 
 RMCTI_TOOL = {

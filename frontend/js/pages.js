@@ -2147,7 +2147,8 @@ const Page = (() => {
         const d = await Api.get('/admin/assistant/status');
         if (modelLabel) modelLabel.textContent = d.model || 'Gemini model';
         if (d.configured) {
-          setStatus('ready', 'API ready');
+          setStatus('ready', 'Key configured');
+          if (modelLabel && d.fallback_enabled) modelLabel.textContent = `${d.model || 'Gemini'} · auto fallback enabled`;
         } else {
           setStatus('error', 'API key missing');
           if (modelLabel) modelLabel.textContent = 'Add GEMINI_API_KEY to backend environment';

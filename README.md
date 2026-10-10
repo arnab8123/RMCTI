@@ -293,7 +293,7 @@ The admin assistant uses the server-side Google Gemini API for conversation, int
 
 1. Create an API key in Google AI Studio.
 2. For local development, add it to your untracked `.env` file as `GEMINI_API_KEY=your_key_here`.
-3. For Render, open the backend web service → **Environment** and add `GEMINI_API_KEY` with your key, plus `GEMINI_MODEL=gemini-2.5-flash` (or another model enabled for your key). Save and redeploy/restart the service.
+3. For Render, open the backend web service → **Environment** and add `GEMINI_API_KEY` with your key, plus `GEMINI_MODEL=gemini-3.8-flash` (recommended; if an older configured model returns 404, the backend retries current stable models automatically). Save and redeploy/restart the service.
 4. Sign in as Admin → AI Assistant. The status badge reports whether the backend has a key configured.
 
 Do not put the key in frontend JavaScript, HTML, or CSS, and never commit `.env` to Git. The assistant supports natural-language lookup/list requests for students, teachers, classes, fee balances, attendance, schedules, receipts, complaints, enquiries, and recent audit history. Common writes (student/teacher registration, fee collection/waivers, student-to-class assignment, student deletion, and schedule changes) are presented for confirmation and then validated by the backend. Requests outside the wired operation set will be clarified rather than falsely reported as complete.

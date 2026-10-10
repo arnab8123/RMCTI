@@ -861,9 +861,12 @@ def public_stats():
 @roles("admin")
 def admin_assistant_status():
     """Return non-secret readiness metadata for the admin assistant UI."""
+    configured_model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip() or "gemini-3.8-flash"
     return ok({
         "configured": bool(os.getenv("GEMINI_API_KEY", "").strip()),
-        "model": ("gemini-2.5-flash" if os.getenv("GEMINI_MODEL", "").strip() == "gemini-2.5-flash-lite" else (os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash")),
+        "model": configured_model,
+        "fallback_model": "gemini-3.8-flash",
+        "fallback_enabled": True,
         "provider": "Google Gemini",
     })
 
