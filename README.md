@@ -296,3 +296,10 @@ Set these environment variables in Render (never in frontend code):
 - `GEMINI_MODEL` — defaults to `gemini-2.5-flash-lite`
 
 Without `GEMINI_API_KEY`, the existing deterministic RMCTI assistant still works for its supported commands.
+
+
+### Recent improvements (2026-10-10)
+- Extra classes can be scheduled for any future date, including later today. For same-day entries, choose a start time later than the current India time.
+- Admin can permanently delete complaints and enquiries. Records older than 10 days are purged automatically during API traffic (the free Render service does not provide a continuously running background scheduler).
+- The browser makes a lightweight `/health` request every 3 minutes while the RMCTI tab is visible to reduce idle spin-down; Render may still apply platform-level limits.
+- The Gemini assistant uses `GEMINI_API_KEY` and `GEMINI_MODEL` on the backend only. Add the key in Render → Environment; never place it in frontend JavaScript or commit it to Git. Commands that change fees, schedules, or records remain subject to server validation and confirmation.

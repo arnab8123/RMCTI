@@ -516,7 +516,7 @@ const Page = (() => {
             </div>
             <div data-extra-date-wrap style="display:none">
               <label class="label">Extra class date</label>
-              <input class="input" type="date" name="extra_date" data-extra-date>
+              <input class="input" type="date" name="extra_date" data-extra-date min="${today}">
             </div>
             <div data-extra-teacher style="display:none">
               <label class="label">Teacher</label>
@@ -623,8 +623,13 @@ const Page = (() => {
         action.addEventListener('change',refreshFields);
         existing.addEventListener('change',syncSelectedClass);
         weekInput.addEventListener('change',loadSchedule);
-        extraDate.addEventListener('change',()=>{
-          if(extraDate.value) weekInput.value=getMonday(extraDate.value);
+        extraDate.addEventListener('change',async()=>{
+          if(!extraDate.value) return;
+          if(extraDate.value < today){ U.toast('Extra classes cannot be scheduled in the past','error'); extraDate.value=today; }
+          weekInput.value=getMonday(extraDate.value);
+          // Load the selected date's week immediately so the request always sends
+          // a matching week_start, including for a class later today.
+          await loadSchedule();
         });
 
         const loadChanges=async()=>{
@@ -1987,9 +1992,17 @@ const Page = (() => {
     const status=q('[data-status]'), body=q('[data-body]');
     const load=async()=>{
       const rows=await Api.get('/admin/enquiries',{status:status?.value||''});
-      fill(body,rows.map(e=>`<tr><td>${U.datetime(e.created_at)}</td><td><b>${U.esc(e.name)}</b></td><td>${U.esc(e.phone)}</td><td style="white-space:pre-wrap;max-width:360px">${U.esc(e.message)}</td><td><span class="badge ${e.status==='new'?'due':e.status==='resolved'?'paid':'active'}">${U.esc(e.status)}</span></td><td><button type="button" class="btn warning small" data-enquiry-edit="${e.id}">Update</button></td></tr>`).join('')||tableEmpty(6,'No enquiries yet. Messages sent from the public Contact form will appear here.'));
+      fill(body,rows.map(e=>`<tr><td>${U.datetime(e.created_at)}</td><td><b>${U.esc(e.name)}</b></td><td>${U.esc(e.phone)}</td><td style="white-space:pre-wrap;max-width:360px">${U.esc(e.message)}</td><td><span class="badge ${e.status==='new'?'due':e.status==='resolved'?'paid':'active'}">${U.esc(e.status)}</span></td><td><div class="right"><button type="button" class="btn warning small" data-enquiry-edit="${e.id}">Update</button><button type="button" class="btn danger small" data-enquiry-delete="${e.id}">Delete</button></div></td></tr>`).join('')||tableEmpty(6,'No enquiries yet. Messages sent from the public Contact form will appear here.'));
       body?.querySelectorAll('[data-enquiry-edit]').forEach(btn=>btn.onclick=async()=>{const item=rows.find(x=>String(x.id)===String(btn.dataset.enquiryEdit));if(!item)return;const m=U.modal('Update enquiry',`<form id="enquiryEdit" class="form"><div><label class="label">Name</label><input class="input" value="${U.esc(item.name)}" disabled></div><div><label class="label">Phone</label><input class="input" value="${U.esc(item.phone)}" disabled></div><div class="full"><label class="label">Message</label><textarea class="input" rows="5" disabled>${U.esc(item.message)}</textarea></div><div><label class="label">Status</label><select class="select" name="status"><option value="new" ${item.status==='new'?'selected':''}>New</option><option value="read" ${item.status==='read'?'selected':''}>Read</option><option value="resolved" ${item.status==='resolved'?'selected':''}>Resolved</option></select></div><div><label class="label">Admin note</label><textarea class="input" name="admin_note" rows="3">${U.esc(item.admin_note||'')}</textarea></div><div class="full right" style="justify-content:flex-end"><button class="btn primary">Save update</button></div></form>`);m.querySelector('#enquiryEdit').onsubmit=async ev=>{ev.preventDefault();try{await Api.put(`/admin/enquiries/${item.id}`,formObj(ev.currentTarget));m.remove();U.toast('Enquiry updated');load()}catch(x){U.toast(x.message,'error')}};});
     };
+    body?.addEventListener('click',async ev=>{
+      const btn=ev.target.closest('[data-enquiry-delete]'); if(!btn)return;
+      const id=btn.dataset.enquiryDelete;
+      U.confirm('Delete enquiry?','This permanently deletes the selected enquiry.',async()=>{
+        try{await Api.del(`/admin/enquiries/${id}`);U.toast('Enquiry deleted');await load();}
+        catch(err){U.toast(err.message||'Could not delete enquiry','error');}
+      });
+    });
     status?.addEventListener('change',load);
     q('[data-refresh-enquiries]')?.addEventListener('click',load);
     await load();
@@ -2003,12 +2016,14 @@ const Page = (() => {
         <td data-label="Complaint"><b>${U.esc(c.subject)}</b><div class="muted complaint-description">${U.esc(c.description)}</div></td>
         <td data-label="Class">${U.esc(c.class_name || 'Not mentioned')}</td>
         <td data-label="Status"><span class="badge ${c.status==='resolved'?'paid':c.status==='in_progress'?'active':'due'}">${U.esc(c.status.replace('_',' '))}</span></td>
-        <td data-label="Action"><button class="btn warning small" data-complaint-edit="${c.id}">Update</button></td>
+        <td data-label="Action"><div class="right"><button class="btn warning small" data-complaint-edit="${c.id}">Update</button><button class="btn danger small" data-complaint-delete="${c.id}">Delete</button></div></td>
       </tr>`).join('')||tableEmpty(4,'No complaints found.'));
     };
     status?.addEventListener('change',load);
     body?.addEventListener('click',async e=>{
-      const id=e.target.dataset.complaintEdit;if(!id)return;
+      const deleteButton=e.target.closest('[data-complaint-delete]');
+      if(deleteButton){const id=deleteButton.dataset.complaintDelete;U.confirm('Delete complaint?','This permanently deletes the selected complaint.',async()=>{try{await Api.del(`/complaints/${id}`);U.toast('Complaint deleted');await load();}catch(err){U.toast(err.message||'Could not delete complaint','error');}});return;}
+      const id=e.target.closest('[data-complaint-edit]')?.dataset.complaintEdit;if(!id)return;
       const c=rows.find(x=>String(x.id)===String(id));if(!c)return;
       const m=U.modal('Update complaint',`<form id="complaintEdit" class="form">
         <div class="full"><label class="label">Complaint</label><div class="card pad complaint-readonly"><b>${U.esc(c.subject)}</b><p>${U.esc(c.description)}</p></div></div>

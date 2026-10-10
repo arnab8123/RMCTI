@@ -483,3 +483,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (window.U?.toast) U.toast(error.message || 'Unable to load this page.', 'error');
   }
 });
+
+
+// Keep an open RMCTI tab responsive on hosts that idle inactive services.
+// Pings are limited to a lightweight health endpoint, every 3 minutes, only
+// while this tab is visible; this does not replace a production uptime plan.
+(function rmctiTabHealthPulse(){
+  const ping=()=>{ if(document.visibilityState==='visible') fetch('/health',{method:'GET',cache:'no-store',credentials:'same-origin'}).catch(()=>{}); };
+  window.setTimeout(ping,1500);
+  window.setInterval(ping,180000);
+})();

@@ -77,6 +77,17 @@ def user_profile(u):
         s=Student.query.filter_by(user_id=u.id).first(); x.update({"name":s.name,"student_id":s.student_id} if s else {})
     return x
 
+def _purge_old_feedback():
+    """Remove complaints and public enquiries older than ten days when the API is active."""
+    cutoff = datetime.now(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None) - timedelta(days=10)
+    try:
+        Complaint.query.filter(Complaint.created_at < cutoff).delete(synchronize_session=False)
+        Enquiry.query.filter(Enquiry.created_at < cutoff).delete(synchronize_session=False)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
 def _enquiry_row(e):
     return {
         "id": e.id,
@@ -130,6 +141,7 @@ def create_enquiry_legacy():
 
 
 def _list_enquiries():
+    _purge_old_feedback()
     status = request.args.get("status", "").strip()
     q = request.args.get("q", "").strip().lower()
     query = Enquiry.query
@@ -177,6 +189,16 @@ def _update_enquiry(id):
         db.session.rollback()
         raise
     return ok(_enquiry_row(e), "Enquiry updated")
+
+
+@api.delete("/admin/enquiries/<int:id>")
+@roles("admin")
+def delete_admin_enquiry(id):
+    _purge_old_feedback()
+    item = Enquiry.query.get(id)
+    if not item: return err("Enquiry not found", 404)
+    db.session.delete(item); db.session.commit()
+    return ok(message="Enquiry deleted")
 
 
 @api.put("/admin/enquiries/<int:id>")
@@ -1387,8 +1409,17 @@ def create_schedule_exception():
                 return err("Original date must belong to the selected week")
         if kind in ("reschedule","weekly_time") and target_date < today:
             return err("New date cannot be before today")
-        if kind=="extra" and (not schedule_date or _week_start(schedule_date)!=ws):
-            return err("Extra class date must belong to the selected week")
+        if kind=="extra":
+            if not schedule_date:
+                return err("Choose the extra class date")
+            if schedule_date < today:
+                return err("An extra class cannot be scheduled in the past")
+            if schedule_date == today:
+                now_local = datetime.now(ZoneInfo("Asia/Kolkata")).time().replace(second=0, microsecond=0)
+                if start_time <= now_local:
+                    return err("For today's extra class, choose a start time that is still in the future")
+            if _week_start(schedule_date) != ws:
+                return err("The selected week must match the extra class date")
         if kind=="extra" and not teacher_id:
             return err("Select the teacher for the extra class")
         if teacher_id:
@@ -1942,6 +1973,7 @@ def admin_class_attendance_history(class_id):
 @api.get("/complaints")
 @roles("admin")
 def admin_complaints():
+    _purge_old_feedback()
     status=request.args.get("status","").strip()
     query=Complaint.query
     if status in ("open","in_progress","resolved"): query=query.filter_by(status=status)
@@ -1967,6 +1999,16 @@ def admin_complaints():
             "created_at":iso_ist(c.created_at)
         })
     return ok(out)
+
+@api.delete("/complaints/<int:id>")
+@roles("admin")
+def delete_admin_complaint(id):
+    _purge_old_feedback()
+    item = Complaint.query.get(id)
+    if not item: return err("Complaint not found", 404)
+    db.session.delete(item); db.session.commit()
+    return ok(message="Complaint deleted")
+
 
 @api.put("/complaints/<int:id>")
 @roles("admin")

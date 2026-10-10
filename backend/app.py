@@ -28,6 +28,27 @@ def create_app():
     )
     app.register_blueprint(api)
 
+    @app.before_request
+    def cleanup_expired_feedback():
+        # A lightweight request-triggered cleanup works on Render without a
+        # scheduler/worker. It runs at most once per six hours per worker.
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        last = app.extensions.get("rmcti_feedback_cleanup_at")
+        if last and (now - last).total_seconds() < 21600:
+            return None
+        app.extensions["rmcti_feedback_cleanup_at"] = now
+        try:
+            from .models import Complaint, Enquiry
+            cutoff = now.replace(tzinfo=None) - timedelta(days=10)
+            Complaint.query.filter(Complaint.created_at < cutoff).delete(synchronize_session=False)
+            Enquiry.query.filter(Enquiry.created_at < cutoff).delete(synchronize_session=False)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return None
+
     @jwt.token_in_blocklist_loader
     def is_token_revoked(jwt_header, jwt_payload):
         from .models import TokenBlocklist

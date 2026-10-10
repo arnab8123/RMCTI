@@ -1,1 +1,12 @@
 /* Admin-specific overrides. */
+
+
+/* Consistent dashboard hierarchy across admin, teacher and student pages */
+.dashboard-grid,.stats-grid,.stat-grid,.dashboard-stats{gap:16px!important;align-items:stretch;}
+.dashboard-grid>.card,.stats-grid>.card,.stat-grid>.card,.dashboard-stats>.card{border:1px solid var(--border);border-radius:18px;box-shadow:0 8px 26px rgba(15,23,42,.045);transition:transform .16s ease,box-shadow .16s ease;}
+.dashboard-grid>.card:hover,.stats-grid>.card:hover,.stat-grid>.card:hover,.dashboard-stats>.card:hover{transform:translateY(-2px);box-shadow:0 13px 34px rgba(15,23,42,.08);}
+.content>h1{letter-spacing:-.035em;}
+.content>.toolbar{margin:16px 0 20px;gap:12px;flex-wrap:wrap;}
+.content .card.table{border-radius:16px;overflow:auto;}
+.content table th{font-size:11px;letter-spacing:.045em;text-transform:uppercase;}
+@media(max-width:700px){.dashboard-grid,.stats-grid,.stat-grid,.dashboard-stats{gap:10px!important;}.content{padding:16px!important;}.content>h1{font-size:24px;}}

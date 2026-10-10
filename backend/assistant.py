@@ -716,11 +716,14 @@ def _assistant_handle_deterministic(raw, user_id=None, history=None):
         amount = _parse_money(raw, ("amount", "payment", "paid", "pay", "collect"))
         if not student:
             return {"reply": "Which student is making the payment? Give the student's name or ID."}
-        if amount is None or amount <= 0:
-            return {"reply": f"How much did **{student.name}** pay?"}
         oldest, balance = __import__("backend.routes", fromlist=["oldest_due_month"]).oldest_due_month(student.id)
         if not oldest:
             return {"reply": f"**{student.name}** has no outstanding fee balance."}
+        full_payment = bool(re.search(r"\b(mark|set|make|consider)\b.{0,25}\b(paid|full)\b|\b(full fee|fee in full|paid in full|pay all dues|clear all dues)\b", t))
+        if (amount is None or amount <= 0) and full_payment:
+            amount = balance
+        if amount is None or amount <= 0:
+            return {"reply": f"How much did **{student.name}** pay? If they paid the full outstanding amount, say `mark {student.name} paid in full`."}
         return {"reply": f"I can record **{_money(amount)}** from **{student.name}** against **{oldest.strftime('%B %Y')}**. Shall I save it?",
                 "confirm": True,
                 "action": {"type":"collect_fee","student_id":student.id,"month":oldest.strftime("%Y-%m"),"amount":float(amount),"discount":0,"payment_method":"cash"}}
