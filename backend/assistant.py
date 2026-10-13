@@ -374,7 +374,7 @@ def assistant_chat(message, history, user):
         ctx = _context(user)
         return run_agent(ctx, message, history, current_app.config["SECRET_KEY"],
                          confirm_risky=assistant_status()["confirm_risky"],
-                         budget=int(_cfg("AI_TIME_BUDGET", "25") or 25))
+                         budget=int(_cfg("AI_TIME_BUDGET", "55") or 55))
     except GeminiError as e:
         return {"error": "gemini", "reply": f"⚠️ {e}", "steps": [], "pending": [], "cards": []}
     except Exception:

@@ -833,9 +833,20 @@ def download_attachment(id):
     if not _attachment_visible_to_current_user(row):
         return err("You do not have access to this file",403)
     if row.cloudinary_url:
-        return Response("", status=302, headers={"Location": row.cloudinary_url, "Cache-Control": "private, max-age=300"})
+        try:
+            import urllib.request
+            req = urllib.request.Request(row.cloudinary_url, headers={"User-Agent": "RMCTI-file-proxy/1.0"})
+            with urllib.request.urlopen(req, timeout=20) as remote:
+                payload = remote.read(15 * 1024 * 1024 + 1)
+            if len(payload) > 15 * 1024 * 1024:
+                return err("Stored file exceeds the download limit", 413)
+            return send_file(io.BytesIO(payload), mimetype=row.mime_type or "application/octet-stream",
+                             as_attachment=True, download_name=row.original_filename, max_age=60)
+        except Exception:
+            current_app.logger.exception("Could not proxy notice attachment %s", id)
+            return err("Could not retrieve this file from storage. Please contact the administrator.", 502)
     if row.data:
-        return send_file(io.BytesIO(bytes(row.data)),mimetype=row.mime_type,as_attachment=False,download_name=row.original_filename,max_age=300)
+        return send_file(io.BytesIO(bytes(row.data)),mimetype=row.mime_type,as_attachment=True,download_name=row.original_filename,max_age=300)
     return err("Attachment storage is unavailable",410)
 
 @api.get("/subjects")
@@ -1929,6 +1940,38 @@ def admin_class_attendance_history(class_id):
     c=Class.query.get(class_id)
     if not c:return err("Course not found",404)
     if c.status!="active":return err("Course is inactive",404)
+    # Repair missed roll calls on history access: past scheduled sessions with no
+    # attendance become all-absent, and any missing student rows are filled absent.
+    # This is intentionally bounded to the last 180 days to keep the request fast.
+    try:
+        local_now=datetime.now(ZoneInfo("Asia/Kolkata"))
+        backfill_start=local_now.date()-timedelta(days=180)
+        roster_rows=(StudentClass.query.filter_by(class_id=class_id,status="active")
+                     .order_by(StudentClass.student_id.asc()).all())
+        roster_by_date={}
+        for d_off in range(180):
+            session_date=backfill_start+timedelta(days=d_off)
+            if session_date>=local_now.date(): continue
+            sessions=_effective_class_schedule(c,session_date,1)
+            for session in sessions:
+                if session.get("date")!=session_date.isoformat(): continue
+                end_time=pt(session.get("end_time"))
+                if end_time and session_date==local_now.date() and end_time>=local_now.time().replace(tzinfo=None): continue
+                st=pt(session.get("start_time")); et=end_time
+                if not st or not et: continue
+                eligible=[sc.student_id for sc in roster_rows if sc.assigned_at is None or sc.assigned_at.date()<=session_date]
+                if not eligible: continue
+                existing=Attendance.query.filter(Attendance.class_id==class_id,Attendance.attendance_date==session_date,
+                    Attendance.session_start_time==st,Attendance.session_end_time==et).all()
+                existing_ids={a.student_id for a in existing}
+                for sid in eligible:
+                    if sid not in existing_ids:
+                        db.session.add(Attendance(student_id=sid,class_id=class_id,attendance_date=session_date,
+                            session_start_time=st,session_end_time=et,status="absent",marked_by=current_user().id))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Attendance missed-session backfill failed for class %s",class_id)
     date_filter=request.args.get("date","").strip()
     from_date=request.args.get("from","").strip()
     to_date=request.args.get("to","").strip()
@@ -1951,6 +1994,7 @@ def admin_class_attendance_history(class_id):
         end=r.session_end_time.strftime("%H:%M") if r.session_end_time else None
         key=(day,start,end)
         grouped.setdefault(key,[]).append({
+            "id":r.student_id,
             "student_id":students[r.student_id].student_id if r.student_id in students else "",
             "name":students[r.student_id].name if r.student_id in students else "Unknown",
             "status":r.status
@@ -1970,6 +2014,46 @@ def admin_class_attendance_history(class_id):
     days.sort(key=lambda x:(x["date"],x.get("start_time") or ""),reverse=True)
     sub=subject_obj(c.subject_id)
     return ok({"class_id":class_id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "","history":days})
+
+@api.put("/admin/classes/<int:class_id>/attendance")
+@roles("admin")
+def admin_update_class_attendance(class_id):
+    """Create or correct attendance for any date/session, including historical sessions."""
+    c=Class.query.get(class_id)
+    if not c:return err("Course not found",404)
+    b=request.get_json(silent=True) or {}
+    try:
+        day=date.fromisoformat(str(b.get("date", "")))
+        start=pt(b.get("start_time"),True)
+        end=pt(b.get("end_time"),True)
+        if start >= end:return err("End time must be after start time")
+        rows=b.get("attendance")
+        if not isinstance(rows,list) or not rows:return err("Attendance list is required")
+        allowed={x.student_id for x in StudentClass.query.filter_by(class_id=class_id,status="active").all()}
+        seen=set()
+        for item in rows:
+            sid=int(item.get("student_id",0)); status=str(item.get("status","")).lower()
+            if sid not in allowed:return err("Student is not currently allotted to this course",403)
+            if sid in seen:return err("Duplicate student in attendance")
+            if status not in ("present","absent"):return err("Status must be present or absent")
+            seen.add(sid)
+        if seen != allowed:return err("Submit a status for every currently allotted student")
+        existing=Attendance.query.filter(Attendance.class_id==class_id,Attendance.attendance_date==day,
+            Attendance.session_start_time==start,Attendance.session_end_time==end,Attendance.student_id.in_(allowed or [-1])).all()
+        by_student={x.student_id:x for x in existing}
+        for item in rows:
+            sid=int(item["student_id"]); status=str(item["status"]).lower(); rec=by_student.get(sid)
+            if rec: rec.status=status; rec.marked_by=current_user().id
+            else: db.session.add(Attendance(student_id=sid,class_id=class_id,attendance_date=day,
+                session_start_time=start,session_end_time=end,status=status,marked_by=current_user().id))
+        audit(current_user().id,"update","attendance",class_id,f"Admin corrected attendance for {day.isoformat()} {start}-{end}")
+        db.session.commit()
+        return ok({"date":day.isoformat(),"start_time":start.strftime("%H:%M"),"end_time":end.strftime("%H:%M"),"count":len(rows)},"Attendance saved by admin")
+    except (ValueError,TypeError):
+        db.session.rollback();return err("Invalid date, time, or attendance data")
+    except Exception:
+        db.session.rollback();current_app.logger.exception("Admin attendance update failed")
+        return err("Could not save attendance")
 
 @api.get("/complaints")
 @roles("admin")
@@ -3181,7 +3265,18 @@ def download_classwork_attachment(id):
         s=student_for_user();allowed=bool(StudentClass.query.filter_by(student_id=s.id,class_id=w.class_id,status="active").first())
     if not allowed:return err("You do not have access to this file",403)
     if a.cloudinary_url:
-        return Response("", status=302, headers={"Location": a.cloudinary_url, "Cache-Control": "private, max-age=300"})
+        try:
+            import urllib.request
+            req = urllib.request.Request(a.cloudinary_url, headers={"User-Agent": "RMCTI-file-proxy/1.0"})
+            with urllib.request.urlopen(req, timeout=20) as remote:
+                payload = remote.read(15 * 1024 * 1024 + 1)
+            if len(payload) > 15 * 1024 * 1024:
+                return err("Stored file exceeds the download limit", 413)
+            return send_file(io.BytesIO(payload), mimetype=a.mime_type or "application/octet-stream",
+                             as_attachment=True, download_name=a.original_filename, max_age=60)
+        except Exception:
+            current_app.logger.exception("Could not proxy classwork attachment %s", id)
+            return err("Could not retrieve this file from storage. Please contact the administrator.", 502)
     if a.data:
         return send_file(io.BytesIO(bytes(a.data)),mimetype=a.mime_type,as_attachment=True,download_name=a.original_filename,max_age=300)
     return err("Attachment storage is unavailable",410)

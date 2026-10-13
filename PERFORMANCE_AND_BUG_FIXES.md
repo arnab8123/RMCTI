@@ -24,3 +24,12 @@
 ## Verification
 - Python syntax compilation passed for backend and migration scripts.
 - JavaScript syntax checks passed for all frontend JS files.
+
+## October 2026 fixes
+- Admin attendance history now repairs missed scheduled roll calls in the previous 180 days: students active on the course roster who were assigned by that session date are recorded absent when no mark exists. Any missing rows in an existing session are also filled as absent.
+- Admin attendance history allows changing a student's status for a dated session and saving it. A backend admin-only endpoint validates that every currently enrolled student has a present/absent status and records an audit entry.
+- Admin notice-board and teacher classwork downloads are served through the authenticated Flask endpoint instead of redirecting the browser to Cloudinary. This avoids cross-origin fetch/blob failures in the frontend and forces file downloads.
+- Gemini AI's default overall time budget is increased from 25 to 55 seconds to reduce premature timeout errors during multi-step tool calls. You can override this with `AI_TIME_BUDGET`.
+- Extra classes can be scheduled during the current week; the existing backend validates the selected date against its week and still rejects past dates/times.
+
+After deploying, check the Render logs and confirm `GEMINI_API_KEY`, `CLOUDINARY_URL`, and database environment variables are configured. No schema migration is required for these changes.
