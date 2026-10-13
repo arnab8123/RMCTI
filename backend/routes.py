@@ -799,7 +799,8 @@ def upload_attachment():
     else:
         target_student_id=target_class_id=None
     try:
-        cloud_url, public_id, resource_type = _cloudinary_upload(data, name, folder=os.getenv("CLOUDINARY_FILE_FOLDER", "rmcti/notice-board"))
+        resource_type_hint = "image" if mime.startswith("image/") else "raw"
+        cloud_url, public_id, resource_type = _cloudinary_upload(data, name, folder=os.getenv("CLOUDINARY_FILE_FOLDER", "rmcti/notice-board"), resource_type=resource_type_hint)
         row=NoticeAttachment(title=title[:255],original_filename=name,mime_type=mime,file_size=len(data),
             cloudinary_url=cloud_url,cloudinary_public_id=public_id,cloudinary_resource_type=resource_type,data=None,
             uploaded_by=current_user().id,target_type=target_type,target_student_id=target_student_id,target_class_id=target_class_id)
@@ -3155,7 +3156,8 @@ def add_classwork():
         for f in files:
             name=secure_filename(f.filename) or f"classwork-{uuid.uuid4().hex}"
             mime=(f.mimetype or "application/octet-stream").lower()[:255]
-            cloud_url, public_id, resource_type = _cloudinary_upload(f._rmcti_data, name, folder=os.getenv("CLOUDINARY_FILE_FOLDER", "rmcti/classwork"))
+            resource_type_hint = "image" if mime.startswith("image/") else "raw"
+            cloud_url, public_id, resource_type = _cloudinary_upload(f._rmcti_data, name, folder=os.getenv("CLOUDINARY_FILE_FOLDER", "rmcti/classwork"), resource_type=resource_type_hint)
             a=ClassworkAttachment(classwork_id=w.id,original_filename=name,
                                   mime_type=mime,file_size=len(f._rmcti_data),
                                   cloudinary_url=cloud_url,cloudinary_public_id=public_id,cloudinary_resource_type=resource_type,data=None)
@@ -3207,7 +3209,8 @@ def add_classwork_attachment(id):
 
             name=secure_filename(f.filename) or f"classwork-{uuid.uuid4().hex}"
             mime=(f.mimetype or "application/octet-stream").lower()[:255]
-            cloud_url, public_id, resource_type = _cloudinary_upload(data, name, folder=os.getenv("CLOUDINARY_FILE_FOLDER", "rmcti/classwork"))
+            resource_type_hint = "image" if mime.startswith("image/") else "raw"
+            cloud_url, public_id, resource_type = _cloudinary_upload(data, name, folder=os.getenv("CLOUDINARY_FILE_FOLDER", "rmcti/classwork"), resource_type=resource_type_hint)
             a=ClassworkAttachment(
                 classwork_id=w.id,
                 original_filename=name,

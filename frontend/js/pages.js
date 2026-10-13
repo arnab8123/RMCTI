@@ -1912,8 +1912,8 @@ const Page = (() => {
     try {
       const token=sessionStorage.getItem('token');
       const r=await fetch(`${API}/classwork/attachments/${id}/download`,{headers:{Authorization:`Bearer ${token}`}});
-      if(!r.ok) throw Error('Could not open attachment');
-      const blob=await r.blob(); const url=URL.createObjectURL(blob); window.open(url,'_blank','noopener'); setTimeout(()=>URL.revokeObjectURL(url),60000);
+      if(!r.ok) { let message='Could not open attachment'; try { const body=await r.json(); message=body.message||body.error||message; } catch(_) {} throw Error(message); }
+      const blob=await r.blob(); const url=URL.createObjectURL(blob); const tab=window.open(url,'_blank','noopener'); if(!tab){ const a=document.createElement('a'); a.href=url; a.download='attachment'; document.body.appendChild(a); a.click(); a.remove(); } setTimeout(()=>URL.revokeObjectURL(url),60000);
     } catch(e) { U.toast(e.message||'Could not open attachment','error'); }
   }
 
@@ -2097,7 +2097,7 @@ const Page = (() => {
       const del=e.target.closest('[data-delete-file]')?.dataset.deleteFile;
       if(del){U.confirm('Delete attachment?', 'This file will be permanently deleted from the institute notice board.', async()=>{try{await Api.del(`/admin/attachments/${del}`);U.toast('File deleted');load();}catch(x){U.toast(x.message,'error')}});return;}
       if(!open)return;
-      try{const token=sessionStorage.getItem('token');const r=await fetch(`${API}/attachments/${open}/download`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw Error('Could not open file');const blob=await r.blob();const url=URL.createObjectURL(blob);window.open(url,'_blank','noopener');setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(x){U.toast(x.message||'Could not open file','error')}
+      try{const token=sessionStorage.getItem('token');const r=await fetch(`${API}/attachments/${open}/download`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok){let message='Could not open file';try{const body=await r.json();message=body.message||body.error||message;}catch(_){}throw Error(message);}const blob=await r.blob();const url=URL.createObjectURL(blob);window.open(url,'_blank','noopener');setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(x){U.toast(x.message||'Could not open file','error')}
     });
     form?.addEventListener('submit',async e=>{
       e.preventDefault();const btn=form.querySelector('button[type="submit"]');btn.disabled=true;
