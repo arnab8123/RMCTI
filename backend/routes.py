@@ -1941,43 +1941,18 @@ def admin_class_attendance_history(class_id):
     c=Class.query.get(class_id)
     if not c:return err("Course not found",404)
     if c.status!="active":return err("Course is inactive",404)
-    # Repair missed roll calls on history access: past scheduled sessions with no
-    # attendance become all-absent, and any missing student rows are filled absent.
-    # This is intentionally bounded to the last 180 days to keep the request fast.
-    try:
-        local_now=datetime.now(ZoneInfo("Asia/Kolkata"))
-        backfill_start=local_now.date()-timedelta(days=180)
-        roster_rows=(StudentClass.query.filter_by(class_id=class_id,status="active")
-                     .order_by(StudentClass.student_id.asc()).all())
-        roster_by_date={}
-        for d_off in range(180):
-            session_date=backfill_start+timedelta(days=d_off)
-            if session_date>=local_now.date(): continue
-            sessions=_effective_class_schedule(c,session_date,1)
-            for session in sessions:
-                if session.get("date")!=session_date.isoformat(): continue
-                end_time=pt(session.get("end_time"))
-                if end_time and session_date==local_now.date() and end_time>=local_now.time().replace(tzinfo=None): continue
-                st=pt(session.get("start_time")); et=end_time
-                if not st or not et: continue
-                eligible=[sc.student_id for sc in roster_rows if sc.assigned_at is None or sc.assigned_at.date()<=session_date]
-                if not eligible: continue
-                existing=Attendance.query.filter(Attendance.class_id==class_id,Attendance.attendance_date==session_date,
-                    Attendance.session_start_time==st,Attendance.session_end_time==et).all()
-                existing_ids={a.student_id for a in existing}
-                for sid in eligible:
-                    if sid not in existing_ids:
-                        db.session.add(Attendance(student_id=sid,class_id=class_id,attendance_date=session_date,
-                            session_start_time=st,session_end_time=et,status="absent",marked_by=current_user().id))
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-        current_app.logger.exception("Attendance missed-session backfill failed for class %s",class_id)
+    # Keep history reads fast: do not synchronously backfill 180 days of sessions
+    # (which caused one query per scheduled day/session on every popup open).
+    # Missing-attendance backfills should be run as a bounded maintenance task,
+    # not as part of a user-facing GET request.
     date_filter=request.args.get("date","").strip()
     from_date=request.args.get("from","").strip()
     to_date=request.args.get("to","").strip()
     query=Attendance.query.filter_by(class_id=class_id)
     try:
+        if not date_filter and not from_date and not to_date:
+            to_date = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+            from_date = (datetime.now(ZoneInfo("Asia/Kolkata")).date()-timedelta(days=29)).isoformat()
         if date_filter:
             query=query.filter(Attendance.attendance_date==date.fromisoformat(date_filter))
         elif from_date or to_date:
