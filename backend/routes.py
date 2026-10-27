@@ -1388,8 +1388,6 @@ def create_schedule_exception():
         if kind not in ("delete","extra","weekly_time"):return err("Invalid schedule action")
         today=today_ist()
         ws=date.fromisoformat(str(b["week_start"]))
-        if ws < _week_start(today_ist()):
-            return err("Schedule changes can only be made for the current or a future week")
         allocation_id=int(b["allocation_id"]) if b.get("allocation_id") else None
         schedule_date=date.fromisoformat(b["schedule_date"]) if b.get("schedule_date") else None
         target_date=date.fromisoformat(b["target_date"]) if b.get("target_date") else None
@@ -1420,8 +1418,6 @@ def create_schedule_exception():
         if kind=="reschedule":
             if _week_start(schedule_date)!=ws:
                 return err("Original date must belong to the selected week")
-        if kind in ("reschedule","weekly_time") and target_date < today:
-            return err("New date cannot be before today")
         if kind=="extra":
             if not schedule_date:
                 return err("Choose the extra class date")
@@ -1467,8 +1463,17 @@ def create_schedule_exception():
                 schedule_date=schedule_date,target_date=target_date,start_time=start_time,end_time=end_time,
                 teacher_id=tc.teacher_id,created_by=current_user().id,kind="weekly_time")
             db.session.add(ex)
+            # A moved occurrence is a new session on the target date. Remove any
+            # attendance recorded against the old occurrence so reports do not
+            # count the same class on both dates. The new date starts unmarked.
+            Attendance.query.filter(
+                Attendance.class_id == cid,
+                Attendance.attendance_date == schedule_date,
+                Attendance.session_start_time == tc.start_time,
+                Attendance.session_end_time == tc.end_time
+            ).delete(synchronize_session=False)
             audit(current_user().id,"schedule_change","schedule_exception",None,
-                  f"Weekly-only change for {c.class_name} on {schedule_date.isoformat()} -> {target_date.isoformat()}")
+                  f"Weekly-only change for {c.class_name} on {schedule_date.isoformat()} -> {target_date.isoformat()}; old attendance cleared")
             db.session.commit()
             return ok({"id":ex.id,"kind":"weekly_time","permanent":False},
                       "This week's class was changed. Next week will use the normal schedule.",201)
@@ -2013,7 +2018,7 @@ def admin_update_class_attendance(class_id):
             if sid in seen:return err("Duplicate student in attendance")
             if status not in ("present","absent"):return err("Status must be present or absent")
             seen.add(sid)
-        if seen != allowed:return err("Submit a status for every currently allotted student")
+        if not seen:return err("No valid attendance rows were submitted")
         existing=Attendance.query.filter(Attendance.class_id==class_id,Attendance.attendance_date==day,
             Attendance.session_start_time==start,Attendance.session_end_time==end,Attendance.student_id.in_(allowed or [-1])).all()
         by_student={x.student_id:x for x in existing}

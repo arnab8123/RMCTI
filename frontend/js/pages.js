@@ -499,6 +499,16 @@ const Page = (() => {
 
         let weekStart=getMonday(today);
         const m=U.modal(`Schedule Class · ${c.class_name}`,`
+          <style>
+            .schedule-week-picker{padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--surface,transparent)}
+            .schedule-week-nav{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px}
+            .schedule-week-selected{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;padding:10px 12px;border-radius:9px;background:var(--surface-2,var(--background,transparent))}
+            .schedule-week-selected b{font-size:1rem}
+            .schedule-week-jump{margin-top:10px}
+            .schedule-week-jump summary{cursor:pointer;color:var(--text);font-size:.9rem;padding:5px 0}
+            .schedule-week-jump-row{display:grid;gap:6px;margin-top:8px}
+            @media(max-width:520px){.schedule-week-nav .btn{flex:1}.schedule-week-selected{display:grid;gap:3px}}
+          </style>
           <form class="form schedule-manager-form" data-reschedule-form>
             <div class="full"><label class="label">Action</label>
               <select class="select" name="kind" data-res-action>
@@ -508,10 +518,15 @@ const Page = (() => {
               </select>
             </div>
             <div class="full schedule-manager-help" data-res-help></div>
-            <div>
-              <label class="label">Week</label>
-              <input class="input" type="date" name="week_start" value="${weekStart}" required>
-              <small class="muted">The week is Monday–Sunday.</small>
+            <div class="full schedule-week-picker">
+              <label class="label" for="reschedule-week-start">Choose a week</label>
+              <div class="schedule-week-nav">
+                <button class="btn secondary small" type="button" data-week-back aria-label="Previous week">‹ Previous</button>
+                <button class="btn secondary small" type="button" data-week-current>This week</button>
+                <button class="btn secondary small" type="button" data-week-forward>Next ›</button>
+              </div>
+              <div class="schedule-week-selected"><span class="muted">Showing classes for</span><b data-week-range>${dateLabel(weekStart)} – ${dateLabel(dateAdd(weekStart,6))}</b></div>
+              <details class="schedule-week-jump"><summary>Choose another week…</summary><div class="schedule-week-jump-row"><input class="input" id="reschedule-week-start" type="date" name="week_start" value="${weekStart}" required><small class="muted">Pick any date; we’ll show its Monday–Sunday week.</small></div></details>
             </div>
             <div data-class-date-wrap>
               <label class="label">Scheduled class</label>
@@ -520,8 +535,8 @@ const Page = (() => {
             </div>
             <div data-target-date-wrap style="display:none">
               <label class="label">New date</label>
-              <input class="input" type="date" name="target_date" data-target-date required min="${today}">
-              <small class="muted">Choose today or any future date. The date is not restricted to the selected week.</small>
+              <input class="input" type="date" name="target_date" data-target-date required>
+              <small class="muted">Choose the replacement date. Past classes can also be rescheduled.</small>
             </div>
             <div data-extra-date-wrap style="display:none">
               <label class="label">Extra class date</label>
@@ -562,12 +577,12 @@ const Page = (() => {
         let scheduleRows=[];
 
         const renderTargetDate=()=>{
-          target.min=today;
+          target.removeAttribute('min');
           const row=scheduleRows.find(x=>`${x.allocation_id || 'extra'}::${x.date}`===existing.value);
           if(row){
             const next=dateAdd(row.date,1);
             target.value=next>=today ? next : today;
-          }else if(!target.value || target.value<today){
+          }else if(!target.value){
             target.value=today;
           }
         };
@@ -587,11 +602,12 @@ const Page = (() => {
           endInput.value=row.end_time||'';
           const d=new Date(`${row.date}T00:00:00`);
           const next=dateAdd(row.date,1);
-          target.min=today; target.value=next>=today ? next : today;
+          target.removeAttribute('min'); target.value=next;
         };
         const loadSchedule=async()=>{
           weekStart=getMonday(weekInput.value||today);
           weekInput.value=weekStart;
+          updateWeekLabel();
           try{
             scheduleRows=await Api.get(`/classes/${classId}/schedule-week`,{week_start:weekStart});
             renderExisting();
@@ -631,6 +647,17 @@ const Page = (() => {
 
         action.addEventListener('change',refreshFields);
         existing.addEventListener('change',syncSelectedClass);
+        const updateWeekLabel=()=>{
+          const range=m.querySelector('[data-week-range]');
+          if(range)range.textContent=`${dateLabel(weekStart)} – ${dateLabel(dateAdd(weekStart,6))}`;
+        };
+        const moveWeek=async(offset)=>{
+          weekInput.value=dateAdd(weekStart,offset*7);
+          await loadSchedule();
+        };
+        m.querySelector('[data-week-back]')?.addEventListener('click',()=>moveWeek(-1));
+        m.querySelector('[data-week-forward]')?.addEventListener('click',()=>moveWeek(1));
+        m.querySelector('[data-week-current]')?.addEventListener('click',()=>{weekInput.value=getMonday(today);loadSchedule();});
         weekInput.addEventListener('change',loadSchedule);
         extraDate.addEventListener('change',async()=>{
           if(!extraDate.value) return;
