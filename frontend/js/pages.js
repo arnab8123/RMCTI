@@ -492,8 +492,9 @@ const Page = (() => {
         const c=await Api.get(`/classes/${classId}`);
         const teachers=await Api.get('/teachers',{status:'active'});
         const today=U.today();
-        const getMonday=iso=>{const d=new Date(`${iso}T00:00:00`);d.setDate(d.getDate()-((d.getDay()+6)%7));return d.toISOString().slice(0,10);};
-        const dateAdd=(iso,n)=>{const d=new Date(`${iso}T00:00:00`);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);};
+        const toLocalISO=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const getMonday=iso=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()-((d.getDay()+6)%7));return toLocalISO(d);};
+        const dateAdd=(iso,n)=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()+n);return toLocalISO(d);};
         const dayName=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
         const dateLabel=iso=>new Intl.DateTimeFormat('en-IN',{day:'2-digit',month:'short',year:'numeric'}).format(new Date(`${iso}T00:00:00`));
 
