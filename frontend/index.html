@@ -400,7 +400,10 @@
   .landing-brand-copy{display:block!important;line-height:1.05;}
   .landing-brand-copy p{margin-top:2px;}
 }
-</style></head>
+</style>
+<link rel="icon" type="image/jpeg" href="asset/image.jpeg?v=20261029">
+<link rel="apple-touch-icon" href="asset/image.jpeg?v=20261029">
+</head>
 <body class="antialiased">
 
     <div id="loader-wrapper">
@@ -1228,5 +1231,14 @@ document.querySelectorAll('[data-certificate]').forEach(btn => {
     });
 })();
 </script>
+
+/* Keep the service health status warm while someone is actively using the site.
+   Render may still suspend free instances when there is no user traffic. */
+(function rmctiHealthHeartbeat(){
+  const ping = () => fetch('/health', {method:'GET', cache:'no-store', credentials:'same-origin'}).catch(() => {});
+  ping();
+  window.setInterval(() => { if (!document.hidden) ping(); }, 180000);
+})();
+
 </body>
 </html>

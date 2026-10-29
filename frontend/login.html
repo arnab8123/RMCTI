@@ -7,7 +7,10 @@
 .password-toggle:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 .password-toggle svg{width:20px;height:20px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
 .remember-row{display:flex;align-items:center;gap:8px;margin:12px 0 16px;font-size:.9rem;color:var(--muted)}
-</style></head>
+</style>
+<link rel="icon" type="image/jpeg" href="asset/image.jpeg?v=20261029">
+<link rel="apple-touch-icon" href="asset/image.jpeg?v=20261029">
+</head>
 <body data-login>
 <main class="login-page"><section class="card pad login-card"><div class="brand"><img class="brandlogo" src="asset/image.jpeg" alt="RMCTI logo" loading="lazy" decoding="async"> <span>RMCTI</span></div><h1>Sign in</h1><p class="muted">Admin, teacher and student portal access.</p><form id="login"><label class="label">Username</label><input class="input" name="username" autocomplete="username" required><label class="label">Password</label>
 <div class="password-field">
@@ -18,4 +21,13 @@
 </div>
 <label class="remember-row"><input type="checkbox" name="remember" value="1" checked> <span>Keep me signed in on this device</span></label><button class="btn primary" type="submit">Sign in</button></form><p id="err" class="error-text" aria-live="polite"></p></section></main>
 <script src="js/api.js?v=20260926"></script><script src="js/utils.js?v=20260926"></script><script src="js/login.js?v=20261004"></script>
+
+/* Keep the service health status warm while someone is actively using the site.
+   Render may still suspend free instances when there is no user traffic. */
+(function rmctiHealthHeartbeat(){
+  const ping = () => fetch('/health', {method:'GET', cache:'no-store', credentials:'same-origin'}).catch(() => {});
+  ping();
+  window.setInterval(() => { if (!document.hidden) ping(); }, 180000);
+})();
+
 </body></html>

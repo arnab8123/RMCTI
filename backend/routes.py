@@ -2879,6 +2879,18 @@ def my_classes():
             st=now.replace(hour=sh,minute=sm,second=0,microsecond=0)
             et=now.replace(hour=eh,minute=em,second=0,microsecond=0)
             active=st<=now<=et
+            # Once the scheduled session has ended, close any unsubmitted attendance
+            # as absent for every active student rather than leaving the session uncounted.
+            if now > et and total_students:
+                enrolled=[x.student_id for x in StudentClass.query.filter_by(class_id=a.class_id,status="active").all()]
+                existing_rows=Attendance.query.filter(Attendance.class_id==a.class_id,Attendance.attendance_date==now.date(),Attendance.session_start_time==st.time(),Attendance.session_end_time==et.time()).all()
+                existing_by_id={x.student_id:x for x in existing_rows}
+                for sid in enrolled:
+                    if sid not in existing_by_id:
+                        db.session.add(Attendance(student_id=sid,class_id=a.class_id,attendance_date=now.date(),session_start_time=st.time(),session_end_time=et.time(),status="absent",marked_by=t.user_id))
+                if any(sid not in existing_by_id for sid in enrolled):
+                    db.session.commit()
+                    marked=len(enrolled)
             sessions.append({**row,"active":active,"marked_count":marked,"student_count":total_students,
                              "attendance_complete":total_students==0 or marked>=total_students})
         current=next((x for x in sessions if x["active"]),None)
@@ -2899,6 +2911,16 @@ def my_classes():
         st=ex.start_time; et=ex.end_time
         now_t=now.time().replace(second=0,microsecond=0)
         marked=attendance_counts.get((ex.class_id,st,et),0)
+        if now.time().replace(tzinfo=None) > et and total_students:
+            enrolled=[x.student_id for x in StudentClass.query.filter_by(class_id=ex.class_id,status="active").all()]
+            existing_rows=Attendance.query.filter(Attendance.class_id==ex.class_id,Attendance.attendance_date==now.date(),Attendance.session_start_time==st,Attendance.session_end_time==et).all()
+            existing_by_id={x.student_id:x for x in existing_rows}
+            for sid in enrolled:
+                if sid not in existing_by_id:
+                    db.session.add(Attendance(student_id=sid,class_id=ex.class_id,attendance_date=now.date(),session_start_time=st,session_end_time=et,status="absent",marked_by=t.user_id))
+            if any(sid not in existing_by_id for sid in enrolled):
+                db.session.commit()
+                marked=len(enrolled)
         session={"date":now.date().isoformat(),"allocation_id":None,"teacher_id":t.id,
                  "teacher_name":t.name,"start_time":st.strftime("%H:%M"),"end_time":et.strftime("%H:%M"),
                  "day_of_week":now.weekday(),"room":item.get("room"),"kind":"extra",

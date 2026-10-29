@@ -3,6 +3,9 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RMCTI AI Assistant</title>
 <link rel="stylesheet" href="../css/variables.css?v=20260926"><link rel="stylesheet" href="../css/global.css?v=20260926"><link rel="stylesheet" href="../css/components.css?v=20260926"><link rel="stylesheet" href="../css/admin.css?v=20261010"><link rel="stylesheet" href="../css/ai-assistant.css?v=20261011">
+
+<link rel="icon" type="image/jpeg" href="../asset/image.jpeg?v=20261029">
+<link rel="apple-touch-icon" href="../asset/image.jpeg?v=20261029">
 </head>
 <body data-role="admin" data-page="assistant">
 <div class="app">
@@ -30,4 +33,13 @@
 </div>
 </section></main></div>
 <script src="../js/theme.js?v=20260926"></script><script src="../js/api.js?v=20260926"></script><script src="../js/utils.js?v=20260926"></script><script src="../js/auth.js?v=20260926"></script><script src="../js/ai-markdown.js?v=20261011"></script><script src="../js/ai-assistant.js?v=20261011"></script><script src="../js/pages.js?v=20261027"></script><script src="../js/app.js?v=20261011"></script>
+
+/* Keep the service health status warm while someone is actively using the site.
+   Render may still suspend free instances when there is no user traffic. */
+(function rmctiHealthHeartbeat(){
+  const ping = () => fetch('/health', {method:'GET', cache:'no-store', credentials:'same-origin'}).catch(() => {});
+  ping();
+  window.setInterval(() => { if (!document.hidden) ping(); }, 180000);
+})();
+
 </body></html>
