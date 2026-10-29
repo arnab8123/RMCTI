@@ -10,4 +10,4 @@ gunicorn
 cryptography
 Pillow>=10.4,<12
 
-cloudinary>=1.44,<2
+boto3>=1.35,<2

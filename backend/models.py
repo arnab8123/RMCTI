@@ -71,6 +71,7 @@ class ClassworkAttachment(db.Model):
     cloudinary_public_id=db.Column(db.String(500),nullable=True)
     cloudinary_resource_type=db.Column(db.String(20),nullable=True)
     data=db.Column(MEDIUMBLOB,nullable=True)
+    storage_key=db.Column(db.String(1000),nullable=True)
     uploaded_at=db.Column(db.DateTime,default=datetime.utcnow,nullable=False)
     __table_args__=(db.Index("idx_classwork_attachments_work","classwork_id"),)
 class Attendance(db.Model):
@@ -128,6 +129,7 @@ class NoticeAttachment(db.Model):
     cloudinary_public_id = db.Column(db.String(500), nullable=True)
     cloudinary_resource_type = db.Column(db.String(20), nullable=True)
     data = db.Column(MEDIUMBLOB, nullable=True)
+    storage_key = db.Column(db.String(1000), nullable=True)
     uploaded_by = db.Column(db.BigInteger, db.ForeignKey("users.id"), nullable=False)
     target_type = db.Column(db.Enum("all","student","class"), default="all", nullable=False)
     target_student_id = db.Column(db.BigInteger, db.ForeignKey("students.id", ondelete="CASCADE"), nullable=True)
@@ -145,3 +147,18 @@ class PhotoAsset(db.Model):
     cloudinary_resource_type = db.Column(db.String(20), nullable=True)
     data = db.Column(MEDIUMBLOB, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class StudentSavedWork(db.Model):
+    __tablename__ = "student_saved_work"
+    id = db.Column(db.BigInteger, primary_key=True)
+    student_id = db.Column(db.BigInteger, db.ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
+    title = db.Column(db.String(255), nullable=False)
+    content = db.Column(db.Text, nullable=False, default="")
+    original_filename = db.Column(db.String(255), nullable=True)
+    mime_type = db.Column(db.String(255), nullable=True)
+    file_size = db.Column(db.BigInteger, nullable=False, default=0)
+    storage_key = db.Column(db.String(1000), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    __table_args__ = (db.Index("idx_student_saved_work_student_updated", "student_id", "updated_at"),)

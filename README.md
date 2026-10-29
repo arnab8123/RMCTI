@@ -223,7 +223,6 @@ Uploaded teacher and student profile photos are stored in the `photo_assets` MyS
 - Keep `.env` local only; Render secrets belong in Render Environment Variables.
 - Render runs `python scripts/migrate.py` during the build before Gunicorn starts.
 - The Flask app does not run schema migrations during worker startup.
-- For production photos set `PHOTO_STORAGE=cloudinary` and `CLOUDINARY_URL` in Render.
 - Existing MySQL/Aiven photos can be migrated once with `python scripts/migrate_photos.py`. The script keeps `photo_assets` unchanged as a rollback copy.
 
 ## Security, database and performance hardening
@@ -234,11 +233,9 @@ The production configuration now includes:
 - Authorization based on the current database user role/status instead of trusting a stale role claim in the JWT.
 - Login and public-enquiry rate limits through Flask-Limiter.
 - A 3 MB global request-body limit and 2 MB image upload limit.
-- Actual image-file verification with Pillow, EXIF orientation handling, resizing and normalization before Cloudinary upload.
 - Security response headers and HSTS when requests are served over HTTPS.
 - SQL-side search and bounded result sets for high-traffic list endpoints to avoid loading unbounded tables into Python.
 - Additional schedule conflict checks for teachers, courses and rooms.
-- Existing MySQL photo BLOBs remain as a compatibility/rollback store; new production uploads continue to use Cloudinary. Run `python scripts/migrate_photos.py` once if old BLOB-backed photos still need migration.
 - Gunicorn request timeout reduced to 60 seconds and keep-alive enabled.
 
 ### Render environment recommendations
@@ -247,7 +244,6 @@ Set a long random `SECRET_KEY` and preferably a separate long random `JWT_SECRET
 
 For one Render instance, the default `RATELIMIT_STORAGE_URI=memory://` works. If the service is scaled to multiple instances, configure a shared Redis storage URI so rate limits are shared across instances.
 
-Keep `PHOTO_STORAGE=cloudinary` in production and set `CLOUDINARY_URL` in Render. Do not commit real secrets to Git.
 
 
 ## Notice Board file migration
@@ -264,24 +260,17 @@ Run `database/add_notice_attachments.sql` once on the hosted MySQL database befo
 For an existing Aiven/MySQL database, run `database/fix_file_attachments.sql` once. It repairs older notice-attachment schemas and ensures the classwork attachment table exists. The application accepts teacher classwork files up to 15 MB per file; Flask is configured with a 20 MB request limit so the documented upload size is not rejected before the route runs.
 
 
-## Fee discounts + Cloudinary file storage
 
 ### Required Render environment variable
-Keep `CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME` configured in Render.
 Optional:
-- `CLOUDINARY_FOLDER=rmcti/photos`
-- `CLOUDINARY_FILE_FOLDER=rmcti/files`
 
-The landing page keeps its existing `frontend/asset/` files. Admin notice-board attachments, teacher classwork attachments, and uploaded student/teacher photos use Cloudinary instead of MySQL BLOB storage.
 
 ### Existing uploaded files
 After the new deployment has run `scripts/migrate.py`, run the one-time migration from the project root:
 
 ```bash
-python scripts/migrate_cloudinary_files.py
 ```
 
-This transfers legacy notice/classwork/photo BLOBs to Cloudinary, updates photo references, and clears the old BLOB bytes. It is safe to rerun.
 
 ### Fee discount
 Admin → Collect Fee now has **Discount / Fee Waiver**. The server records the discount separately from cash/UPI/bank payment. The student's balance is reduced by `payment + discount`, while collection reports continue to count only actual money collected.
@@ -339,3 +328,10 @@ Examples: *"give me all teachers"*, *"who hasn't paid this month?"*, *"Rahul Das
 python -m unittest discover -s tests -t .
 node tests/ai-markdown.test.js
 ```
+
+
+## Cloudflare R2 object storage and student saved work
+
+Configure `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET_NAME` in Render (and locally in `.env`). `R2_PUBLIC_BASE_URL` is optional; without it, uploads are served through authenticated application endpoints. Install dependencies from `requirements.txt`, then run `database/add_fee_discount_and_r2_storage.sql` and `database/add_cloudflare_r2_and_student_saved_work.sql` against the existing MySQL database. New notice-board, classwork, photo, and student saved-work file uploads are stored in R2.
+
+The Admin sidebar includes **All Files**, a searchable file-manager-style inventory. Student accounts have **Save Work** for personal notes and optional file attachments. Website source files (HTML/CSS/JS/Python) should remain in the deployment repository; R2 is for uploaded/runtime files, not a replacement for the app's source deployment. Existing legacy storage entries are retained for compatibility; previously uploaded files must be copied to R2 separately before removing their old storage.

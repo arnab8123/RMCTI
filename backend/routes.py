@@ -23,40 +23,31 @@ def _request_limit(rule, scope=None):
     return limiter.limit(rule, scope=scope)
 
 
-def _cloudinary():
-    """Return configured Cloudinary SDK modules or raise a clear configuration error."""
-    import cloudinary
-    import cloudinary.uploader
-    cloudinary_url = os.getenv("CLOUDINARY_URL", "").strip()
-    if not cloudinary_url or not cloudinary_url.startswith("cloudinary://"):
-        raise RuntimeError("CLOUDINARY_URL is missing or invalid")
-    cloudinary.config(cloudinary_url=cloudinary_url, secure=True)
-    return cloudinary, cloudinary.uploader
+def _r2_client():
+    """S3-compatible Cloudflare R2 client. Configure credentials in deployment env."""
+    import boto3
+    account_id=os.getenv("R2_ACCOUNT_ID", "").strip()
+    access_key=os.getenv("R2_ACCESS_KEY_ID", "").strip()
+    secret_key=os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
+    bucket=os.getenv("R2_BUCKET_NAME", "").strip()
+    if not all((account_id, access_key, secret_key, bucket)):
+        raise RuntimeError("Cloudflare R2 is not configured. Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET_NAME.")
+    client=boto3.client("s3", endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com", aws_access_key_id=access_key, aws_secret_access_key=secret_key, region_name="auto")
+    return client,bucket
 
+def _r2_upload(data, filename, folder="rmcti/files", resource_type="auto", content_type=None):
+    client,bucket=_r2_client()
+    stem=secure_filename(os.path.basename(filename or "file")) or "file"
+    key=f"{folder.strip('/').replace('..','')}/{uuid.uuid4().hex}-{stem}"
+    client.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type or "application/octet-stream")
+    public_base=os.getenv("R2_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    # Store the object key; downloads are proxied through the authenticated app.
+    return (f"{public_base}/{key}" if public_base else None), key, "r2"
 
-def _cloudinary_upload(data, filename, folder="rmcti/files", resource_type="auto"):
-    """Upload bytes directly to Cloudinary and return CDN metadata."""
-    cloudinary, uploader = _cloudinary()
-    stem = secure_filename(os.path.splitext(filename or "file")[0])[:80] or "file"
-    public_id = f"{stem}-{uuid.uuid4().hex}"
-    result = uploader.upload(
-        data,
-        folder=folder,
-        public_id=public_id,
-        resource_type=resource_type,
-        overwrite=False,
-        use_filename=False,
-        unique_filename=False,
-    )
-    return result["secure_url"], result.get("public_id"), result.get("resource_type", resource_type)
-
-
-def _cloudinary_delete(public_id, resource_type="auto"):
-    if not public_id:
-        return
-    cloudinary, uploader = _cloudinary()
-    uploader.destroy(public_id, resource_type=resource_type, invalidate=True)
-
+def _r2_delete(key, resource_type=None):
+    if not key:return
+    client,bucket=_r2_client()
+    client.delete_object(Bucket=bucket, Key=key)
 
 
 def _bounded_limit(default=100, maximum=500):
@@ -321,42 +312,16 @@ def upload_photo():
         return err("The uploaded file is not a valid image")
     name=f"{uuid.uuid4().hex}.{ext}"
 
-    # Production storage: Cloudinary serves the image directly to the browser
-    # through its CDN. This avoids sending image bytes through Render and avoids
-    # storing large BLOBs in the remote Aiven MySQL database.
-    if os.getenv("PHOTO_STORAGE", "cloudinary").strip().lower() == "cloudinary":
-        try:
-            import cloudinary
-            import cloudinary.uploader
-            cloudinary_url = os.getenv("CLOUDINARY_URL", "").strip()
-            if not cloudinary_url:
-                raise RuntimeError("CLOUDINARY_URL is missing")
-            if not cloudinary_url.startswith("cloudinary://"):
-                raise RuntimeError("CLOUDINARY_URL has an invalid format")
-            # Configure explicitly instead of relying on SDK auto-discovery.
-            # This is important on Render where environment variables are
-            # injected into the running process rather than a local .env file.
-            cloudinary.config(cloudinary_url=cloudinary_url, secure=True)
-            result=cloudinary.uploader.upload(
-                data,
-                folder=os.getenv("CLOUDINARY_FOLDER", "rmcti/photos"),
-                public_id=os.path.splitext(name)[0],
-                resource_type="image",
-                overwrite=False,
-                transformation=[{
-                    "width": 600, "height": 800, "crop": "fill",
-                    "gravity": "auto", "quality": "auto", "fetch_format": "auto"
-                }]
-            )
-            return ok({"photo":result["secure_url"]},"Photo uploaded",201)
-        except Exception as exc:
-            db.session.rollback()
-            # Do not silently fall back to MySQL in production: doing so would
-            # reintroduce the exact performance problem this endpoint avoids.
-            current_app.logger.exception("Cloudinary upload failed: %s", exc)
-            if os.getenv("FLASK_ENV", "production").lower() == "production":
-                return err("Photo storage is not configured or the Cloudinary upload failed. Check CLOUDINARY_URL in Render logs.",500)
-            return err("Could not upload photo. Please check Cloudinary configuration.",500)
+    # Store optimized photos in Cloudflare R2; keep the database as metadata only.
+    try:
+        public_url, object_key, _ = _r2_upload(data, name, folder=os.getenv("R2_PHOTO_FOLDER", "rmcti/photos"), content_type=("image/jpeg" if ext == "jpg" else "image/webp"))
+        asset=PhotoAsset(id=name,mime_type=("image/jpeg" if ext == "jpg" else "image/webp"),cloudinary_url=public_url,cloudinary_public_id=object_key,cloudinary_resource_type="r2",storage_key=object_key,data=None)
+        db.session.add(asset);db.session.commit()
+        return ok({"photo": public_url or f"/uploads/photos/{name}"},"Photo uploaded",201)
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Cloudflare R2 photo upload failed: %s", exc)
+        return err("Photo storage is not configured or the Cloudflare R2 upload failed. Check R2 environment variables.",500)
 
     # Local-development fallback. Set PHOTO_STORAGE=mysql only if Cloudinary
     # is intentionally unavailable for a local test.
@@ -757,6 +722,18 @@ def attachments():
     rows=NoticeAttachment.query.order_by(NoticeAttachment.created_at.desc(),NoticeAttachment.id.desc()).limit(_bounded_limit(200,500)).all()
     return ok([_attachment_obj(x) for x in rows if _attachment_visible_to_current_user(x)])
 
+@api.get("/admin/all-files")
+@roles("admin")
+def admin_all_files():
+    items=[]
+    for x in NoticeAttachment.query.order_by(NoticeAttachment.created_at.desc()).limit(500).all():
+        items.append({"id":f"notice:{x.id}","name":x.original_filename,"title":x.title,"type":"Notice attachment","mime_type":x.mime_type,"size":x.file_size,"storage":"Cloudflare R2" if x.cloudinary_resource_type=="r2" else ("Database" if x.data else "Legacy storage"),"created_at":iso_ist(x.created_at),"download_url":f"/api/attachments/{x.id}/download"})
+    for x in ClassworkAttachment.query.order_by(ClassworkAttachment.uploaded_at.desc()).limit(500).all():
+        items.append({"id":f"classwork:{x.id}","name":x.original_filename,"title":"Classwork attachment","type":"Classwork attachment","mime_type":x.mime_type,"size":x.file_size,"storage":"Cloudflare R2" if x.cloudinary_resource_type=="r2" else ("Database" if x.data else "Legacy storage"),"created_at":iso_ist(x.uploaded_at),"download_url":f"/api/classwork/attachments/{x.id}/download"})
+    for x in PhotoAsset.query.order_by(PhotoAsset.created_at.desc()).limit(500).all():
+        items.append({"id":f"photo:{x.id}","name":x.id,"title":"Uploaded image/photo","type":"Photo / image","mime_type":x.mime_type,"size":0,"storage":"Cloudflare R2" if x.cloudinary_resource_type=="r2" else ("Database" if x.data else "Legacy storage"),"created_at":iso_ist(x.created_at),"download_url":f"/uploads/photos/{x.id}"})
+    return ok(sorted(items,key=lambda x:x.get("created_at") or "",reverse=True))
+
 @api.post("/admin/attachments")
 @roles("admin")
 def upload_attachment():
@@ -800,16 +777,16 @@ def upload_attachment():
         target_student_id=target_class_id=None
     try:
         resource_type_hint = "image" if mime.startswith("image/") else "raw"
-        cloud_url, public_id, resource_type = _cloudinary_upload(data, name, folder=os.getenv("CLOUDINARY_FILE_FOLDER", "rmcti/notice-board"), resource_type=resource_type_hint)
+        cloud_url, public_id, resource_type = _r2_upload(data, name, folder=os.getenv("R2_FILE_FOLDER", "rmcti/notice-board"), resource_type=resource_type_hint, content_type=mime)
         row=NoticeAttachment(title=title[:255],original_filename=name,mime_type=mime,file_size=len(data),
-            cloudinary_url=cloud_url,cloudinary_public_id=public_id,cloudinary_resource_type=resource_type,data=None,
+            cloudinary_url=cloud_url,cloudinary_public_id=public_id,cloudinary_resource_type="r2",storage_key=public_id,data=None,
             uploaded_by=current_user().id,target_type=target_type,target_student_id=target_student_id,target_class_id=target_class_id)
         db.session.add(row);db.session.flush();audit(current_user().id,"upload","notice_attachment",row.id,name);db.session.commit()
         return ok({"id":row.id,"title":row.title,"filename":row.original_filename,"mime_type":row.mime_type,"file_size":row.file_size,"download_url":f"/api/attachments/{row.id}/download","created_at":iso_ist(row.created_at)},"File attached to notice board",201)
     except Exception as exc:
         db.session.rollback()
-        current_app.logger.exception("Cloudinary notice attachment upload failed: %s", exc)
-        return err("Could not upload the file. Check Cloudinary configuration and try again.",500)
+        current_app.logger.exception("Cloudflare R2 notice attachment upload failed: %s", exc)
+        return err("Could not upload the file. Check Cloudflare R2 configuration and try again.",500)
 
 @api.delete("/admin/attachments/<int:id>")
 @roles("admin")
@@ -819,9 +796,9 @@ def delete_attachment(id):
     try:
         if row.cloudinary_public_id:
             try:
-                _cloudinary_delete(row.cloudinary_public_id, row.cloudinary_resource_type or ("image" if row.mime_type.startswith("image/") else "raw"))
+                _r2_delete(row.cloudinary_public_id)
             except Exception:
-                current_app.logger.exception("Could not delete notice attachment from Cloudinary")
+                current_app.logger.exception("Could not delete notice attachment from Cloudflare R2")
         db.session.delete(row);audit(current_user().id,"delete","notice_attachment",id,row.original_filename);db.session.commit();return ok(message="Attachment deleted")
     except Exception:
         db.session.rollback();return err("Could not delete attachment")
@@ -833,6 +810,13 @@ def download_attachment(id):
     if not row:return err("Attachment not found",404)
     if not _attachment_visible_to_current_user(row):
         return err("You do not have access to this file",403)
+    if row.cloudinary_resource_type == "r2" and row.cloudinary_public_id:
+        try:
+            client,bucket=_r2_client(); obj=client.get_object(Bucket=bucket,Key=row.cloudinary_public_id); payload=obj["Body"].read(15*1024*1024+1)
+            if len(payload)>15*1024*1024:return err("Stored file exceeds the download limit",413)
+            return send_file(io.BytesIO(payload),mimetype=row.mime_type or "application/octet-stream",as_attachment=True,download_name=row.original_filename,max_age=60)
+        except Exception:
+            current_app.logger.exception("Could not retrieve R2 notice attachment %s", id); return err("Could not retrieve this file from Cloudflare R2.",502)
     if row.cloudinary_url:
         try:
             import urllib.request
@@ -3159,10 +3143,10 @@ def add_classwork():
             name=secure_filename(f.filename) or f"classwork-{uuid.uuid4().hex}"
             mime=(f.mimetype or "application/octet-stream").lower()[:255]
             resource_type_hint = "image" if mime.startswith("image/") else "raw"
-            cloud_url, public_id, resource_type = _cloudinary_upload(f._rmcti_data, name, folder=os.getenv("CLOUDINARY_FILE_FOLDER", "rmcti/classwork"), resource_type=resource_type_hint)
+            cloud_url, public_id, resource_type = _r2_upload(f._rmcti_data, name, folder=os.getenv("R2_FILE_FOLDER", "rmcti/classwork"), resource_type=resource_type_hint, content_type=f.mimetype or "application/octet-stream")
             a=ClassworkAttachment(classwork_id=w.id,original_filename=name,
                                   mime_type=mime,file_size=len(f._rmcti_data),
-                                  cloudinary_url=cloud_url,cloudinary_public_id=public_id,cloudinary_resource_type=resource_type,data=None)
+                                  cloudinary_url=cloud_url,cloudinary_public_id=public_id,cloudinary_resource_type="r2",storage_key=public_id,data=None)
             db.session.add(a)
             created.append(a)
 
@@ -3212,7 +3196,7 @@ def add_classwork_attachment(id):
             name=secure_filename(f.filename) or f"classwork-{uuid.uuid4().hex}"
             mime=(f.mimetype or "application/octet-stream").lower()[:255]
             resource_type_hint = "image" if mime.startswith("image/") else "raw"
-            cloud_url, public_id, resource_type = _cloudinary_upload(data, name, folder=os.getenv("CLOUDINARY_FILE_FOLDER", "rmcti/classwork"), resource_type=resource_type_hint)
+            cloud_url, public_id, resource_type = _r2_upload(data, name, folder=os.getenv("R2_FILE_FOLDER", "rmcti/classwork"), resource_type=resource_type_hint, content_type=f.mimetype or "application/octet-stream")
             a=ClassworkAttachment(
                 classwork_id=w.id,
                 original_filename=name,
@@ -3220,7 +3204,8 @@ def add_classwork_attachment(id):
                 file_size=len(data),
                 cloudinary_url=cloud_url,
                 cloudinary_public_id=public_id,
-                cloudinary_resource_type=resource_type,
+                cloudinary_resource_type="r2",
+                storage_key=public_id,
                 data=None,
             )
             db.session.add(a)
@@ -3250,7 +3235,7 @@ def delete_classwork_attachment(id):
     if not a or not w or w.teacher_id!=t.id:return err("Not found",404)
     try:
         if a.cloudinary_public_id:
-            _cloudinary_delete(a.cloudinary_public_id, a.cloudinary_resource_type or ("image" if a.mime_type.startswith("image/") else "raw"))
+            _r2_delete(a.cloudinary_public_id)
         db.session.delete(a);db.session.commit();return ok(message="Attachment deleted")
     except Exception:
         db.session.rollback();return err("Could not delete attachment")
@@ -3269,6 +3254,13 @@ def download_classwork_attachment(id):
     else:
         s=student_for_user();allowed=bool(StudentClass.query.filter_by(student_id=s.id,class_id=w.class_id,status="active").first())
     if not allowed:return err("You do not have access to this file",403)
+    if a.cloudinary_resource_type == "r2" and a.cloudinary_public_id:
+        try:
+            client,bucket=_r2_client(); obj=client.get_object(Bucket=bucket,Key=a.cloudinary_public_id); payload=obj["Body"].read(15*1024*1024+1)
+            if len(payload)>15*1024*1024:return err("Stored file exceeds the download limit",413)
+            return send_file(io.BytesIO(payload),mimetype=a.mime_type or "application/octet-stream",as_attachment=True,download_name=a.original_filename,max_age=60)
+        except Exception:
+            current_app.logger.exception("Could not retrieve R2 classwork attachment %s", id); return err("Could not retrieve this file from Cloudflare R2.",502)
     if a.cloudinary_url:
         try:
             import urllib.request
@@ -3348,6 +3340,62 @@ def student_routine():
 @api.get("/student/homework")
 @roles("student")
 def student_homework():return get_homework()
+@api.get("/student/saved-work")
+@roles("student")
+def list_student_saved_work():
+    student=student_for_user()
+    rows=StudentSavedWork.query.filter_by(student_id=student.id).order_by(StudentSavedWork.updated_at.desc(),StudentSavedWork.id.desc()).all()
+    return ok([{"id":x.id,"title":x.title,"content":x.content,"filename":x.original_filename,"mime_type":x.mime_type,"file_size":x.file_size,"created_at":iso_ist(x.created_at),"updated_at":iso_ist(x.updated_at)} for x in rows])
+
+@api.post("/student/saved-work")
+@roles("student")
+def create_student_saved_work():
+    student=student_for_user(); title=str(request.form.get("title") or "").strip(); content=str(request.form.get("content") or "").strip(); f=request.files.get("file")
+    if not title:return err("Please enter a title")
+    if len(title)>255 or len(content)>100000:return err("Title or work content is too long",413)
+    row=StudentSavedWork(student_id=student.id,title=title,content=content)
+    try:
+        if f and f.filename:
+            data=f.read(15*1024*1024+1)
+            if len(data)>15*1024*1024:return err("File must be 15 MB or smaller",413)
+            name=secure_filename(f.filename) or "student-work-file"
+            url,key,provider=_r2_upload(data,name,folder="rmcti/student-work",content_type=f.mimetype or "application/octet-stream")
+            row.original_filename=name;row.mime_type=f.mimetype or "application/octet-stream";row.file_size=len(data);row.storage_key=key
+        db.session.add(row);db.session.commit()
+        return ok({"id":row.id,"title":row.title,"content":row.content,"filename":row.original_filename,"file_size":row.file_size,"updated_at":iso_ist(row.updated_at)},"Work saved",201)
+    except Exception as exc:
+        db.session.rollback();current_app.logger.exception("Could not save student work: %s",exc);return err("Could not save work. Check Cloudflare R2 configuration if you attached a file.",500)
+
+@api.put("/student/saved-work/<int:id>")
+@roles("student")
+def update_student_saved_work(id):
+    student=student_for_user();row=StudentSavedWork.query.filter_by(id=id,student_id=student.id).first()
+    if not row:return err("Saved work not found",404)
+    b=request.get_json(silent=True) or {};title=str(b.get("title") or "").strip();content=str(b.get("content") or "").strip()
+    if not title:return err("Please enter a title")
+    row.title=title[:255];row.content=content[:100000]
+    db.session.commit();return ok({"id":row.id,"title":row.title,"content":row.content,"updated_at":iso_ist(row.updated_at)},"Work updated")
+
+@api.delete("/student/saved-work/<int:id>")
+@roles("student")
+def delete_student_saved_work(id):
+    student=student_for_user();row=StudentSavedWork.query.filter_by(id=id,student_id=student.id).first()
+    if not row:return err("Saved work not found",404)
+    try:
+        if row.storage_key:_r2_delete(row.storage_key)
+        db.session.delete(row);db.session.commit();return ok(message="Saved work deleted")
+    except Exception:db.session.rollback();return err("Could not delete saved work",500)
+
+@api.get("/student/saved-work/<int:id>/download")
+@roles("student")
+def download_student_saved_work(id):
+    student=student_for_user();row=StudentSavedWork.query.filter_by(id=id,student_id=student.id).first()
+    if not row or not row.storage_key:return err("Saved file not found",404)
+    try:
+        client,bucket=_r2_client();obj=client.get_object(Bucket=bucket,Key=row.storage_key)
+        return send_file(io.BytesIO(obj["Body"].read(15*1024*1024+1)),mimetype=row.mime_type or "application/octet-stream",as_attachment=True,download_name=row.original_filename or "saved-work")
+    except Exception:current_app.logger.exception("Could not download student saved work");return err("Could not retrieve saved file",502)
+
 @api.get("/student/classwork")
 @roles("student")
 def student_classwork():return get_classwork()

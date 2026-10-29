@@ -1262,13 +1262,5 @@ document.querySelectorAll('[data-certificate]').forEach(btn => {
 })();
 </script>
 
-/* Keep the service health status warm while someone is actively using the site.
-   Render may still suspend free instances when there is no user traffic. */
-(function rmctiHealthHeartbeat(){
-  const ping = () => fetch('/health', {method:'GET', cache:'no-store', credentials:'same-origin'}).catch(() => {});
-  ping();
-  window.setInterval(() => { if (!document.hidden) ping(); }, 180000);
-})();
-
 </body>
 </html>

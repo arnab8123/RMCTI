@@ -50,8 +50,8 @@ class Config:
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    PHOTO_STORAGE = os.getenv("PHOTO_STORAGE", "cloudinary").strip().lower()
-    CLOUDINARY_FOLDER = os.getenv("CLOUDINARY_FOLDER", "rmcti/photos")
+    PHOTO_STORAGE = "r2"
+
 
     CORS_ORIGINS = [
         x.strip()

@@ -78,6 +78,11 @@ def create_app():
             from .models import PhotoAsset
             asset = PhotoAsset.query.filter_by(id=filename).first()
             if asset:
+                if asset.cloudinary_resource_type == "r2" and asset.storage_key:
+                    from .routes import _r2_client
+                    from flask import Response
+                    client,bucket=_r2_client(); obj=client.get_object(Bucket=bucket,Key=asset.storage_key)
+                    return Response(obj["Body"].read(),mimetype=asset.mime_type,headers={"Cache-Control":"public, max-age=86400"})
                 if asset.cloudinary_url:
                     from flask import Response
                     return Response("", status=302, headers={"Location": asset.cloudinary_url, "Cache-Control": "public, max-age=31536000, immutable"})

@@ -32,4 +32,4 @@
 - Gemini AI's default overall time budget is increased from 25 to 55 seconds to reduce premature timeout errors during multi-step tool calls. You can override this with `AI_TIME_BUDGET`.
 - Extra classes can be scheduled during the current week; the existing backend validates the selected date against its week and still rejects past dates/times.
 
-After deploying, check the Render logs and confirm `GEMINI_API_KEY`, `CLOUDINARY_URL`, and database environment variables are configured. No schema migration is required for these changes.
+After deploying, check the Render logs and confirm `GEMINI_API_KEY`, Cloudflare R2 environment variables, and database environment variables are configured. No schema migration is required for these changes.
