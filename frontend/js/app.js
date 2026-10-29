@@ -426,7 +426,14 @@ window.RMCTIProfiles = {
 document.addEventListener('DOMContentLoaded', async () => {
   const role = document.body.dataset.role;
   const page = document.body.dataset.page;
-  if (!role || !page) return;
+  // Standalone pages (Save Work and All Files) have their own page logic, but
+  // still need shared sidebar/theme/navigation binding and role verification.
+  if (!role) return;
+  if (!page) {
+    rmctiBootSharedUI();
+    if (typeof Auth !== 'undefined' && Auth?.role) await Auth.role(role);
+    return;
+  }
 
   try {
     const user = await Page.auth(role);
@@ -483,13 +490,3 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (window.U?.toast) U.toast(error.message || 'Unable to load this page.', 'error');
   }
 });
-
-
-// Keep an open RMCTI tab responsive on hosts that idle inactive services.
-// Pings are limited to a lightweight health endpoint, every 3 minutes, only
-// while this tab is visible; this does not replace a production uptime plan.
-(function rmctiTabHealthPulse(){
-  const ping=()=>{ if(document.visibilityState==='visible') fetch('/health',{method:'GET',cache:'no-store',credentials:'same-origin'}).catch(()=>{}); };
-  window.setTimeout(ping,1500);
-  window.setInterval(ping,180000);
-})();

@@ -725,14 +725,68 @@ def attachments():
 @api.get("/admin/all-files")
 @roles("admin")
 def admin_all_files():
+    """Admin-only file inventory across shared uploads, photos and student work."""
     items=[]
     for x in NoticeAttachment.query.order_by(NoticeAttachment.created_at.desc()).limit(500).all():
-        items.append({"id":f"notice:{x.id}","name":x.original_filename,"title":x.title,"type":"Notice attachment","mime_type":x.mime_type,"size":x.file_size,"storage":"Cloudflare R2" if x.cloudinary_resource_type=="r2" else ("Database" if x.data else "Legacy storage"),"created_at":iso_ist(x.created_at),"download_url":f"/api/attachments/{x.id}/download"})
+        items.append({"id":f"notice:{x.id}","name":x.original_filename,"title":x.title,"type":"Notice attachment","mime_type":x.mime_type,"size":x.file_size,"storage":"Cloudflare R2" if (x.storage_key or x.cloudinary_resource_type=="r2") else ("Database" if x.data else "Legacy storage"),"created_at":iso_ist(x.created_at),"download_url":f"/api/attachments/{x.id}/download"})
     for x in ClassworkAttachment.query.order_by(ClassworkAttachment.uploaded_at.desc()).limit(500).all():
-        items.append({"id":f"classwork:{x.id}","name":x.original_filename,"title":"Classwork attachment","type":"Classwork attachment","mime_type":x.mime_type,"size":x.file_size,"storage":"Cloudflare R2" if x.cloudinary_resource_type=="r2" else ("Database" if x.data else "Legacy storage"),"created_at":iso_ist(x.uploaded_at),"download_url":f"/api/classwork/attachments/{x.id}/download"})
+        items.append({"id":f"classwork:{x.id}","name":x.original_filename,"title":"Classwork attachment","type":"Classwork attachment","mime_type":x.mime_type,"size":x.file_size,"storage":"Cloudflare R2" if (x.storage_key or x.cloudinary_resource_type=="r2") else ("Database" if x.data else "Legacy storage"),"created_at":iso_ist(x.uploaded_at),"download_url":f"/api/classwork/attachments/{x.id}/download"})
     for x in PhotoAsset.query.order_by(PhotoAsset.created_at.desc()).limit(500).all():
-        items.append({"id":f"photo:{x.id}","name":x.id,"title":"Uploaded image/photo","type":"Photo / image","mime_type":x.mime_type,"size":0,"storage":"Cloudflare R2" if x.cloudinary_resource_type=="r2" else ("Database" if x.data else "Legacy storage"),"created_at":iso_ist(x.created_at),"download_url":f"/uploads/photos/{x.id}"})
+        items.append({"id":f"photo:{x.id}","name":x.id,"title":"Uploaded image/photo","type":"Photo / image","mime_type":x.mime_type,"size":len(x.data) if x.data else 0,"storage":"Cloudflare R2" if (getattr(x,"storage_key",None) or x.cloudinary_resource_type=="r2") else ("Database" if x.data else "Legacy storage"),"created_at":iso_ist(x.created_at),"download_url":f"/uploads/photos/{x.id}"})
+    saved=(StudentSavedWork.query.filter(StudentSavedWork.storage_key.isnot(None)).order_by(StudentSavedWork.created_at.desc()).limit(500).all())
+    for x in saved:
+        if not x.storage_key: continue
+        student=Student.query.get(x.student_id)
+        items.append({"id":f"student-work:{x.id}","name":x.original_filename or x.title,"title":f"Student saved work · {student.name if student else 'Student'} · {x.title}","type":"Student saved work","mime_type":x.mime_type or "application/octet-stream","size":x.file_size or 0,"storage":"Cloudflare R2","created_at":iso_ist(x.created_at),"download_url":f"/api/admin/all-files/{'student-work'}:{x.id}/download"})
     return ok(sorted(items,key=lambda x:x.get("created_at") or "",reverse=True))
+
+@api.delete("/admin/all-files/<path:file_ref>")
+@roles("admin")
+def admin_delete_file(file_ref):
+    """Delete a file and its metadata from the admin file manager."""
+    try:
+        kind, raw_id = file_ref.split(":", 1)
+        if kind == "photo":
+            row=PhotoAsset.query.get(raw_id)
+        else:
+            item_id=int(raw_id)
+            row={"notice":NoticeAttachment,"classwork":ClassworkAttachment,"student-work":StudentSavedWork}.get(kind)
+            row=row.query.get(item_id) if row else None
+        if not row:return err("File not found",404)
+        key=getattr(row,"storage_key",None)
+        if not key and getattr(row,"cloudinary_resource_type",None)=="r2":
+            key=getattr(row,"cloudinary_public_id",None)
+        if key:
+            _r2_delete(key)
+        if kind=="photo":
+            db.session.delete(row)
+        elif kind=="notice":
+            audit(current_user().id,"delete","notice_attachment",row.id,row.original_filename);db.session.delete(row)
+        elif kind=="classwork":
+            db.session.delete(row)
+        elif kind=="student-work":
+            db.session.delete(row)
+        else:
+            return err("Unsupported file type",400)
+        db.session.commit()
+        return ok(message="File deleted")
+    except ValueError:
+        return err("Invalid file reference",400)
+    except Exception:
+        db.session.rollback();current_app.logger.exception("Admin file deletion failed")
+        return err("Could not delete file. Check storage permissions and try again.",500)
+
+@api.get("/admin/all-files/student-work:<int:item_id>/download")
+@roles("admin")
+def admin_download_student_saved_work(item_id):
+    row=StudentSavedWork.query.get(item_id)
+    if not row or not row.storage_key:return err("Saved file not found",404)
+    try:
+        client,bucket=_r2_client();obj=client.get_object(Bucket=bucket,Key=row.storage_key)
+        return send_file(io.BytesIO(obj["Body"].read(15*1024*1024+1)),mimetype=row.mime_type or "application/octet-stream",as_attachment=True,download_name=row.original_filename or "saved-work")
+    except Exception:
+        current_app.logger.exception("Admin could not download student saved work")
+        return err("Could not retrieve saved file",502)
 
 @api.post("/admin/attachments")
 @roles("admin")

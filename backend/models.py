@@ -146,6 +146,7 @@ class PhotoAsset(db.Model):
     cloudinary_public_id = db.Column(db.String(500), nullable=True)
     cloudinary_resource_type = db.Column(db.String(20), nullable=True)
     data = db.Column(MEDIUMBLOB, nullable=True)
+    storage_key = db.Column(db.String(1000), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
