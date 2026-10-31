@@ -81,6 +81,26 @@ const Page = (() => {
   }
 
   async function dashboard(role) {
+    // Shared greeting for every signed-in role, using institute-local time.
+    const updateGreeting = () => {
+      const parts = new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+      }).formatToParts(new Date());
+      const get = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
+      const hour = get('hour');
+      const minute = get('minute');
+      let greeting;
+      if (hour >= 21 && (hour > 21 || minute >= 30) || hour < 5) greeting = 'Good night';
+      else if (hour < 12) greeting = 'Good morning';
+      else if (hour < 13) greeting = 'Good noon';
+      else if (hour < 17) greeting = 'Good afternoon';
+      else greeting = 'Good evening';
+      document.querySelectorAll('[data-greeting]').forEach((el) => { el.textContent = greeting; });
+    };
+    updateGreeting();
+    clearInterval(window.__rmctiGreetingTimer);
+    window.__rmctiGreetingTimer = setInterval(updateGreeting, 60000);
+
     // Render a safe value immediately so no dashboard card remains stuck in
     // the loading state if a field is missing/null in the API response.
     const setStat = (name, value, fallback = '0') => {
