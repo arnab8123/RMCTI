@@ -6,6 +6,7 @@
     <link rel="icon" type="image/png" href="/favicon.png?v=20261029">
     <link rel="apple-touch-icon" href="/favicon-192.png?v=20261029">
     <meta charset="UTF-8">
+    <script src="/js/theme.js?v=20261102"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RMCTI - Ratna's Modern Computer Training Institute</title>
     <meta name="description" content="RMCTI - Ratna's Modern Computer Training Institute. Explore computer training, courses and institute information.">
@@ -1102,7 +1103,7 @@
             </nav>
 
             <div class="flex items-center gap-4">
-                <button id="themeToggle" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all hover:scale-110 hover:rotate-12">
+                <button id="themeToggle" data-theme type="button" aria-label="Toggle light and dark theme" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all hover:scale-110 hover:rotate-12">
                     <i class="fas fa-moon"></i>
                 </button>
                 <a href="login.html" class="hidden sm:flex btn-accent px-6 py-2 rounded-full font-semibold items-center gap-2">
@@ -1387,28 +1388,9 @@
             }, loaderDuration);
         });
 
-        let savedTheme = localStorage.getItem("theme");
-        if (!savedTheme) {
-            const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-            savedTheme = prefersDark ? "dark-mode" : "light-mode";
-            localStorage.setItem("theme", savedTheme);
-        }
-
-        body.classList.add(savedTheme);
-        updateThemeIcon();
-
-        themeToggle.addEventListener("click", () => {
-            body.classList.toggle("dark-mode");
-            const newTheme = body.classList.contains("dark-mode") ? "dark-mode" : "light-mode";
-            localStorage.setItem("theme", newTheme);
-            updateThemeIcon();
-        });
-
-        function updateThemeIcon() {
-            themeToggle.innerHTML = body.classList.contains("dark-mode")
-                ? '<i class="fas fa-sun text-yellow-300"></i>'
-                : '<i class="fas fa-moon text-blue-200"></i>';
-        }
+        // Theme is managed globally by /js/theme.js and shared with all portals.
+        // The same saved preference is used on the landing page, login page,
+        // admin portal, teacher portal and student portal.
 
         document.addEventListener("mousemove", e => {
             if(e.clientY > 80) { 
