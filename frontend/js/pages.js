@@ -1129,15 +1129,9 @@ const Page = (() => {
       if(!calendarPanel)return;
       q('[data-week-label]') && (q('[data-week-label]').textContent=prettyWeek(calendarWeek));
       try{
-        const packs=await Promise.all(classes.map(async c=>{
-          const [schedule,changes]=await Promise.all([
-            Api.get(`/classes/${c.id}/schedule-week`,{week_start:calendarWeek}),
-            Api.get('/schedule-exceptions',{class_id:c.id,week_start:calendarWeek})
-          ]);
-          return {c,schedule:schedule||[],changes:changes||[]};
-        }));
-        calendarRows=packs.flatMap(({c,schedule})=>schedule.map(r=>({...r,class_id:c.id,class_name:c.class_name,batch:c.batch,subject:c.subject,room:c.room})));
-        calendarChanges=packs.flatMap(({c,changes})=>changes.map(x=>({...x,class_id:c.id})));
+        const packs=await Api.get('/admin/schedule-calendar',{week_start:calendarWeek});
+        calendarRows=(packs||[]).flatMap(({class_id,class_name,batch,subject,room,schedule})=>(schedule||[]).map(r=>({...r,class_id,class_name,batch,subject,room})));
+        calendarChanges=(packs||[]).flatMap(({class_id,changes})=>(changes||[]).map(x=>({...x,class_id})));
         renderCalendar();
       }catch(error){
         fill(q('[data-schedule-calendar-body]'),`<div class="empty-card"><b>Calendar unavailable</b><span>${U.esc(error.message||'Could not load the weekly schedule.')}</span></div>`);
@@ -1494,7 +1488,7 @@ const Page = (() => {
   }
 
   async function feePayment() {
-    const allStudents = await Api.get('/students', { status: 'active' });
+    const allStudents = await Api.get('/students', { status: 'active', select: '1', limit: 500 });
     const studentSelect = q('[data-student]');
     const search = q('[data-student-search]');
     const filter = q('[data-fee-filter]');
@@ -1618,67 +1612,80 @@ const Page = (() => {
 
   async function reportsPage() {
     const monthInput = q('[data-report-month]');
+    const yearInput = q('[data-report-year]');
     const summary = q('[data-report-summary]');
     const attendanceBody = q('[data-report-attendance]');
     const teacherBody = q('[data-report-teachers]');
     const monthLabel = q('[data-report-month-label]');
-
+    const current = U.today().split('-').map(Number);
+    const monthNames = Array.from({length:12},(_,i)=>new Date(2020,i,1).toLocaleDateString('en-IN',{month:'long'}));
+    if(monthInput)monthInput.innerHTML=monthNames.map((name,i)=>`<option value="${String(i+1).padStart(2,'0')}">${name}</option>`).join('');
+    if(yearInput){const firstYear=2019,lastYear=Math.max(current[0]+1,2026);yearInput.innerHTML=Array.from({length:lastYear-firstYear+1},(_,i)=>firstYear+i).map(y=>`<option value="${y}">${y}</option>`).join('');yearInput.value=String(current[0]);}
+    if(monthInput)monthInput.value=String(current[1]).padStart(2,'0');
+    let latest=null,renderSerial=0;
+    const selectedMonth=()=>`${yearInput?.value||current[0]}-${monthInput?.value||String(current[1]).padStart(2,'0')}`;
+    const rows=(list,renderRow,cols,label)=>list?.length?list.map(renderRow).join(''):tableEmpty(cols,label);
+    const reportApiBase=((location.hostname==='localhost'||location.hostname==='127.0.0.1')&&location.port==='5500')?`${location.protocol}//${location.hostname}:5000/api`:'/api';
     const render = async () => {
-      const month = monthInput?.value || U.today().slice(0, 7);
+      const serial=++renderSerial,month=selectedMonth();
+      latest=null;
+      [q('[data-report-export-csv]'),q('[data-report-export-xlsx]')].forEach(button=>{if(button)button.disabled=true});
       try {
-        [summary, attendanceBody, teacherBody].forEach((el) => { if (el) el.innerHTML = '<div class="loading">Loading…</div>'; });
-        const d = await Api.get('/admin/reports/summary', { month });
-        const f = d.fees || {};
+        [summary,attendanceBody,teacherBody,q('[data-report-payments]'),q('[data-report-attendance-detail]'),q('[data-report-students]'),q('[data-report-teachers-full]'),q('[data-report-classes]'),q('[data-report-complaints]'),q('[data-report-enquiries]')].forEach(el=>{if(el)el.innerHTML=el===summary?'<div class="loading">Loading institute report…</div>':'<tr><td colspan="8" class="loading">Loading institute report…</td></tr>'});
+        const aiSource=q('[data-report-ai-source]'),aiSummary=q('[data-report-ai-summary]');if(aiSource)aiSource.textContent='Preparing report…';if(aiSummary)aiSummary.textContent='Generating institute overview…';
+        const d = await Api.get('/admin/reports/full', { month });
+        if(serial!==renderSerial)return null;
+        latest=d;
+        [q('[data-report-export-csv]'),q('[data-report-export-xlsx]')].forEach(button=>{if(button)button.disabled=false});
+        const report=d.summary||{},f=report.fees||{};
         if (monthLabel) {
-          const dt = new Date(`${month}-01T00:00:00`);
+          const [yy,mm]=month.split('-').map(Number),dt = new Date(yy,mm-1,1);
           monthLabel.textContent = dt.toLocaleDateString('en-IN', {month:'long', year:'numeric'});
         }
+        if(aiSource){aiSource.textContent=d.overview_source||'Built-in analysis';aiSource.dataset.source=d.overview_source||'Built-in analysis'}
+        if(aiSummary)aiSummary.textContent=d.overview||'No report analysis available.';
         fill(summary, `
           <div class="report-kpi"><span>Collected (cash)</span><strong>${U.money(f.collected)}</strong></div>
           <div class="report-kpi"><span>Discount / waiver</span><strong>${U.money(f.discount||0)}</strong></div>
           <div class="report-kpi"><span>Total credited</span><strong>${U.money(f.credited||((f.collected||0)+(f.discount||0)))}</strong></div>
           <div class="report-kpi"><span>Pending</span><strong>${U.money(f.pending)}</strong></div>
-          <div class="report-kpi"><span>Partial</span><strong>${U.money(f.partial_balance)}</strong></div>
-          <div class="report-kpi"><span>Fine</span><strong>${U.money(f.fine)}</strong></div>
-          <div class="report-kpi"><span>Students paid</span><strong>${f.paid_students || 0}</strong></div>
-          <div class="report-kpi"><span>Students pending</span><strong>${f.pending_students || 0}</strong></div>
+          <div class="report-kpi"><span>Partial balance</span><strong>${U.money(f.partial_balance)}</strong></div>
+          <div class="report-kpi"><span>Late fine</span><strong>${U.money(f.fine)}</strong></div>
+          <div class="report-kpi"><span>Students paid</span><strong>${f.paid_students||0}</strong></div>
+          <div class="report-kpi"><span>Students with pending fees</span><strong>${f.pending_students||0}</strong></div>
+          <div class="report-kpi"><span>Active students</span><strong>${report.students||0}</strong></div>
+          <div class="report-kpi"><span>Active teachers</span><strong>${report.teachers||0}</strong></div>
+          <div class="report-kpi"><span>Active classes</span><strong>${report.classes||0}</strong></div>
+          <div class="report-kpi"><span>Payments this month</span><strong>${(d.payments||[]).length}</strong></div>
+          <div class="report-kpi"><span>Attendance records</span><strong>${(d.attendance_records||[]).length}</strong></div>
+          <div class="report-kpi"><span>Complaints</span><strong>${(d.complaints||[]).length}</strong></div>
+          <div class="report-kpi"><span>Website enquiries</span><strong>${(d.enquiries||[]).length}</strong></div>
         `);
-        fill(attendanceBody, (d.attendance || []).map(x => `<tr><td>${U.esc(x.subject)}</td><td>${U.esc(x.class_name)} · ${U.esc(x.batch)}</td><td>${x.present}</td><td>${x.absent}</td><td><span class="badge ${x.attendance_percent>=80?'paid':'pending'}">${x.attendance_percent}%</span></td></tr>`).join('') || tableEmpty(5, 'No attendance records for this month.'));
-        fill(teacherBody, (d.teacher_workload || []).map(x => `<tr><td>${U.esc(x.teacher_id)}</td><td>${U.esc(x.name)}</td><td>${x.classes}</td></tr>`).join('') || tableEmpty(3, 'No active teachers found.'));
+        fill(attendanceBody,rows(report.attendance,x=>`<tr><td>${U.esc(x.subject)}</td><td>${U.esc(x.class_name)} · ${U.esc(x.batch)}</td><td>${x.present}</td><td>${x.absent}</td><td>${x.attendance_percent}%</td></tr>`,5,'No attendance records for this month.'));
+        fill(teacherBody,rows(report.teacher_workload,x=>`<tr><td>${U.esc(x.teacher_id)}</td><td>${U.esc(x.name)}</td><td>Active</td><td>${x.classes}</td></tr>`,4,'No teacher workload found.'));
+        fill(q('[data-report-payments]'),rows(d.payments,x=>`<tr><td>${U.esc(x.date)}</td><td>${U.esc(x.receipt)}</td><td>${U.esc(x.student)}</td><td>${U.esc(x.student_id)}</td><td>${U.money(x.amount)}</td><td>${U.money(x.discount)}</td><td>${U.esc(x.method)}</td></tr>`,7,'No payments for this fee month.'));
+        fill(q('[data-report-attendance-detail]'),rows(d.attendance_records,x=>`<tr><td>${U.esc(x.date)}</td><td>${U.esc(x.student)}</td><td>${U.esc(x.student_id)}</td><td>${U.esc(x.course)}</td><td>${U.esc(x.batch)}</td><td>${U.esc(x.status)}</td></tr>`,6,'No attendance records for this month.'));
+        fill(q('[data-report-students]'),rows(d.students,x=>`<tr><td>${U.esc(x.student_id)}</td><td>${U.esc(x.name)}</td><td>${U.esc(x.status)}</td><td>${U.esc(x.admission_date||'—')}</td><td>${U.esc(x.courses||'—')}</td></tr>`,5,'No students found.'));
+        fill(q('[data-report-teachers-full]'),rows(d.teachers,x=>`<tr><td>${U.esc(x.teacher_id)}</td><td>${U.esc(x.name)}</td><td>${U.esc(x.status)}</td><td>${U.esc(x.qualification||'—')}</td><td>${x.weekly_classes}</td></tr>`,5,'No teachers found.'));
+        fill(q('[data-report-classes]'),rows(d.classes,x=>`<tr><td>${U.esc(x.course)}</td><td>${U.esc(x.batch)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.status)}</td><td>${x.active_students}</td><td>${x.active_teachers}</td></tr>`,6,'No classes found.'));
+        fill(q('[data-report-complaints]'),rows(d.complaints,x=>`<tr><td>${U.esc(x.date)}</td><td>${U.esc(x.student)} · ${U.esc(x.student_id)}</td><td>${U.esc(x.subject)}</td><td>${U.esc(x.description)}</td><td>${U.esc(x.status)}</td></tr>`,5,'No complaints found.'));
+        fill(q('[data-report-enquiries]'),rows(d.enquiries,x=>`<tr><td>${U.esc(x.date)}</td><td>${U.esc(x.name)} · ${U.esc(x.phone)}</td><td>${U.esc(x.status)}</td><td>${U.esc(x.message)}</td></tr>`,4,'No enquiries found.'));
         return d;
       } catch (e) {
+        if(serial!==renderSerial)return null;
         U.toast(e.message || 'Could not load report', 'error');
         fill(summary, '<div class="empty-card"><b>Report unavailable</b><span>Try another month or refresh the page.</span></div>');
+        const aiSummary=q('[data-report-ai-summary]');if(aiSummary)aiSummary.textContent='Report analysis is unavailable until report data can be loaded.';
+        [q('[data-report-export-csv]'),q('[data-report-export-xlsx]')].forEach(button=>{if(button)button.disabled=true});
         return null;
       }
     };
-
-    const toCsv = (headers, rows) => {
-      const escCsv = (v) => `"${String(v ?? '').replaceAll('"','""')}"`;
-      return [headers, ...rows].map(row => row.map(escCsv).join(',')).join('\n');
-    };
-    const download = (name, text, mime='text/csv;charset=utf-8') => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([text], {type:mime}));
-      a.download = name; document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 500);
-    };
-
-    let latest = await render();
-    monthInput?.addEventListener('change', () => { render().then(x => { latest=x; }); });
-    q('[data-report-export-csv]')?.addEventListener('click', () => {
-      if (!latest) return U.toast('Load the report first', 'warning');
-      const m=latest.month;
-      const rows=[
-        ['Section','Metric','Value'],
-        ['Fees','Collected (cash)',latest.fees.collected],['Fees','Discount / waiver',latest.fees.discount||0],['Fees','Total credited',latest.fees.credited||0],['Fees','Pending',latest.fees.pending],['Fees','Partial',latest.fees.partial_balance],['Fees','Fine',latest.fees.fine],
-        ...latest.attendance.map(x=>['Attendance',x.subject,`${x.attendance_percent}%`]),
-        ...latest.teacher_workload.map(x=>['Teacher workload',x.name,x.classes])
-      ];
-      download(`rmcti-report-${m}.csv`, toCsv(rows.shift(), rows));
-      U.toast('CSV report exported');
-    });
+    monthInput?.addEventListener('change',render);yearInput?.addEventListener('change',render);
+    const downloadReport=async(kind,button)=>{if(!latest)return U.toast('Load the report first','warning');const old=button.textContent;button.disabled=true;button.textContent='Preparing…';try{const response=await fetch(`${reportApiBase}/admin/reports/export.${kind}?month=${encodeURIComponent(latest.month)}`,{credentials:'include'});if(!response.ok){let error={};try{error=await response.json()}catch{}throw Error(error.message||'Could not export report')}const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`rmcti-institute-report-${latest.month}.${kind}`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);U.toast(`${kind.toUpperCase()} institute report downloaded`)}catch(e){U.toast(e.message||'Report export failed','error')}finally{button.disabled=false;button.textContent=old}};
+    q('[data-report-export-csv]')?.addEventListener('click',e=>downloadReport('csv',e.currentTarget));
+    q('[data-report-export-xlsx]')?.addEventListener('click',e=>downloadReport('xlsx',e.currentTarget));
     q('[data-report-print]')?.addEventListener('click', () => window.print());
+    await render();
   }
 
   async function analyticsPage() {
@@ -1960,8 +1967,7 @@ const Page = (() => {
 
   async function openClassworkAttachment(id) {
     try {
-      const token=sessionStorage.getItem('token');
-      const r=await fetch(`${API}/classwork/attachments/${id}/download`,{headers:{Authorization:`Bearer ${token}`}});
+      const r=await fetch(`${API}/classwork/attachments/${id}/download`,{credentials:'include'});
       if(!r.ok) { let message='Could not open attachment'; try { const body=await r.json(); message=body.message||body.error||message; } catch(_) {} throw Error(message); }
       const blob=await r.blob(); const url=URL.createObjectURL(blob); const tab=window.open(url,'_blank','noopener'); if(!tab){ const a=document.createElement('a'); a.href=url; a.download='attachment'; document.body.appendChild(a); a.click(); a.remove(); } setTimeout(()=>URL.revokeObjectURL(url),60000);
     } catch(e) { U.toast(e.message||'Could not open attachment','error'); }
@@ -2129,7 +2135,7 @@ const Page = (() => {
     const loadRecipients=async()=>{
       if(!isAdmin)return;
       try{
-        const [students,classes]=await Promise.all([Api.get('/students',{status:'active'}),Api.get('/classes',{status:'active'})]);
+        const [students,classes]=await Promise.all([Api.get('/students',{status:'active',select:'1',limit:500}),Api.get('/classes',{status:'active'})]);
         fill(studentSelect,'<option value="">Select student</option>'+students.map(s=>`<option value="${s.id}">${U.esc(s.name)} · ${U.esc(s.student_id)}</option>`).join(''));
         fill(classSelect,'<option value="">Select class</option>'+classes.map(c=>`<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}${c.course_type==='free'?' · FREE':' · PAID'}</option>`).join(''));
       }catch(e){U.toast(e.message||'Could not load recipients','error');}
@@ -2147,14 +2153,14 @@ const Page = (() => {
       const del=e.target.closest('[data-delete-file]')?.dataset.deleteFile;
       if(del){U.confirm('Delete attachment?', 'This file will be permanently deleted from the institute notice board.', async()=>{try{await Api.del(`/admin/attachments/${del}`);U.toast('File deleted');load();}catch(x){U.toast(x.message,'error')}});return;}
       if(!open)return;
-      try{const token=sessionStorage.getItem('token');const r=await fetch(`${API}/attachments/${open}/download`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok){let message='Could not open file';try{const body=await r.json();message=body.message||body.error||message;}catch(_){}throw Error(message);}const blob=await r.blob();const url=URL.createObjectURL(blob);window.open(url,'_blank','noopener');setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(x){U.toast(x.message||'Could not open file','error')}
+      try{const r=await fetch(`${API}/attachments/${open}/download`,{credentials:'include'});if(!r.ok){let message='Could not open file';try{const body=await r.json();message=body.message||body.error||message;}catch(_){}throw Error(message);}const blob=await r.blob();const url=URL.createObjectURL(blob);window.open(url,'_blank','noopener');setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(x){U.toast(x.message||'Could not open file','error')}
     });
     form?.addEventListener('submit',async e=>{
       e.preventDefault();const btn=form.querySelector('button[type="submit"]');btn.disabled=true;
       try{
-        const fd=new FormData(form),token=sessionStorage.getItem('token');
+        const fd=new FormData(form);
         if(fd.get('target_type')==='all'){fd.delete('target_student_id');fd.delete('target_class_id');}
-        const r=await fetch(`${API}/admin/attachments`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:fd});
+        const r=await fetch(`${API}/admin/attachments`,{method:'POST',credentials:'include',headers:Api.csrfHeaders(),body:fd});
         const d=await r.json().catch(()=>({}));if(!r.ok||d.success===false)throw Error(d.message||'Upload failed');
         form.reset();syncTarget();U.toast('File sent successfully');await load();
       }catch(x){U.toast(x.message||'Could not upload file','error')}finally{btn.disabled=false;}

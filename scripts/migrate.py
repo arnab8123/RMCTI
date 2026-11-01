@@ -35,6 +35,29 @@ def ensure_token_blocklist():
         db.session.execute(text("DELETE FROM token_blocklist WHERE expires_at IS NOT NULL AND expires_at < UTC_TIMESTAMP()"))
 
 
+def ensure_ai_action_nonces():
+    """Persist single-use AI confirmation tokens across workers and restarts."""
+    db.session.execute(text("""CREATE TABLE IF NOT EXISTS ai_action_nonces (
+        nonce VARCHAR(64) PRIMARY KEY,
+        expires_at DATETIME NOT NULL,
+        INDEX idx_ai_action_nonces_expires(expires_at)
+    ) ENGINE=InnoDB"""))
+
+
+def ensure_private_r2_photo_urls():
+    """Replace old public R2 photo links with authenticated app photo paths."""
+    tables=set(inspect(db.engine).get_table_names())
+    if {"photo_assets", "teachers", "students"}.issubset(tables):
+        db.session.execute(text("""UPDATE teachers t JOIN photo_assets p ON t.photo=p.cloudinary_url
+            SET t.photo=CONCAT('/api/uploads/photos/',p.id) WHERE p.cloudinary_resource_type='r2'"""))
+        db.session.execute(text("""UPDATE students s JOIN photo_assets p ON s.photo=p.cloudinary_url
+            SET s.photo=CONCAT('/api/uploads/photos/',p.id) WHERE p.cloudinary_resource_type='r2'"""))
+        db.session.execute(text("UPDATE photo_assets SET cloudinary_url=NULL WHERE cloudinary_resource_type='r2'"))
+    for table in ("notice_attachments", "classwork_attachments"):
+        if table in tables:
+            db.session.execute(text(f"UPDATE {table} SET cloudinary_url=NULL WHERE cloudinary_resource_type='r2'"))
+
+
 def ensure_enquiries():
     inspector=inspect(db.engine)
     if "enquiries" not in inspector.get_table_names():
@@ -279,6 +302,7 @@ def ensure_performance_indexes():
         "schedule_exceptions": [
             ("idx_schedule_exceptions_week_kind_date_teacher", "week_start,kind,schedule_date,teacher_id"),
             ("idx_schedule_exceptions_date_kind", "schedule_date,kind"),
+            ("idx_schedule_exceptions_class_target", "class_id,target_date,kind"),
         ],
         "student_classes": [
             ("idx_student_classes_student_status", "student_id,status"),
@@ -287,6 +311,7 @@ def ensure_performance_indexes():
         "fee_payments": [
             ("idx_fee_payments_student_month", "student_id,fee_month"),
             ("idx_fee_payments_student_payment_date", "student_id,payment_date,id"),
+            ("idx_fee_payments_month_date", "fee_month,payment_date"),
         ],
         "fee_structures": [
             ("idx_fee_structures_class_status_effective", "class_id,status,effective_from"),
@@ -311,8 +336,21 @@ def ensure_performance_indexes():
         "teachers": [
             ("idx_teachers_status_name", "status,name"),
         ],
+        "notice_attachments": [
+            ("idx_notice_attachments_page", "created_at,id"),
+        ],
+        "classwork_attachments": [
+            ("idx_classwork_attachments_page", "uploaded_at,id"),
+        ],
+        "photo_assets": [
+            ("idx_photo_assets_page", "created_at,id"),
+        ],
+        "student_saved_work": [
+            ("idx_student_saved_work_page", "created_at,id"),
+        ],
         "classes": [
             ("idx_classes_status", "status"),
+            ("idx_classes_status_subject", "status,subject_id"),
         ],
     }
     for table, indexes in wanted.items():
@@ -332,6 +370,7 @@ with app.app_context():
     db.create_all()
     ensure_course_type_and_classwork_attachments()
     ensure_token_blocklist()
+    ensure_ai_action_nonces()
     ensure_enquiries()
     ensure_attendance_marker()
     ensure_attendance_sessions()
@@ -341,6 +380,7 @@ with app.app_context():
     ensure_attachment_targets()
     ensure_fee_discount()
     ensure_cloudinary_file_storage()
+    ensure_private_r2_photo_urls()
     ensure_performance_indexes()
     db.session.commit()
     print("RMCTI database schema is ready. Schedule controls, Aadhaar fields, targeted attachments, attendance marker, and performance indexes are ready. Existing data is preserved.")

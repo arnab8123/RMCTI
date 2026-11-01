@@ -50,6 +50,8 @@ cp .env.example .env
 
 Set the MySQL username/password and a strong `SECRET_KEY` in `.env`. Never commit `.env` with real credentials.
 
+Profile photos are served through authenticated API paths. For deployments that previously exposed R2 objects through a public domain, disable public bucket access in Cloudflare R2; the app now stores and serves new R2 uploads through authenticated endpoints only. For multi-instance deployments, configure `RATELIMIT_STORAGE_URI` to a shared Redis service; the default in-process limiter is suitable only for the current single-worker setup.
+
 ## 4. Install backend dependencies
 
 ```bash
@@ -102,8 +104,8 @@ Open `http://127.0.0.1:5500/login.html`.
 ## Authentication flow
 1. Login at `login.html`.
 2. The backend validates the account and returns a JWT.
-3. The frontend stores the token in `sessionStorage`.
-4. Each API request sends `Authorization: Bearer <token>`.
+3. The server sets the access token in an `HttpOnly`, `SameSite=Lax` cookie; browser JavaScript cannot read the token.
+4. State-changing API requests send the paired CSRF token in `X-CSRF-TOKEN`.
 5. The backend checks the authenticated user and required role for every protected route.
 6. A teacher is limited to their assigned classes/students and cannot access admin endpoints.
 7. A student is limited to their own routine, homework, classwork, teacher information, and fee information.
@@ -175,7 +177,7 @@ Health check path:
 /health
 ```
 
-Set your MySQL and `SECRET_KEY` environment variables in Render. Because the frontend and API share the same origin, the public enquiry form posts to the correct production API without requiring a hard-coded localhost URL.
+Set `APP_ENV=production`, strong random `SECRET_KEY` and `JWT_SECRET_KEY` values of at least 32 characters, and your MySQL environment variables in Render. The app refuses to start in production if either secret is missing or too short. Because the frontend and API share the same origin, the public enquiry form posts to the correct production API without requiring a hard-coded localhost URL.
 
 
 ## Website Contact → Admin Enquire flow
@@ -216,7 +218,7 @@ Then submit a test message from the landing page and open **Admin → Enquire**.
 
 
 ## Persistent photo storage
-Uploaded teacher and student profile photos are stored in the `photo_assets` MySQL table and served through `/uploads/photos/<filename>`. This makes profile images survive local API restarts and redeploys instead of depending only on the backend filesystem. Existing legacy disk uploads remain supported and are imported into the durable table automatically when the application can access them.
+Uploaded teacher and student profile photos are stored in the `photo_assets` MySQL table and served through the authenticated `/api/uploads/photos/<filename>` endpoint. Existing legacy disk uploads remain readable through that same protected endpoint.
 
 ## Production deployment and photo migration
 
@@ -332,6 +334,6 @@ node tests/ai-markdown.test.js
 
 ## Cloudflare R2 object storage and student saved work
 
-Configure `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET_NAME` in Render (and locally in `.env`). `R2_PUBLIC_BASE_URL` is optional; without it, uploads are served through authenticated application endpoints. Install dependencies from `requirements.txt`, then run `database/add_fee_discount_and_r2_storage.sql` and `database/add_cloudflare_r2_and_student_saved_work.sql` against the existing MySQL database. New notice-board, classwork, photo, and student saved-work file uploads are stored in R2.
+Configure `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET_NAME` in Render (and locally in `.env`). Run `python scripts/migrate.py` against the existing MySQL database; the deployment build already does this. New uploads are served through authenticated app endpoints and do not publish an R2 URL. Disable public access on any existing R2 bucket/domain to revoke older direct links. For deployments with multiple app instances, set `RATELIMIT_STORAGE_URI` to a shared Redis service so rate-limit counters are shared.
 
 The Admin sidebar includes **All Files**, a searchable file-manager-style inventory. Student accounts have **Save Work** for personal notes and optional file attachments. Website source files (HTML/CSS/JS/Python) should remain in the deployment repository; R2 is for uploaded/runtime files, not a replacement for the app's source deployment. Existing legacy storage entries are retained for compatibility; previously uploaded files must be copied to R2 separately before removing their old storage.
