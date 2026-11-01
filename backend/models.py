@@ -12,6 +12,12 @@ class TokenBlocklist(db.Model):
     expires_at=db.Column(db.DateTime,nullable=True)
     __table_args__=(db.Index("idx_token_blocklist_user","user_id"),)
 
+class AiActionNonce(db.Model):
+    """One-time AI confirmation nonces shared across workers and restarts."""
+    __tablename__ = "ai_action_nonces"
+    nonce = db.Column(db.String(64), primary_key=True)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+
 class Admin(db.Model):
     __tablename__="admins"; id=db.Column(db.BigInteger,primary_key=True); user_id=db.Column(db.BigInteger,db.ForeignKey("users.id"),unique=True,nullable=False); name=db.Column(db.String(150),nullable=False); email=db.Column(db.String(255)); phone=db.Column(db.String(30))
 class Teacher(db.Model):

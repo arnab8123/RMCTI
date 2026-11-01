@@ -37,7 +37,6 @@ MAX_STEPS = 8
 CONFIRM_MAX_AGE = 15 * 60
 
 _thinking_rejected = False          # set if the API ever refuses thinkingConfig
-_used_nonces = {}                   # per-worker replay guard for confirm tokens
 
 
 def _cfg(name, default=""):
@@ -215,12 +214,23 @@ def load_action(secret, token, user_id):
         raise ToolError("That confirmation isn't valid. Please ask me again.")
     if data.get("u") != user_id or data.get("t") not in TOOLS:
         raise ToolError("That confirmation isn't valid. Please ask me again.")
-    now = time.monotonic()
-    for k in [k for k, exp in _used_nonces.items() if exp < now]:
-        _used_nonces.pop(k, None)
-    if data["n"] in _used_nonces:
+    # A process-local set loses its replay guard on restart and does not work
+    # across workers. Claim the nonce in the database before executing.
+    from datetime import datetime, timedelta
+    from sqlalchemy.exc import IntegrityError
+    from .database import db
+    from .models import AiActionNonce
+    now = datetime.utcnow()
+    try:
+        db.session.query(AiActionNonce).filter(AiActionNonce.expires_at < now).delete(synchronize_session=False)
+        db.session.add(AiActionNonce(nonce=data["n"], expires_at=now + timedelta(seconds=CONFIRM_MAX_AGE)))
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
         raise ToolError("That action was already confirmed. Nothing was done twice.")
-    _used_nonces[data["n"]] = now + CONFIRM_MAX_AGE
+    except Exception:
+        db.session.rollback()
+        raise ToolError("Confirmation could not be safely verified. Please try again.")
     return data
 
 

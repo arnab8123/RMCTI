@@ -1,16 +1,17 @@
 from flask import Blueprint,request,current_app
-from flask_jwt_extended import create_access_token,jwt_required,get_jwt
+from flask_jwt_extended import create_access_token,jwt_required,get_jwt,set_access_cookies,unset_jwt_cookies
 from sqlalchemy import or_,func
 from sqlalchemy.orm import joinedload, load_only
 from sqlalchemy.exc import IntegrityError
 from datetime import date,datetime,timedelta,time
 from decimal import Decimal
 from zoneinfo import ZoneInfo
-import os,uuid
+import os,uuid,json,csv,time as time_module
 from werkzeug.utils import secure_filename
 from PIL import Image, ImageOps, UnidentifiedImageError
+import warnings
 import io
-from flask import Response,send_file
+from flask import Response,send_file,send_from_directory
 from .database import db
 from .extensions import limiter
 from .models import *
@@ -18,6 +19,37 @@ from .auth import roles,current_user
 from .utils import *
 
 api=Blueprint("api",__name__,url_prefix="/api")
+
+
+@api.get("/uploads/photos/<path:filename>")
+@roles("admin", "teacher", "student")
+def uploaded_photo(filename):
+    """Serve profile images only to signed-in portal users."""
+    asset = PhotoAsset.query.filter_by(id=filename).first()
+    if not asset:
+        # Legacy local uploads are still supported, but only behind the same
+        # authenticated endpoint. send_from_directory constrains traversal.
+        legacy_dir=os.path.join(os.path.dirname(__file__),"uploads","photos")
+        if os.path.isfile(os.path.join(legacy_dir,os.path.basename(filename))):
+            response=send_from_directory(legacy_dir,os.path.basename(filename),conditional=True)
+            response.headers["Cache-Control"]="private, max-age=3600"
+            response.headers["Vary"]="Cookie"
+            return response
+        return err("Photo not found", 404)
+    mime = asset.mime_type if asset.mime_type in {"image/jpeg", "image/png", "image/webp"} else "application/octet-stream"
+    try:
+        if asset.cloudinary_resource_type == "r2" and asset.storage_key:
+            client, bucket = _r2_client()
+            obj = client.get_object(Bucket=bucket, Key=asset.storage_key)
+            payload = obj["Body"].read()
+        elif asset.data:
+            payload = asset.data
+        else:
+            return err("Photo not found", 404)
+        return Response(payload, mimetype=mime, headers={"Cache-Control": "private, max-age=3600", "Vary": "Cookie"})
+    except Exception:
+        current_app.logger.exception("Profile photo could not be retrieved")
+        return err("Could not retrieve photo", 502)
 
 def _request_limit(rule, scope=None):
     return limiter.limit(rule, scope=scope)
@@ -40,9 +72,9 @@ def _r2_upload(data, filename, folder="rmcti/files", resource_type="auto", conte
     stem=secure_filename(os.path.basename(filename or "file")) or "file"
     key=f"{folder.strip('/').replace('..','')}/{uuid.uuid4().hex}-{stem}"
     client.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type or "application/octet-stream")
-    public_base=os.getenv("R2_PUBLIC_BASE_URL", "").strip().rstrip("/")
-    # Store the object key; downloads are proxied through the authenticated app.
-    return (f"{public_base}/{key}" if public_base else None), key, "r2"
+    # Keep the bucket private: object keys are exposed only to authenticated
+    # download endpoints, never as directly accessible public URLs.
+    return None, key, "r2"
 
 def _r2_delete(key, resource_type=None):
     if not key:return
@@ -58,6 +90,21 @@ def _bounded_limit(default=100, maximum=500):
         value = default
     return max(1, min(value, maximum))
 
+
+def _classwork_attachment_mime(filename):
+    """Allow common school document/media/source files, excluding active web files and executables."""
+    ext=os.path.splitext(secure_filename(filename or ""))[1].lower()
+    return {
+        ".pdf":"application/pdf", ".txt":"text/plain", ".md":"text/markdown", ".csv":"text/csv",
+        ".doc":"application/msword", ".docx":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xls":"application/vnd.ms-excel", ".xlsx":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".ppt":"application/vnd.ms-powerpoint", ".pptx":"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".jpg":"image/jpeg", ".jpeg":"image/jpeg", ".png":"image/png", ".webp":"image/webp", ".gif":"image/gif",
+        ".py":"text/x-python", ".c":"text/x-c", ".h":"text/x-c", ".cpp":"text/x-c++", ".hpp":"text/x-c++",
+        ".java":"text/x-java-source", ".zip":"application/zip", ".mp3":"audio/mpeg", ".wav":"audio/wav",
+        ".mp4":"video/mp4", ".webm":"video/webm",
+    }.get(ext)
+
 def user_profile(u):
     x={"id":u.id,"username":u.username,"role":u.role}
     if u.role=="admin":
@@ -67,17 +114,6 @@ def user_profile(u):
     else:
         s=Student.query.filter_by(user_id=u.id).first(); x.update({"name":s.name,"student_id":s.student_id} if s else {})
     return x
-
-def _purge_old_feedback():
-    """Remove complaints and public enquiries older than ten days when the API is active."""
-    cutoff = datetime.now(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None) - timedelta(days=10)
-    try:
-        Complaint.query.filter(Complaint.created_at < cutoff).delete(synchronize_session=False)
-        Enquiry.query.filter(Enquiry.created_at < cutoff).delete(synchronize_session=False)
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-
 
 def _enquiry_row(e):
     return {
@@ -132,7 +168,6 @@ def create_enquiry_legacy():
 
 
 def _list_enquiries():
-    _purge_old_feedback()
     status = request.args.get("status", "").strip()
     q = request.args.get("q", "").strip().lower()
     query = Enquiry.query
@@ -185,7 +220,6 @@ def _update_enquiry(id):
 @api.delete("/admin/enquiries/<int:id>")
 @roles("admin")
 def delete_admin_enquiry(id):
-    _purge_old_feedback()
     item = Enquiry.query.get(id)
     if not item: return err("Enquiry not found", 404)
     db.session.delete(item); db.session.commit()
@@ -212,13 +246,14 @@ def login():
     u=User.query.filter_by(username=username).first()
     if not u or not u.is_active or not cp(password,u.password_hash):
         return err("Invalid username or password",401)
-    # Keep authorization state in the database. The JWT contains identity only.
-    # The web client asks for a persistent login by default; logout still
-    # revokes the token through the normal blocklist.
-    remember = bool(b.get("remember", True))
+    # Keep authorization state in the database. The JWT is sent only as an
+    # HttpOnly cookie; browser JavaScript never receives the token value.
+    remember = b.get("remember") is True
     expires = timedelta(days=current_app.config.get("JWT_REMEMBER_ME_DAYS", 30)) if remember else current_app.config["JWT_ACCESS_TOKEN_EXPIRES"]
     token=create_access_token(identity=str(u.id), expires_delta=expires)
-    return ok({"token":token,"user":user_profile(u),"remember":remember},"Login successful")
+    response,status=ok({"user":user_profile(u),"remember":remember},"Login successful")
+    set_access_cookies(response,token)
+    return response,status
 
 @api.post("/auth/logout")
 @jwt_required()
@@ -234,7 +269,9 @@ def logout():
             pass
         db.session.add(TokenBlocklist(jti=jti,user_id=int(claims["sub"]),expires_at=expires_at))
         db.session.commit()
-    return ok(message="Logged out successfully")
+    response,status=ok(message="Logged out successfully")
+    unset_jwt_cookies(response)
+    return response,status
 
 @api.get("/auth/me")
 @jwt_required()
@@ -282,18 +319,27 @@ def notifications():
 def upload_photo():
     f=request.files.get("photo")
     if not f or not f.filename:return err("Photo is required")
-    allowed={"image/jpeg":"jpg","image/png":"png","image/webp":"webp"}
-    ext=allowed.get((f.mimetype or "").lower())
-    if not ext:return err("Only JPG, PNG or WEBP images are allowed")
+    allowed={"JPEG":"jpg","PNG":"png","WEBP":"webp"}
+    ext=None
+    declared=(f.mimetype or "").lower()
+    declared_to_format={"image/jpeg":"JPEG","image/png":"PNG","image/webp":"WEBP"}
+    declared_format=declared_to_format.get(declared)
+    if not declared_format:return err("Only JPG, PNG or WEBP images are allowed")
     f.seek(0,2); size=f.tell(); f.seek(0)
     if size>2*1024*1024:return err("Photo must be 2 MB or smaller")
     raw=f.read()
     try:
-        probe=Image.open(io.BytesIO(raw))
-        probe.verify()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            probe=Image.open(io.BytesIO(raw))
+            if probe.format not in allowed or probe.format != declared_format:
+                return err("The file content must match a JPG, PNG or WEBP image")
+            probe.verify()
         image=Image.open(io.BytesIO(raw))
+        if image.format not in allowed or image.format != declared_format:
+            return err("The file content must match a JPG, PNG or WEBP image")
         image=ImageOps.exif_transpose(image)
-        if image.width<1 or image.height<1 or image.width>10000 or image.height>10000:
+        if image.width<1 or image.height<1 or image.width>10000 or image.height>10000 or image.width*image.height>40_000_000:
             return err("Invalid image dimensions")
         # Normalize uploads before storage: strips arbitrary metadata and keeps
         # giant camera originals from travelling through the application.
@@ -308,16 +354,16 @@ def upload_photo():
             image.convert("RGB").save(out,format="JPEG",quality=88,optimize=True)
             ext="jpg"
         data=out.getvalue()
-    except (UnidentifiedImageError, OSError, ValueError):
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
         return err("The uploaded file is not a valid image")
     name=f"{uuid.uuid4().hex}.{ext}"
 
     # Store optimized photos in Cloudflare R2; keep the database as metadata only.
     try:
-        public_url, object_key, _ = _r2_upload(data, name, folder=os.getenv("R2_PHOTO_FOLDER", "rmcti/photos"), content_type=("image/jpeg" if ext == "jpg" else "image/webp"))
-        asset=PhotoAsset(id=name,mime_type=("image/jpeg" if ext == "jpg" else "image/webp"),cloudinary_url=public_url,cloudinary_public_id=object_key,cloudinary_resource_type="r2",storage_key=object_key,data=None)
+        _, object_key, _ = _r2_upload(data, name, folder=os.getenv("R2_PHOTO_FOLDER", "rmcti/photos"), content_type=("image/jpeg" if ext == "jpg" else "image/webp"))
+        asset=PhotoAsset(id=name,mime_type=("image/jpeg" if ext == "jpg" else "image/webp"),cloudinary_url=None,cloudinary_public_id=object_key,cloudinary_resource_type="r2",storage_key=object_key,data=None)
         db.session.add(asset);db.session.commit()
-        return ok({"photo": public_url or f"/uploads/photos/{name}"},"Photo uploaded",201)
+        return ok({"photo": f"/api/uploads/photos/{name}"},"Photo uploaded",201)
     except Exception as exc:
         db.session.rollback()
         current_app.logger.exception("Cloudflare R2 photo upload failed: %s", exc)
@@ -325,14 +371,14 @@ def upload_photo():
 
     # Local-development fallback. Set PHOTO_STORAGE=mysql only if Cloudinary
     # is intentionally unavailable for a local test.
-    asset=PhotoAsset(id=name,mime_type=f.mimetype or "application/octet-stream",data=data)
+    asset=PhotoAsset(id=name,mime_type=("image/jpeg" if ext == "jpg" else "image/webp"),data=data)
     try:
         db.session.add(asset)
         db.session.commit()
     except Exception:
         db.session.rollback()
         return err("Could not save photo. Please try again.",500)
-    return ok({"photo":f"/uploads/photos/{name}"},"Photo uploaded",201)
+    return ok({"photo":f"/api/uploads/photos/{name}"},"Photo uploaded",201)
 
 def subject_obj(id):
     return Subject.query.get(id)
@@ -726,19 +772,35 @@ def attachments():
 @roles("admin")
 def admin_all_files():
     """Admin-only file inventory across shared uploads, photos and student work."""
-    items=[]
-    for x in NoticeAttachment.query.order_by(NoticeAttachment.created_at.desc()).limit(500).all():
-        items.append({"id":f"notice:{x.id}","name":x.original_filename,"title":x.title,"type":"Notice attachment","mime_type":x.mime_type,"size":x.file_size,"storage":"Cloudflare R2" if (x.storage_key or x.cloudinary_resource_type=="r2") else ("Database" if x.data else "Legacy storage"),"created_at":iso_ist(x.created_at),"download_url":f"/api/attachments/{x.id}/download"})
-    for x in ClassworkAttachment.query.order_by(ClassworkAttachment.uploaded_at.desc()).limit(500).all():
-        items.append({"id":f"classwork:{x.id}","name":x.original_filename,"title":"Classwork attachment","type":"Classwork attachment","mime_type":x.mime_type,"size":x.file_size,"storage":"Cloudflare R2" if (x.storage_key or x.cloudinary_resource_type=="r2") else ("Database" if x.data else "Legacy storage"),"created_at":iso_ist(x.uploaded_at),"download_url":f"/api/classwork/attachments/{x.id}/download"})
-    for x in PhotoAsset.query.order_by(PhotoAsset.created_at.desc()).limit(500).all():
-        items.append({"id":f"photo:{x.id}","name":x.id,"title":"Uploaded image/photo","type":"Photo / image","mime_type":x.mime_type,"size":len(x.data) if x.data else 0,"storage":"Cloudflare R2" if (getattr(x,"storage_key",None) or x.cloudinary_resource_type=="r2") else ("Database" if x.data else "Legacy storage"),"created_at":iso_ist(x.created_at),"download_url":f"/uploads/photos/{x.id}"})
-    saved=(StudentSavedWork.query.filter(StudentSavedWork.storage_key.isnot(None)).order_by(StudentSavedWork.created_at.desc()).limit(500).all())
-    for x in saved:
-        if not x.storage_key: continue
-        student=Student.query.get(x.student_id)
-        items.append({"id":f"student-work:{x.id}","name":x.original_filename or x.title,"title":f"Student saved work · {student.name if student else 'Student'} · {x.title}","type":"Student saved work","mime_type":x.mime_type or "application/octet-stream","size":x.file_size or 0,"storage":"Cloudflare R2","created_at":iso_ist(x.created_at),"download_url":f"/api/admin/all-files/{'student-work'}:{x.id}/download"})
-    return ok(sorted(items,key=lambda x:x.get("created_at") or "",reverse=True))
+    page_size=_bounded_limit(100,200)
+    try:
+        raw_cursor=json.loads(request.args.get("cursor") or "{}")
+        if not isinstance(raw_cursor,dict):raw_cursor={}
+        offsets={k:max(0,min(int(raw_cursor.get(k,0)),10_000_000)) for k in ("notices","classwork","photos","student_work")}
+    except (TypeError,ValueError,json.JSONDecodeError):
+        offsets={k:0 for k in ("notices","classwork","photos","student_work")}
+    batch=page_size+1
+    notice_rows=db.session.query(NoticeAttachment.id,NoticeAttachment.original_filename,NoticeAttachment.title,NoticeAttachment.mime_type,NoticeAttachment.file_size,NoticeAttachment.storage_key,NoticeAttachment.cloudinary_resource_type,NoticeAttachment.data.isnot(None),NoticeAttachment.created_at).order_by(NoticeAttachment.created_at.desc(),NoticeAttachment.id.desc()).offset(offsets["notices"]).limit(batch).all()
+    classwork_rows=db.session.query(ClassworkAttachment.id,ClassworkAttachment.original_filename,ClassworkAttachment.mime_type,ClassworkAttachment.file_size,ClassworkAttachment.storage_key,ClassworkAttachment.cloudinary_resource_type,ClassworkAttachment.data.isnot(None),ClassworkAttachment.uploaded_at).order_by(ClassworkAttachment.uploaded_at.desc(),ClassworkAttachment.id.desc()).offset(offsets["classwork"]).limit(batch).all()
+    photo_rows=db.session.query(PhotoAsset.id,PhotoAsset.mime_type,PhotoAsset.cloudinary_resource_type,PhotoAsset.storage_key,PhotoAsset.data.isnot(None),func.octet_length(PhotoAsset.data),PhotoAsset.created_at).order_by(PhotoAsset.created_at.desc(),PhotoAsset.id.desc()).offset(offsets["photos"]).limit(batch).all()
+    work_rows=db.session.query(StudentSavedWork.id,StudentSavedWork.student_id,StudentSavedWork.title,StudentSavedWork.original_filename,StudentSavedWork.mime_type,StudentSavedWork.file_size,StudentSavedWork.created_at,Student.name).join(Student,Student.id==StudentSavedWork.student_id).filter(StudentSavedWork.storage_key.isnot(None)).order_by(StudentSavedWork.created_at.desc(),StudentSavedWork.id.desc()).offset(offsets["student_work"]).limit(batch).all()
+    groups={"notices":[],"classwork":[],"photos":[],"student_work":[]}
+    for x in notice_rows:
+        groups["notices"].append({"id":f"notice:{x[0]}","name":x[1],"title":x[2],"type":"Notice attachment","mime_type":x[3],"size":x[4],"storage":"Cloudflare R2" if (x[5] or x[6]=="r2") else ("Database" if x[7] else "Legacy storage"),"created_at":iso_ist(x[8]),"download_url":f"/api/attachments/{x[0]}/download"})
+    for x in classwork_rows:
+        groups["classwork"].append({"id":f"classwork:{x[0]}","name":x[1],"title":"Classwork attachment","type":"Classwork attachment","mime_type":x[2],"size":x[3],"storage":"Cloudflare R2" if (x[4] or x[5]=="r2") else ("Database" if x[6] else "Legacy storage"),"created_at":iso_ist(x[7]),"download_url":f"/api/classwork/attachments/{x[0]}/download"})
+    for x in photo_rows:
+        groups["photos"].append({"id":f"photo:{x[0]}","name":x[0],"title":"Uploaded image/photo","type":"Photo / image","mime_type":x[1],"size":x[5] or 0,"storage":"Cloudflare R2" if (x[3] or x[2]=="r2") else ("Database" if x[4] else "Legacy storage"),"created_at":iso_ist(x[6]),"download_url":f"/api/uploads/photos/{x[0]}"})
+    for x in work_rows:
+        groups["student_work"].append({"id":f"student-work:{x[0]}","name":x[3] or x[2],"title":f"Student saved work · {x[7]} · {x[2]}","type":"Student saved work","mime_type":x[4] or "application/octet-stream","size":x[5] or 0,"storage":"Cloudflare R2","created_at":iso_ist(x[6]),"download_url":f"/api/admin/all-files/student-work:{x[0]}/download"})
+    merged=[(group,item) for group,items in groups.items() for item in items]
+    merged.sort(key=lambda row:(row[1].get("created_at") or "",row[1]["id"]),reverse=True)
+    page=merged[:page_size]
+    next_offsets=offsets.copy()
+    for group,item in page:next_offsets[group]+=1
+    has_more=any(len(groups[group])>sum(1 for source,_ in page if source==group) or len(groups[group])==batch for group in groups)
+    next_cursor=json.dumps(next_offsets,separators=(",",":")) if has_more else None
+    return ok({"items":[item for _,item in page],"next_cursor":next_cursor})
 
 @api.delete("/admin/all-files/<path:file_ref>")
 @roles("admin")
@@ -1275,6 +1337,234 @@ def admin_report_summary():
     })
 
 
+def _report_text(value):
+    """Neutralize spreadsheet formula prefixes in user-controlled text."""
+    if isinstance(value, str) and value[:1] in {"=", "+", "-", "@", "\t", "\r"}:
+        return "'" + value
+    return value
+
+
+def _institute_report_payload(month):
+    # The report endpoint is admin-protected; call the summary's undecorated
+    # view once so the detailed export and on-screen KPIs share their rules.
+    summary_response = admin_report_summary.__wrapped__()
+    response, status = summary_response if isinstance(summary_response, tuple) else (summary_response, 200)
+    if status != 200:
+        raise ValueError("Could not calculate the monthly institute summary")
+    summary = (response.get_json() or {}).get("data") or {}
+    period = date.fromisoformat(month + "-01")
+    next_period = (period + timedelta(days=32)).replace(day=1)
+
+    student_course_rows = (db.session.query(StudentClass.student_id, Class.class_name, Class.batch, Subject.name)
+        .join(Class, Class.id == StudentClass.class_id).join(Subject, Subject.id == Class.subject_id)
+        .filter(StudentClass.status == "active").order_by(Class.class_name, Class.batch).all())
+    courses_by_student = {}
+    for student_pk, class_name, batch, subject in student_course_rows:
+        courses_by_student.setdefault(student_pk, []).append(f"{class_name} · {batch} · {subject}")
+    students = [{"student_id": s.student_id, "name": s.name, "status": s.status,
+                 "admission_date": s.admission_date.isoformat() if s.admission_date else "",
+                 "courses": "; ".join(courses_by_student.get(s.id, []))}
+                for s in Student.query.order_by(Student.name, Student.id).all()]
+
+    teacher_class_counts = dict(db.session.query(TeacherClass.teacher_id, func.count(TeacherClass.id))
+        .filter(TeacherClass.status == "active").group_by(TeacherClass.teacher_id).all())
+    teachers = [{"teacher_id": t.teacher_id, "name": t.name, "status": t.status,
+                 "qualification": t.qualification or "", "weekly_classes": teacher_class_counts.get(t.id, 0)}
+                for t in Teacher.query.order_by(Teacher.name, Teacher.id).all()]
+
+    student_class_counts = dict(db.session.query(StudentClass.class_id, func.count(StudentClass.id))
+        .filter(StudentClass.status == "active").group_by(StudentClass.class_id).all())
+    teacher_counts_by_class = dict(db.session.query(TeacherClass.class_id, func.count(func.distinct(TeacherClass.teacher_id)))
+        .filter(TeacherClass.status == "active").group_by(TeacherClass.class_id).all())
+    classes = []
+    for c, subject in Class.query.join(Subject, Subject.id == Class.subject_id).order_by(Class.class_name, Class.batch).with_entities(Class, Subject.name).all():
+        classes.append({"course": c.class_name, "batch": c.batch, "subject": subject,
+            "status": c.status, "course_type": c.course_type,
+            "active_students": student_class_counts.get(c.id, 0),
+            "active_teachers": teacher_counts_by_class.get(c.id, 0)})
+
+    payment_rows = (db.session.query(FeePayment, Student)
+        .join(Student, Student.id == FeePayment.student_id)
+        .filter(FeePayment.fee_month == period)
+        .order_by(FeePayment.payment_date, FeePayment.id).all())
+    payments = [{"date": p.payment_date.isoformat(sep=" ") if p.payment_date else "",
+        "receipt": p.receipt_number, "student": s.name, "student_id": s.student_id,
+        "amount": float(p.amount or 0), "discount": float(p.discount_amount or 0),
+        "method": p.payment_method} for p, s in payment_rows]
+
+    attendance_rows = (db.session.query(Attendance, Student, Class, Subject.name)
+        .join(Student, Student.id == Attendance.student_id)
+        .join(Class, Class.id == Attendance.class_id)
+        .join(Subject, Subject.id == Class.subject_id)
+        .filter(Attendance.attendance_date >= period, Attendance.attendance_date < next_period)
+        .order_by(Attendance.attendance_date, Class.class_name, Student.name, Attendance.id).all())
+    attendance_records = [{"date": a.attendance_date.isoformat(), "student": s.name,
+        "student_id": s.student_id, "course": c.class_name, "batch": c.batch,
+        "subject": subject, "status": a.status} for a, s, c, subject in attendance_rows]
+
+    complaint_rows = (db.session.query(Complaint, Student)
+        .join(Student, Student.id == Complaint.student_id)
+        .order_by(Complaint.created_at.desc(), Complaint.id.desc()).all())
+    complaints = [{"date": x.complaint_date.isoformat() if x.complaint_date else "",
+        "student": s.name, "student_id": s.student_id, "subject": x.subject,
+        "description": x.description, "status": x.status} for x, s in complaint_rows]
+    enquiries = [{"date": e.created_at.isoformat(sep=" ") if e.created_at else "",
+        "name": e.name, "phone": e.phone, "status": e.status, "message": e.message}
+        for e in Enquiry.query.order_by(Enquiry.created_at.desc(), Enquiry.id.desc()).all()]
+
+    present = sum(1 for x in attendance_records if x["status"] == "present")
+    absent = sum(1 for x in attendance_records if x["status"] == "absent")
+    fee = summary.get("fees", {})
+    compact = {"period": month, "active_students": summary.get("students", 0),
+        "active_teachers": summary.get("teachers", 0), "active_classes": summary.get("classes", 0),
+        "fee_collected": fee.get("collected", 0), "fee_discounts": fee.get("discount", 0),
+        "pending_fees": fee.get("pending", 0), "pending_students": fee.get("pending_students", 0),
+        "payments_count": len(payments), "attendance_present": present, "attendance_absent": absent,
+        "complaints": len(complaints), "open_complaints": sum(1 for x in complaints if x["status"] != "resolved"),
+        "enquiries": len(enquiries), "new_enquiries": sum(1 for x in enquiries if x["status"] == "new")}
+    total_attendance = present + absent
+    compact["attendance_percent"] = round(100 * present / total_attendance, 1) if total_attendance else None
+    fallback = (f"{month}: RMCTI has {compact['active_students']} active students, "
+        f"{compact['active_teachers']} active teachers and {compact['active_classes']} active classes. "
+        f"The institute recorded {len(payments)} fee payments totaling ₹{fee.get('collected', 0):,.2f}; "
+        f"₹{fee.get('pending', 0):,.2f} remains pending across {fee.get('pending_students', 0)} students. "
+        + (f"Attendance was {compact['attendance_percent']}% ({present} present, {absent} absent). " if total_attendance else "No attendance was recorded for this period. ")
+        + f"There are {compact['open_complaints']} unresolved complaints and {compact['new_enquiries']} new enquiries to review.")
+    ai_summary, ai_source = fallback, "Built-in analysis"
+    try:
+        from .assistant import gemini_generate
+        prompt = ("Write a concise institute management report in 4-6 short bullets, followed by 2 practical priorities. "
+            "Use only the aggregate facts below. Do not invent causes, names, or targets. State clearly when there is no data.\n" +
+            json.dumps(compact, ensure_ascii=False))
+        generated = gemini_generate([{"role": "user", "parts": [{"text": prompt}]}],
+            "You prepare accurate, concise operational summaries for a school administrator. Output plain text with bullets.",
+            deadline=time_module.monotonic() + 18)
+        parts = (((generated or {}).get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+        text = "\n".join(p.get("text", "") for p in parts if p.get("text") and not p.get("thought")).strip()
+        if text:
+            ai_summary, ai_source = text[:6000], "Gemini"
+    except Exception as exc:
+        current_app.logger.info("Gemini report summary unavailable; using built-in summary (%s)", type(exc).__name__)
+
+    return {"month": month, "summary": summary, "overview": ai_summary, "overview_source": ai_source,
+        "students": students, "teachers": teachers, "classes": classes, "payments": payments,
+        "attendance_records": attendance_records, "complaints": complaints, "enquiries": enquiries,
+        "totals": compact}
+
+
+def _report_export_response(month, kind):
+    payload = _institute_report_payload(month)
+    basename = f"rmcti-institute-report-{month}"
+    if kind == "csv":
+        stream = io.StringIO(newline="")
+        writer = csv.writer(stream)
+        writer.writerow(["RMCTI Institute Report", month])
+        writer.writerow(["AI overview source", payload["overview_source"]])
+        writer.writerow(["AI generated institute overview", _report_text(payload["overview"])])
+        writer.writerow([])
+        sheets = [
+            ("Summary", [["Metric", "Value"], *[[k, v] for k, v in payload["totals"].items()]]),
+            ("Fee transactions", [["Date", "Receipt", "Student", "Student ID", "Amount", "Discount", "Method"], *[[r[k] for k in ("date","receipt","student","student_id","amount","discount","method")] for r in payload["payments"]]]),
+            ("Attendance", [["Date", "Student", "Student ID", "Course", "Batch", "Subject", "Status"], *[[r[k] for k in ("date","student","student_id","course","batch","subject","status")] for r in payload["attendance_records"]]]),
+            ("Students", [["Student ID", "Name", "Status", "Admission date", "Courses"], *[[r[k] for k in ("student_id","name","status","admission_date","courses")] for r in payload["students"]]]),
+            ("Teachers", [["Teacher ID", "Name", "Status", "Qualification", "Weekly classes"], *[[r[k] for k in ("teacher_id","name","status","qualification","weekly_classes")] for r in payload["teachers"]]]),
+            ("Classes", [["Course", "Batch", "Subject", "Status", "Course type", "Active students", "Active teachers"], *[[r[k] for k in ("course","batch","subject","status","course_type","active_students","active_teachers")] for r in payload["classes"]]]),
+            ("Complaints", [["Date", "Student", "Student ID", "Subject", "Details", "Status"], *[[r[k] for k in ("date","student","student_id","subject","description","status")] for r in payload["complaints"]]]),
+            ("Enquiries", [["Date", "Name", "Phone", "Status", "Message"], *[[r[k] for k in ("date","name","phone","status","message")] for r in payload["enquiries"]]])]
+        for title, rows in sheets:
+            writer.writerow([title])
+            for row in rows:writer.writerow([_report_text(v) for v in row])
+            writer.writerow([])
+        data = io.BytesIO(("\ufeff" + stream.getvalue()).encode("utf-8"))
+        return send_file(data, mimetype="text/csv; charset=utf-8", as_attachment=True, download_name=basename + ".csv")
+
+    from openpyxl import Workbook
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+    from openpyxl.styles import Font, PatternFill, Alignment
+    def excel_value(value):
+        value = _report_text(value)
+        return ILLEGAL_CHARACTERS_RE.sub("", value)[:32767] if isinstance(value, str) else value
+    wb = Workbook()
+    summary_sheet = wb.active
+    summary_sheet.title = "Overview"
+    summary_sheet.append(["RMCTI Institute Report", month])
+    summary_sheet.append(["Overview source", payload["overview_source"]])
+    summary_sheet.append(["AI generated overview", excel_value(payload["overview"])])
+    summary_sheet.append([])
+    summary_sheet.append(["Metric", "Value"])
+    for key, value in payload["totals"].items():summary_sheet.append([key.replace("_", " ").title(), value])
+    sheets = [
+        ("Fee transactions", ["Date", "Receipt", "Student", "Student ID", "Amount", "Discount", "Method"], payload["payments"], ("date","receipt","student","student_id","amount","discount","method")),
+        ("Attendance", ["Date", "Student", "Student ID", "Course", "Batch", "Subject", "Status"], payload["attendance_records"], ("date","student","student_id","course","batch","subject","status")),
+        ("Students", ["Student ID", "Name", "Status", "Admission date", "Courses"], payload["students"], ("student_id","name","status","admission_date","courses")),
+        ("Teachers", ["Teacher ID", "Name", "Status", "Qualification", "Weekly classes"], payload["teachers"], ("teacher_id","name","status","qualification","weekly_classes")),
+        ("Classes", ["Course", "Batch", "Subject", "Status", "Course type", "Active students", "Active teachers"], payload["classes"], ("course","batch","subject","status","course_type","active_students","active_teachers")),
+        ("Complaints", ["Date", "Student", "Student ID", "Subject", "Details", "Status"], payload["complaints"], ("date","student","student_id","subject","description","status")),
+        ("Enquiries", ["Date", "Name", "Phone", "Status", "Message"], payload["enquiries"], ("date","name","phone","status","message"))]
+    for name, headers, rows, keys in sheets:
+        ws = wb.create_sheet(name)
+        ws.append(headers)
+        for record in rows:ws.append([excel_value(record[k]) for k in keys])
+    for ws in wb.worksheets:
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+        for cell in ws[1]:
+            cell.font = Font(color="FFFFFF", bold=True)
+            cell.fill = PatternFill("solid", fgColor="12345A")
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+        for column in ws.columns:
+            letter = column[0].column_letter
+            width = min(52, max(12, max((len(str(cell.value or "")) for cell in column[:200]), default=10) + 2))
+            ws.column_dimensions[letter].width = width
+    data = io.BytesIO()
+    wb.save(data)
+    data.seek(0)
+    return send_file(data, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=basename + ".xlsx")
+
+
+def _parse_report_month():
+    raw = str(request.args.get("month") or today_ist().strftime("%Y-%m"))
+    try:
+        date.fromisoformat(raw + "-01")
+    except ValueError:
+        return None
+    return raw
+
+
+@api.get("/admin/reports/full")
+@roles("admin")
+def admin_full_report():
+    month = _parse_report_month()
+    if not month:return err("Invalid month. Use YYYY-MM")
+    try:return ok(_institute_report_payload(month))
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Could not build full institute report")
+        return err("Could not build the full institute report", 500)
+
+
+@api.get("/admin/reports/export.csv")
+@roles("admin")
+def admin_report_csv():
+    month = _parse_report_month()
+    if not month:return err("Invalid month. Use YYYY-MM")
+    try:return _report_export_response(month, "csv")
+    except Exception:
+        db.session.rollback();current_app.logger.exception("CSV institute report export failed")
+        return err("Could not export the institute report", 500)
+
+
+@api.get("/admin/reports/export.xlsx")
+@roles("admin")
+def admin_report_xlsx():
+    month = _parse_report_month()
+    if not month:return err("Invalid month. Use YYYY-MM")
+    try:return _report_export_response(month, "xlsx")
+    except Exception:
+        db.session.rollback();current_app.logger.exception("Excel institute report export failed")
+        return err("Could not export the institute report", 500)
+
+
 @api.get("/admin/analytics")
 @roles("admin")
 def admin_analytics():
@@ -1415,6 +1705,42 @@ def schedule_exceptions():
                 "end_time":x.end_time.strftime("%H:%M") if x.end_time else None,
                 "teacher_id":x.teacher_id} for x in rows])
 
+@api.get("/admin/schedule-calendar")
+@roles("admin")
+def admin_schedule_calendar():
+    try:
+        start=date.fromisoformat(request.args.get("week_start") or _week_start(today_ist()).isoformat())
+    except Exception:
+        return err("Invalid week_start")
+    classes=Class.query.filter_by(status="active").order_by(Class.class_name.asc()).all()
+    if not classes:
+        return ok([])
+    class_ids=[c.id for c in classes]
+    schedules=_effective_class_schedule_bulk(classes,start,7)
+    subjects={s.id:s.name for s in Subject.query.filter(
+        Subject.id.in_({c.subject_id for c in classes})
+    ).all()}
+    exceptions=ScheduleException.query.filter(
+        ScheduleException.class_id.in_(class_ids),
+        ScheduleException.week_start==_week_start(start),
+    ).all()
+    changes_by_class={cid:[] for cid in class_ids}
+    for x in exceptions:
+        changes_by_class.setdefault(x.class_id,[]).append({
+            "id":x.id,"allocation_id":x.allocation_id,"kind":x.kind,
+            "week_start":x.week_start.isoformat(),
+            "schedule_date":x.schedule_date.isoformat() if x.schedule_date else None,
+            "target_date":x.target_date.isoformat() if x.target_date else None,
+            "start_time":x.start_time.strftime("%H:%M") if x.start_time else None,
+            "end_time":x.end_time.strftime("%H:%M") if x.end_time else None,
+            "teacher_id":x.teacher_id,
+        })
+    return ok([{
+        "class_id":c.id,"class_name":c.class_name,"batch":c.batch,
+        "subject":subjects.get(c.subject_id, ""),"room":c.room,
+        "schedule":schedules.get(c.id,[]),"changes":changes_by_class.get(c.id,[]),
+    } for c in classes])
+
 @api.post("/schedule-exceptions")
 @roles("admin")
 def create_schedule_exception():
@@ -1553,11 +1879,13 @@ def classes():
     if request.args.get("include_unassigned") not in ("1","true","yes"):
         query=query.join(TeacherClass,TeacherClass.class_id==Class.id).filter(TeacherClass.status=="active").distinct()
     if q:query=query.filter(or_(Class.class_name.like(f"%{q}%"),Class.batch.like(f"%{q}%")))
-    rows=_class_objs_bulk(query.order_by(Class.class_name,Class.batch).limit(_bounded_limit()).all())
+    class_rows=query.order_by(Class.class_name,Class.batch).limit(_bounded_limit()).all()
+    rows=_class_objs_bulk(class_rows)
     if request.args.get("include_current") in ("1","true","yes"):
         now=datetime.now(ZoneInfo("Asia/Kolkata")); by_id={x["id"]:x for x in rows}
-        for c in query.order_by(Class.class_name,Class.batch).limit(_bounded_limit()).all():
-            current=[x for x in _effective_class_schedule(c,now.date(),1)
+        schedules_by_class=_effective_class_schedule_bulk(class_rows,now.date(),1)
+        for c in class_rows:
+            current=[x for x in schedules_by_class.get(c.id,[])
                      if x.get("date")==now.date().isoformat() and x.get("start_time")<=now.strftime("%H:%M")<=x.get("end_time")]
             row=by_id.get(c.id)
             if row:
@@ -2077,7 +2405,6 @@ def admin_update_class_attendance(class_id):
 @api.get("/complaints")
 @roles("admin")
 def admin_complaints():
-    _purge_old_feedback()
     status=request.args.get("status","").strip()
     query=Complaint.query
     if status in ("open","in_progress","resolved"): query=query.filter_by(status=status)
@@ -2107,7 +2434,6 @@ def admin_complaints():
 @api.delete("/complaints/<int:id>")
 @roles("admin")
 def delete_admin_complaint(id):
-    _purge_old_feedback()
     item = Complaint.query.get(id)
     if not item: return err("Complaint not found", 404)
     db.session.delete(item); db.session.commit()
@@ -2893,9 +3219,21 @@ def my_classes():
         Attendance.attendance_date==now.date()
     ).all()
     attendance_counts = {}
+    attendance_students_by_session = {}
     for ar in attendance_rows:
         key=(ar.class_id, ar.session_start_time, ar.session_end_time)
         attendance_counts[key]=attendance_counts.get(key,0)+1
+        attendance_students_by_session.setdefault(key, set()).add(ar.student_id)
+
+    enrolled_by_class = {cid: [] for cid in class_ids}
+    for student_id, class_id in db.session.query(
+        StudentClass.student_id, StudentClass.class_id
+    ).filter(
+        StudentClass.class_id.in_(class_ids or [-1]),
+        StudentClass.status == "active",
+    ).all():
+        enrolled_by_class.setdefault(class_id, []).append(student_id)
+    attendance_rows_to_add = []
 
     for a in allocations:
         if a.class_id in seen_class_ids:continue
@@ -2920,15 +3258,18 @@ def my_classes():
             # Once the scheduled session has ended, close any unsubmitted attendance
             # as absent for every active student rather than leaving the session uncounted.
             if now > et and total_students:
-                enrolled=[x.student_id for x in StudentClass.query.filter_by(class_id=a.class_id,status="active").all()]
-                existing_rows=Attendance.query.filter(Attendance.class_id==a.class_id,Attendance.attendance_date==now.date(),Attendance.session_start_time==st.time(),Attendance.session_end_time==et.time()).all()
-                existing_by_id={x.student_id:x for x in existing_rows}
-                for sid in enrolled:
-                    if sid not in existing_by_id:
-                        db.session.add(Attendance(student_id=sid,class_id=a.class_id,attendance_date=now.date(),session_start_time=st.time(),session_end_time=et.time(),status="absent",marked_by=t.user_id))
-                if any(sid not in existing_by_id for sid in enrolled):
-                    db.session.commit()
-                    marked=len(enrolled)
+                session_key=(a.class_id,st.time(),et.time())
+                existing_ids=attendance_students_by_session.setdefault(session_key,set())
+                enrolled=enrolled_by_class.get(a.class_id,[])
+                missing=[sid for sid in enrolled if sid not in existing_ids]
+                attendance_rows_to_add.extend(
+                    Attendance(student_id=sid,class_id=a.class_id,attendance_date=now.date(),session_start_time=st.time(),session_end_time=et.time(),status="absent",marked_by=t.user_id)
+                    for sid in missing
+                )
+                existing_ids.update(missing)
+                if missing:
+                    attendance_counts[session_key]=len(existing_ids)
+                    marked=len(existing_ids)
             sessions.append({**row,"active":active,"marked_count":marked,"student_count":total_students,
                              "attendance_complete":total_students==0 or marked>=total_students})
         current=next((x for x in sessions if x["active"]),None)
@@ -2950,15 +3291,18 @@ def my_classes():
         now_t=now.time().replace(second=0,microsecond=0)
         marked=attendance_counts.get((ex.class_id,st,et),0)
         if now.time().replace(tzinfo=None) > et and total_students:
-            enrolled=[x.student_id for x in StudentClass.query.filter_by(class_id=ex.class_id,status="active").all()]
-            existing_rows=Attendance.query.filter(Attendance.class_id==ex.class_id,Attendance.attendance_date==now.date(),Attendance.session_start_time==st,Attendance.session_end_time==et).all()
-            existing_by_id={x.student_id:x for x in existing_rows}
-            for sid in enrolled:
-                if sid not in existing_by_id:
-                    db.session.add(Attendance(student_id=sid,class_id=ex.class_id,attendance_date=now.date(),session_start_time=st,session_end_time=et,status="absent",marked_by=t.user_id))
-            if any(sid not in existing_by_id for sid in enrolled):
-                db.session.commit()
-                marked=len(enrolled)
+            session_key=(ex.class_id,st,et)
+            existing_ids=attendance_students_by_session.setdefault(session_key,set())
+            enrolled=enrolled_by_class.get(ex.class_id,[])
+            missing=[sid for sid in enrolled if sid not in existing_ids]
+            attendance_rows_to_add.extend(
+                Attendance(student_id=sid,class_id=ex.class_id,attendance_date=now.date(),session_start_time=st,session_end_time=et,status="absent",marked_by=t.user_id)
+                for sid in missing
+            )
+            existing_ids.update(missing)
+            if missing:
+                attendance_counts[session_key]=len(existing_ids)
+                marked=len(existing_ids)
         session={"date":now.date().isoformat(),"allocation_id":None,"teacher_id":t.id,
                  "teacher_name":t.name,"start_time":st.strftime("%H:%M"),"end_time":et.strftime("%H:%M"),
                  "day_of_week":now.weekday(),"room":item.get("room"),"kind":"extra",
@@ -2968,6 +3312,9 @@ def my_classes():
         item["attendance_active"]=session["active"];item["attendance_complete"]=session["attendance_complete"]
         item["attendance_schedule"]=session
         out.append(item)
+    if attendance_rows_to_add:
+        db.session.add_all(attendance_rows_to_add)
+        db.session.commit()
     out.sort(key=lambda x:(not x.get("attendance_active",False),
                            x.get("attendance_schedule",{}).get("start_time") or "99:99",
                            x.get("class_name","").lower()))
@@ -3178,6 +3525,9 @@ def add_classwork():
         files=[f for f in request.files.getlist("attachments") if f and f.filename]
         max_size=15*1024*1024
         for f in files:
+            mime=_classwork_attachment_mime(f.filename)
+            if not mime:
+                return err(f"Unsupported attachment type: {f.filename}")
             # Read once so the size check is exact and the same bytes are stored.
             data=f.read()
             if not data:
@@ -3185,6 +3535,7 @@ def add_classwork():
             if len(data)>max_size:
                 return err(f"{f.filename} is too large. Maximum size is 15 MB per file")
             f._rmcti_data=data
+            f._rmcti_mime=mime
 
     try:
         w=Classwork(class_id=cid,teacher_id=t.id,subject_id=sid,work_date=work_date,
@@ -3195,7 +3546,7 @@ def add_classwork():
         created=[]
         for f in files:
             name=secure_filename(f.filename) or f"classwork-{uuid.uuid4().hex}"
-            mime=(f.mimetype or "application/octet-stream").lower()[:255]
+            mime=f._rmcti_mime
             resource_type_hint = "image" if mime.startswith("image/") else "raw"
             cloud_url, public_id, resource_type = _r2_upload(f._rmcti_data, name, folder=os.getenv("R2_FILE_FOLDER", "rmcti/classwork"), resource_type=resource_type_hint, content_type=f.mimetype or "application/octet-stream")
             a=ClassworkAttachment(classwork_id=w.id,original_filename=name,
@@ -3240,15 +3591,20 @@ def add_classwork_attachment(id):
     max_size=15*1024*1024
     created=[]
     try:
+        prepared=[]
         for f in files:
+            mime=_classwork_attachment_mime(f.filename)
+            if not mime:
+                raise ValueError(f"Unsupported attachment type: {f.filename}")
             data=f.read()
             if not data:
                 raise ValueError(f"The selected file is empty: {f.filename}")
             if len(data)>max_size:
                 raise ValueError(f"{f.filename} is too large. Maximum size is 15 MB per file")
+            prepared.append((f,data,mime))
 
+        for f,data,mime in prepared:
             name=secure_filename(f.filename) or f"classwork-{uuid.uuid4().hex}"
-            mime=(f.mimetype or "application/octet-stream").lower()[:255]
             resource_type_hint = "image" if mime.startswith("image/") else "raw"
             cloud_url, public_id, resource_type = _r2_upload(data, name, folder=os.getenv("R2_FILE_FOLDER", "rmcti/classwork"), resource_type=resource_type_hint, content_type=f.mimetype or "application/octet-stream")
             a=ClassworkAttachment(
@@ -3351,13 +3707,14 @@ def student_dashboard():
     base_due=sum((max(Decimal("0.00"),x["base"]-x["paid"]) for x in balances),Decimal("0.00"))
     fine_due=max(Decimal("0.00"),total_due-base_due)
     classes={c.id:c for c in Class.query.filter(Class.id.in_(class_ids or [-1]),Class.status=="active").all()}
+    subjects={x.id:x for x in Subject.query.filter(Subject.id.in_({c.subject_id for c in classes.values()} or {-1})).all()}
     todays=[]
     candidates=[]
     schedules_by_class = _effective_class_schedule_bulk(classes.values(), today, 8)
     for c in classes.values():
         for row in schedules_by_class.get(c.id, []):
             if row["date"]==today.isoformat():
-                sub=Subject.query.get(c.subject_id)
+                sub=subjects.get(c.subject_id)
                 item={"class_id":c.id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "",
                       "room":c.room,"start_time":row["start_time"],"end_time":row["end_time"],
                       "teacher_name":row["teacher_name"],"kind":row["kind"]}
@@ -3367,7 +3724,7 @@ def student_dashboard():
                 if dt>now:candidates.append((dt,c,row))
     next_item=None
     if candidates:
-        _,c,row=min(candidates,key=lambda z:z[0]);sub=Subject.query.get(c.subject_id)
+        _,c,row=min(candidates,key=lambda z:z[0]);sub=subjects.get(c.subject_id)
         next_item={"class_id":c.id,"class_name":c.class_name,"batch":c.batch,"subject":sub.name if sub else "",
                    "day":DAYS[row["day_of_week"]],"date":row["date"],"start_time":row["start_time"],"end_time":row["end_time"],
                    "teacher_name":row["teacher_name"],"kind":row["kind"]}

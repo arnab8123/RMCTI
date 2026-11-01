@@ -221,36 +221,6 @@ function rmctiMobileActions() {
   document.body.appendChild(bar);
 }
 
-function rmctiSessionNotice() {
-  const token = sessionStorage.getItem('token');
-  if (!token) return;
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/') + '==='.slice((token.split('.')[1].length + 3) % 4)));
-    const exp = Number(payload.exp || 0) * 1000;
-    if (!exp) return;
-    const warnAt = exp - 120000;
-    const check = () => {
-      const remaining = exp - Date.now();
-      if (remaining <= 0) return;
-      if (remaining <= 120000 && !document.body.dataset.sessionWarningShown) {
-        document.body.dataset.sessionWarningShown = '1';
-        const modal = U.modal('Session ending soon', `
-          <p class="session-warning-copy">Your session will expire in about ${Math.max(1, Math.ceil(remaining / 60000))} minute(s).</p>
-          <div class="right" style="justify-content:flex-end">
-            <button type="button" class="btn primary" data-close>Continue Session</button>
-          </div>`);
-        modal.querySelector('[data-close]')?.addEventListener('click', () => {
-          document.body.dataset.sessionWarningShown = '';
-          // A harmless authenticated request keeps this warning UI useful without inventing a new
-          // backend refresh contract. If the API reports 401, the normal auth flow handles logout.
-          Api.get('/auth/me').catch(() => {});
-        });
-      }
-    };
-    window.setTimeout(check, Math.max(1000, warnAt - Date.now()));
-  } catch (_) {}
-}
-
 function rmctiUpgradeLoadingStates() {
   document.querySelectorAll('.loading').forEach((node) => {
     if (node.dataset.rmctiSkeleton || !/^loading[.…\.]*/i.test((node.textContent || '').trim())) return;
@@ -267,7 +237,6 @@ function rmctiBootSharedUI() {
   rmctiEnsureTopSearch();
   rmctiBottomNav();
   rmctiMobileActions();
-  rmctiSessionNotice();
   if (window.U?.prepareLoadingEnhancement) window.U.prepareLoadingEnhancement();
 }
 

@@ -1,26 +1,198 @@
 <!doctype html>
 <html lang="en">
 <head>
-    <link rel="icon" href="/favicon.ico?v=20261029" sizes="any">
-    <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png?v=20261029">
-    <link rel="apple-touch-icon" href="/favicon-192.png?v=20261029"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RMCTI Login</title><link rel="stylesheet" href="css/variables.css?v=20260926"><link rel="stylesheet" href="css/global.css?v=20260926"><style>
-.password-field{position:relative}.password-field .input{padding-right:50px}
-.password-toggle{position:absolute;right:7px;top:50%;transform:translateY(-50%);width:38px;height:38px;border:0;border-radius:10px;background:transparent;color:var(--muted);cursor:pointer;padding:7px;display:flex;align-items:center;justify-content:center;transition:all .2s ease}
-.password-toggle:hover{color:var(--primary);background:rgba(0,75,135,.08)}
-.password-toggle:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
-.password-toggle svg{width:20px;height:20px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
-.remember-row{display:flex;align-items:center;gap:8px;margin:12px 0 16px;font-size:.9rem;color:var(--muted)}
-</style>
+  <link rel="icon" href="/favicon.ico?v=20261029" sizes="any">
+  <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png?v=20261029">
+  <link rel="apple-touch-icon" href="/favicon-192.png?v=20261029">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f8f4ec">
+  <title>Sign in | RMCTI</title>
+  <link rel="stylesheet" href="css/variables.css?v=20261104">
+  <link rel="stylesheet" href="css/global.css?v=20261104">
+  <style>
+    :root{--login-copper:var(--primary);--login-gold:var(--accent);--login-ink:var(--text);--login-muted:var(--muted)}
+    body[data-login]{min-height:100vh;min-height:100dvh;overflow-x:hidden;background:radial-gradient(ellipse at 7% 6%,rgba(230,190,120,.28),transparent 28%),radial-gradient(ellipse at 95% 95%,rgba(184,121,47,.16),transparent 30%),var(--bg);color:var(--login-ink)}
+    body[data-login]::before,body[data-login]::after{position:fixed;z-index:-1;content:"";pointer-events:none;border-radius:50%;filter:blur(1px)}
+    body[data-login]::before{width:390px;height:390px;top:-190px;right:18%;background:radial-gradient(circle,rgba(230,181,109,.22),transparent 68%);animation:ambientFloat 12s ease-in-out infinite alternate}
+    body[data-login]::after{width:300px;height:300px;bottom:-150px;left:12%;background:radial-gradient(circle,rgba(146,80,15,.13),transparent 70%);animation:ambientFloat 15s ease-in-out infinite alternate-reverse}
+    .login-stage{min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:clamp(14px,3vw,40px)}
+    .login-layout{position:relative;isolation:isolate;display:grid;grid-template-columns:minmax(0,1.06fr) minmax(390px,.94fr);width:min(1280px,100%);min-height:min(760px,calc(100dvh - 48px));overflow:hidden;border:1px solid rgba(119,79,35,.14);border-radius:34px;background:rgba(255,253,248,.76);box-shadow:0 32px 90px rgba(70,48,22,.15),0 4px 14px rgba(70,48,22,.06);backdrop-filter:blur(18px);animation:layoutEnter .8s cubic-bezier(.2,.75,.2,1) both}
+    .login-story{position:relative;isolation:isolate;display:flex;flex-direction:column;justify-content:space-between;min-height:600px;overflow:hidden;padding:clamp(32px,5vw,68px);color:#fff8ec;background:#25190f}
+    .login-story::before{position:absolute;z-index:-2;inset:0;content:"";background:linear-gradient(125deg,rgba(36,23,12,.94),rgba(70,43,19,.85) 47%,rgba(98,57,18,.62)),url("asset/rmcti-est-2019.webp") center/cover;transform:scale(1.04);animation:photoSettle 1.6s cubic-bezier(.2,.7,.2,1) both}
+    .login-story::after{position:absolute;z-index:-1;inset:0;content:"";background:radial-gradient(ellipse at 82% 16%,rgba(235,183,93,.32),transparent 35%),linear-gradient(180deg,transparent 48%,rgba(24,16,10,.45))}
+    .story-orbit{position:absolute;z-index:-1;width:340px;height:340px;right:-135px;top:22%;border:1px solid rgba(255,226,175,.2);border-radius:50%;animation:orbitFloat 18s linear infinite}
+    .story-orbit::before,.story-orbit::after{position:absolute;content:"";border:1px solid rgba(255,226,175,.14);border-radius:50%}
+    .story-orbit::before{inset:24px}.story-orbit::after{inset:56px}
+    .login-brand{display:flex;align-items:center;gap:13px;width:max-content;color:inherit;text-decoration:none;animation:copyEnter .8s .1s both}
+    .login-brand img{width:56px;height:56px;object-fit:contain;padding:4px;border:1px solid rgba(255,255,255,.4);border-radius:50%;background:#fff;box-shadow:0 8px 22px rgba(0,0,0,.22)}
+    .login-brand-name{display:block;font-size:1.05rem;font-weight:850;letter-spacing:.16em}.login-brand-sub{display:block;margin-top:3px;color:rgba(255,248,236,.68);font-size:.72rem;letter-spacing:.08em}
+    .story-copy{max-width:550px;margin:60px 0 48px;animation:copyEnter .9s .22s both}
+    .story-eyebrow{display:inline-flex;align-items:center;gap:9px;margin-bottom:21px;padding:8px 12px;border:1px solid rgba(255,231,189,.24);border-radius:999px;background:rgba(255,255,255,.08);color:#f4d69f;font-size:.7rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase;backdrop-filter:blur(10px)}
+    .story-eyebrow::before{width:7px;height:7px;content:"";border-radius:50%;background:#e4ab53;box-shadow:0 0 0 5px rgba(228,171,83,.16);animation:dotPulse 2.2s ease-in-out infinite}
+    .story-copy h1{max-width:520px;margin:0;color:#fffaf2;font-size:clamp(2.6rem,5.3vw,5rem);font-weight:760;line-height:1.02;letter-spacing:-.055em}
+    .story-copy h1 em{color:#e8bd74;font-style:normal}
+    .story-copy p{max-width:430px;margin:22px 0 0;color:rgba(255,248,236,.73);font-size:1rem;line-height:1.75}
+    .story-points{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px}
+    .story-points span{padding:9px 13px;border:1px solid rgba(255,240,218,.17);border-radius:999px;background:rgba(255,255,255,.075);color:#fff3df;font-size:.76rem;font-weight:650;backdrop-filter:blur(8px);transition:transform .25s ease,background .25s ease}
+    .story-points span:hover{transform:translateY(-3px);background:rgba(255,255,255,.15)}
+    .story-foot{display:flex;align-items:center;gap:10px;color:rgba(255,248,236,.6);font-size:.75rem;animation:copyEnter 1s .34s both}
+    .story-foot i{color:#e4ad59}
+    .login-panel{position:relative;display:flex;flex-direction:column;justify-content:center;padding:clamp(30px,5vw,72px);background:linear-gradient(145deg,rgba(255,254,250,.97),rgba(250,246,238,.96))}
+    .return-link{position:absolute;top:30px;right:34px;display:inline-flex;align-items:center;gap:8px;color:#8a7967;font-size:.78rem;font-weight:700;transition:color .2s,transform .2s}
+    .return-link:hover{color:var(--login-copper);transform:translateX(-3px)}
+    .login-form-wrap{width:min(100%,410px);margin:28px auto 0;animation:formEnter .85s .18s cubic-bezier(.2,.7,.2,1) both}
+    .form-mark{display:grid;place-items:center;width:52px;height:52px;margin-bottom:24px;border:1px solid rgba(146,80,15,.15);border-radius:17px;background:linear-gradient(145deg,#fff8e9,#f4e4c8);color:var(--login-copper);box-shadow:0 8px 24px rgba(146,80,15,.1);transform:rotate(-5deg);transition:transform .35s cubic-bezier(.2,.7,.2,1),box-shadow .35s}
+    .login-form-wrap:hover .form-mark{transform:rotate(0) scale(1.05);box-shadow:0 12px 28px rgba(146,80,15,.15)}
+    .form-mark svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+    .login-heading{margin:0;color:#332719;font-size:clamp(2rem,3vw,2.7rem);font-weight:780;letter-spacing:-.045em;line-height:1.1}
+    .login-intro{margin:10px 0 30px;color:#817566;font-size:.92rem;line-height:1.6}
+    .login-form{display:grid;gap:0}
+    .login-label{display:block;margin:0 0 8px;color:#5b4a37;font-size:.78rem;font-weight:750;letter-spacing:.015em}
+    .login-input-wrap{position:relative;margin-bottom:20px}
+    .login-input{width:100%;height:54px;padding:0 15px;border:1px solid #e4dbcc;border-radius:14px;outline:none;background:rgba(255,255,255,.83);color:#30251b;font-size:.92rem;box-shadow:0 2px 4px rgba(58,40,20,.025);transition:border-color .25s,box-shadow .25s,transform .25s,background .25s}
+    .login-input::placeholder{color:#b6aa9a}
+    .login-input:hover{border-color:#cbb99e;background:#fff}
+    .login-input:focus{border-color:#b8792e;background:#fff;box-shadow:0 0 0 4px rgba(184,121,46,.12),0 8px 20px rgba(87,57,21,.07);transform:translateY(-1px)}
+    .password-field{position:relative}.password-field .login-input{padding-right:54px}
+    .password-toggle{position:absolute;right:8px;top:50%;display:grid;width:38px;height:38px;place-items:center;padding:7px;border:0;border-radius:11px;background:transparent;color:#8d7d69;cursor:pointer;transform:translateY(-50%);transition:color .2s,background .2s,transform .2s}
+    .password-toggle:hover{color:var(--login-copper);background:#f7eedf;transform:translateY(-50%) scale(1.06)}
+    .password-toggle:focus-visible,.login-input:focus-visible,.signin-button:focus-visible,.return-link:focus-visible{outline:3px solid rgba(184,121,46,.38);outline-offset:3px}
+    .password-toggle svg{width:20px;height:20px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+    .remember-row{display:flex;align-items:flex-start;gap:10px;margin:0 0 23px;color:#746756;font-size:.78rem;line-height:1.5;cursor:pointer}
+    .remember-row input{width:17px;height:17px;flex:0 0 17px;margin:1px 0 0;accent-color:var(--login-copper)}
+    .signin-button{position:relative;display:flex;width:100%;min-height:54px;align-items:center;justify-content:center;gap:10px;overflow:hidden;margin:0;padding:0 20px;border:0;border-radius:14px;background:linear-gradient(105deg,#87460b,#b86d1f 56%,#d99a3f);color:#fff;font-size:.9rem;font-weight:800;letter-spacing:.015em;box-shadow:0 12px 25px rgba(133,72,13,.23);cursor:pointer;transition:transform .25s,box-shadow .25s,filter .25s}
+    .signin-button::before{position:absolute;inset:0;content:"";background:linear-gradient(110deg,transparent 25%,rgba(255,255,255,.25) 48%,transparent 70%);transform:translateX(-120%);transition:transform .65s cubic-bezier(.2,.7,.2,1)}
+    .signin-button:hover{transform:translateY(-2px);box-shadow:0 16px 30px rgba(133,72,13,.3);filter:saturate(1.08)}
+    .signin-button:hover::before{transform:translateX(120%)}
+    .signin-button:active{transform:translateY(0)}
+    .signin-button:disabled{opacity:.7;cursor:wait}
+    .signin-button svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .error-text{min-height:22px;margin:12px 0 0;color:#b42318;font-size:.82rem;line-height:1.45}
+    .secure-note{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:23px;color:#958775;font-size:.72rem}
+    .secure-note svg{width:15px;height:15px;fill:none;stroke:#a56a24;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+    @keyframes layoutEnter{from{opacity:0;transform:translateY(18px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+    @keyframes copyEnter{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes formEnter{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes photoSettle{from{transform:scale(1.12);filter:brightness(.8)}to{transform:scale(1.04);filter:brightness(1)}}
+    @keyframes ambientFloat{from{transform:translate3d(-10px,0,0) scale(.94)}to{transform:translate3d(18px,20px,0) scale(1.08)}}
+    @keyframes orbitFloat{to{transform:rotate(360deg)}}
+    @keyframes dotPulse{0%,100%{box-shadow:0 0 0 4px rgba(228,171,83,.13)}50%{box-shadow:0 0 0 7px rgba(228,171,83,.2)}}
+    html[data-theme=dark] body[data-login]{background:radial-gradient(ellipse at 7% 6%,rgba(230,181,109,.12),transparent 28%),radial-gradient(ellipse at 95% 95%,rgba(184,121,47,.1),transparent 30%),var(--bg);color:var(--text)}
+    html[data-theme=dark] .login-layout{border-color:var(--border);background:rgba(33,26,18,.84);box-shadow:0 32px 90px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.16)}
+    html[data-theme=dark] .login-panel{background:linear-gradient(145deg,rgba(33,26,18,.98),rgba(37,29,20,.98))}
+    html[data-theme=dark] .login-heading{color:var(--text)}
+    html[data-theme=dark] .login-intro,html[data-theme=dark] .return-link,html[data-theme=dark] .login-label,html[data-theme=dark] .remember-row,html[data-theme=dark] .secure-note{color:var(--muted)}
+    html[data-theme=dark] .form-mark{border-color:rgba(230,181,109,.2);background:linear-gradient(145deg,#332718,#2b2118);color:var(--primary)}
+    html[data-theme=dark] .login-input{border-color:var(--border);background:#2c241a;color:var(--text)}
+    html[data-theme=dark] .login-input::placeholder{color:#a3947e}
+    html[data-theme=dark] .login-input:hover,html[data-theme=dark] .login-input:focus{background:#33291d}
+    html[data-theme=dark] .password-toggle{color:var(--muted)}
+    html[data-theme=dark] .password-toggle:hover{background:#382a1b;color:var(--primary)}
+    html[data-theme=dark] .secure-note svg{stroke:var(--primary)}
+    @media(max-width:900px){.login-stage{padding:16px}.login-layout{grid-template-columns:minmax(0,.9fr) minmax(360px,1.1fr);min-height:min(700px,calc(100dvh - 32px));border-radius:28px}.login-story{padding:32px}.story-copy h1{font-size:clamp(2.5rem,6vw,4rem)}.login-panel{padding:34px}.return-link{top:24px;right:26px}}
+    @media(max-width:680px){.login-stage{display:block;padding:10px}.login-layout{display:flex;min-height:calc(100dvh - 20px);flex-direction:column;overflow:visible;border-radius:24px}.login-story{min-height:0;flex:0 0 auto;gap:27px;padding:22px 22px 26px;border-radius:24px 24px 0 0}.login-story::before{background:linear-gradient(110deg,rgba(36,23,12,.92),rgba(70,43,19,.78)),url("asset/rmcti-est-2019.webp") center 48%/cover}.login-brand img{width:45px;height:45px}.login-brand-name{font-size:.95rem}.story-copy{margin:0}.story-eyebrow{margin-bottom:12px;font-size:.62rem}.story-copy h1{max-width:420px;font-size:clamp(2rem,9vw,3rem)}.story-copy p{margin-top:10px;font-size:.83rem;line-height:1.55}.story-points{gap:7px;margin-top:15px}.story-points span{padding:7px 10px;font-size:.68rem}.story-foot{font-size:.68rem}.story-orbit{width:230px;height:230px;top:auto;right:-100px;bottom:-70px}.story-orbit::before{inset:18px}.story-orbit::after{inset:42px}.login-panel{flex:1;padding:25px 22px 22px;border-radius:0 0 24px 24px}.return-link{top:20px;right:22px;font-size:.7rem}.login-form-wrap{width:min(100%,440px);margin:8px auto 0}.form-mark{width:43px;height:43px;margin-bottom:15px;border-radius:14px}.login-heading{font-size:2rem}.login-intro{margin:7px 0 20px;font-size:.83rem}.login-input-wrap{margin-bottom:15px}.login-input{height:50px}.remember-row{margin-bottom:17px}.signin-button{min-height:50px}.secure-note{margin-top:15px}}
+    @media(max-width:390px){.login-story{gap:19px;padding:18px 17px 20px}.story-copy h1{font-size:1.9rem}.story-copy p{font-size:.78rem}.story-points span{font-size:.63rem}.login-panel{padding:24px 17px 18px}.login-intro{margin-bottom:16px}}
+    @media(max-height:760px) and (min-width:681px){.login-layout{min-height:calc(100dvh - 28px)}.login-story{min-height:0;padding:30px 42px}.story-copy{margin:32px 0}.story-copy h1{font-size:clamp(2.4rem,4vw,3.7rem)}.login-panel{padding:32px 48px}.login-form-wrap{margin-top:22px}.form-mark{margin-bottom:16px}.login-intro{margin-bottom:20px}.login-input-wrap{margin-bottom:15px}.secure-note{margin-top:14px}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+    /* Calm, theme-aware login palette: neutral shadows and real light/dark surfaces. */
+    body[data-login]{background:#fff;color:var(--text)}
+    body[data-login]::before,body[data-login]::after{display:none}
+    .login-layout{border-color:var(--border);background:#fff;box-shadow:0 22px 64px rgba(15,23,42,.09)}
+    .login-story{color:var(--text);background:var(--muted-surface)}
+    .login-story::before{background:linear-gradient(125deg,rgba(250,246,238,.9),rgba(250,246,238,.72)),url("asset/rmcti-est-2019.webp") center/cover}
+    .login-story::after{background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(15,23,42,.06))}
+    .story-orbit,.story-orbit::before,.story-orbit::after{border-color:rgba(71,85,105,.14)}
+    .login-brand-sub,.story-copy p,.story-foot{color:var(--muted)}
+    .story-eyebrow{border-color:var(--border);background:rgba(255,255,255,.68);color:var(--text)}
+    .story-eyebrow::before{background:var(--primary);box-shadow:none;animation:none}
+    .story-copy h1{color:var(--text)}
+    .story-copy h1 em,.story-foot i{color:var(--primary)}
+    .story-points span{border-color:var(--border);background:rgba(255,255,255,.68);color:var(--text)}
+    .story-points span:hover{background:var(--surface)}
+    .login-panel{background:#fff}
+    .return-link,.login-intro,.login-label,.remember-row,.secure-note{color:var(--muted)}
+    .login-heading{color:var(--text)}
+    .form-mark{border-color:var(--border);background:var(--muted-surface);color:var(--primary);box-shadow:none}
+    .login-form-wrap:hover .form-mark{box-shadow:none}
+    .login-input{border-color:var(--border);background:#fff;color:var(--text);box-shadow:none}
+    .login-input:hover{border-color:var(--primary);background:#fff}
+    .login-input:focus{border-color:var(--primary);background:#fff;box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 16%,transparent);transform:none}
+    .password-toggle{color:var(--muted)}
+    .password-toggle:hover{background:var(--muted-surface)}
+    .password-toggle:focus-visible,.login-input:focus-visible,.signin-button:focus-visible,.return-link:focus-visible,.login-theme-toggle:focus-visible{outline:3px solid color-mix(in srgb,var(--primary) 36%,transparent);outline-offset:3px}
+    .signin-button{background:var(--primary);box-shadow:none}
+    .signin-button:hover{box-shadow:none;filter:brightness(1.06)}
+    .secure-note svg{stroke:var(--primary)}
+    .login-theme-toggle{position:absolute;top:24px;right:190px;z-index:2;display:grid;width:38px;height:38px;place-items:center;margin:0;border:1px solid var(--border);border-radius:50%;background:var(--muted-surface);color:var(--text);font-size:16px;cursor:pointer;transition:transform .2s ease,background .2s ease}
+    .login-theme-toggle:hover{transform:rotate(-12deg);background:var(--surface)}
+    html[data-theme=dark] body[data-login]{background:var(--bg);color:var(--text)}
+    html[data-theme=dark] .login-layout{background:var(--surface);box-shadow:0 22px 64px rgba(0,0,0,.24)}
+    html[data-theme=dark] .login-story{color:var(--text);background:var(--muted-surface)}
+    html[data-theme=dark] .login-story::before{background:linear-gradient(125deg,rgba(11,18,32,.9),rgba(11,18,32,.75)),url("asset/rmcti-est-2019.webp") center/cover}
+    html[data-theme=dark] .login-story::after{background:linear-gradient(180deg,rgba(0,0,0,.04),rgba(0,0,0,.18))}
+    html[data-theme=dark] .story-orbit,html[data-theme=dark] .story-orbit::before,html[data-theme=dark] .story-orbit::after{border-color:rgba(203,213,225,.12)}
+    html[data-theme=dark] .login-brand-sub,html[data-theme=dark] .story-copy p,html[data-theme=dark] .story-foot{color:var(--muted)}
+    html[data-theme=dark] .story-eyebrow,html[data-theme=dark] .story-points span{border-color:var(--border);background:rgba(255,255,255,.045);color:var(--text)}
+    html[data-theme=dark] .story-points span:hover{background:var(--surface)}
+    html[data-theme=dark] .story-copy h1,html[data-theme=dark] .login-heading{color:var(--text)}
+    html[data-theme=dark] .login-panel{background:var(--surface)}
+    html[data-theme=dark] .form-mark{border-color:var(--border);background:var(--muted-surface);color:var(--primary);box-shadow:none}
+    html[data-theme=dark] .login-input{border-color:var(--border);background:var(--muted-surface);color:var(--text)}
+    html[data-theme=dark] .login-input::placeholder{color:var(--muted)}
+    html[data-theme=dark] .login-input:hover,html[data-theme=dark] .login-input:focus{background:var(--muted-surface)}
+    html[data-theme=dark] .password-toggle:hover,html[data-theme=dark] .login-theme-toggle:hover{background:var(--surface);color:var(--text)}
+    html[data-theme=dark] body[data-login] .login-input:focus{border-color:var(--border);box-shadow:0 0 0 3px rgba(148,163,184,.18)}
+    html[data-theme=dark] body[data-login] :is(.password-toggle,.login-input,.signin-button,.return-link,.login-theme-toggle):focus-visible{outline-color:rgba(148,163,184,.55)}
+    html[data-theme=dark] body[data-login] .form-mark,html[data-theme=dark] body[data-login] .login-form-wrap:hover .form-mark,html[data-theme=dark] body[data-login] .signin-button,html[data-theme=dark] body[data-login] .signin-button:hover{box-shadow:none}
+    @media(max-width:680px){.login-theme-toggle{top:18px;right:72px;width:34px;height:34px}}
+  </style>
 </head>
 <body data-login>
-<main class="login-page"><section class="card pad login-card"><div class="brand"><img class="brandlogo" src="asset/image.png" alt="RMCTI logo" loading="lazy" decoding="async"> <span>RMCTI</span></div><h1>Sign in</h1><p class="muted">Admin, teacher and student portal access.</p><form id="login"><label class="label">Username</label><input class="input" name="username" autocomplete="username" required><label class="label">Password</label>
-<div class="password-field">
-<input class="input" id="login-password" type="password" name="password" autocomplete="current-password" required>
-<button type="button" class="password-toggle" data-toggle-password aria-label="Show password" title="Show password">
-<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>
-</button>
-</div>
-<label class="remember-row"><input type="checkbox" name="remember" value="1" checked> <span>Keep me signed in on this device</span></label><button class="btn primary" type="submit">Sign in</button></form><p id="err" class="error-text" aria-live="polite"></p></section></main>
-<script src="js/api.js?v=20260926"></script><script src="js/utils.js?v=20260926"></script><script src="js/login.js?v=20261004"></script>
+  <main class="login-stage">
+    <div class="login-layout">
+      <section class="login-story" aria-label="About RMCTI">
+        <span class="story-orbit" aria-hidden="true"></span>
+        <a class="login-brand" href="index.html" aria-label="RMCTI home">
+          <img src="asset/image.png" alt="" loading="eager" decoding="async">
+          <span><span class="login-brand-name">RMCTI</span><span class="login-brand-sub">Digital Education</span></span>
+        </a>
+        <div class="story-copy">
+          <span class="story-eyebrow">Your learning portal</span>
+          <h1>Make your next step <em>count.</em></h1>
+          <p>Sign in to continue learning, teaching, and building a brighter future with the RMCTI community.</p>
+          <div class="story-points" aria-label="RMCTI values"><span>Learn with confidence</span><span>Grow every day</span><span>Since 2019</span></div>
+        </div>
+        <div class="story-foot"><i aria-hidden="true">✦</i><span>A welcoming place to build digital skills.</span></div>
+      </section>
 
-</body></html>
+      <section class="login-panel" aria-labelledby="login-title">
+        <a class="return-link" href="index.html"><span aria-hidden="true">←</span> Back to website</a>
+        <button class="login-theme-toggle" type="button" data-theme aria-label="Toggle light and dark theme" title="Toggle light and dark theme">◐</button>
+        <div class="login-form-wrap">
+          <div class="form-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.4 2.8 8.1 7 10 4.2-1.9 7-5.6 7-10V6l-7-3Z"></path><path d="m9 12 2 2 4-4"></path></svg></div>
+          <h1 class="login-heading" id="login-title">Welcome back</h1>
+          <p class="login-intro">Sign in to your RMCTI account to continue.</p>
+          <form class="login-form" id="login">
+            <label class="login-label" for="login-username">Username</label>
+            <div class="login-input-wrap"><input class="login-input" id="login-username" name="username" autocomplete="username" placeholder="Enter your username" required></div>
+            <label class="login-label" for="login-password">Password</label>
+            <div class="login-input-wrap password-field">
+              <input class="login-input" id="login-password" type="password" name="password" autocomplete="current-password" placeholder="Enter your password" required>
+              <button type="button" class="password-toggle" data-toggle-password aria-label="Show password" title="Show password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg></button>
+            </div>
+            <label class="remember-row"><input type="checkbox" name="remember" value="1"><span>Keep me signed in on this device <span aria-hidden="true">(30 days)</span></span></label>
+            <button class="signin-button" type="submit"><span>Sign in to portal</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg></button>
+          </form>
+          <p id="err" class="error-text" aria-live="polite"></p>
+          <div class="secure-note"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 1 1 8 0v3"></path></svg><span>Secure access for students, teachers, and admins</span></div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="js/theme.js?v=20261101"></script>
+  <script src="js/api.js?v=20260926"></script>
+  <script src="js/utils.js?v=20261101"></script>
+  <script src="js/login.js?v=20261004"></script>
+</body>
+</html>
