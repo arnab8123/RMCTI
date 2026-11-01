@@ -1211,12 +1211,12 @@ button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s 
 .sidebar-collapsed .nav-icon{width:100%;text-align:center;font-size:18px}
 .nav-icon{width:22px;min-width:22px;text-align:center}
 .nav-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.nav a.active{background:var(--primary);color:#fff;box-shadow:0 8px 20px rgba(15,23,42,.12)}
+.nav a.active{background:var(--primary);color:#fff;box-shadow:0 8px 20px rgba(154,84,18,.2)}
 .nav a.active:hover{background:var(--primary);color:#fff}
 .global-search-wrap{position:relative;flex:1;min-width:180px;max-width:620px;margin:0 18px}
 .global-search-icon{position:absolute;left:13px;top:50%;transform:translateY(-50%);font-size:20px;color:var(--muted);pointer-events:none}
 .global-search-input{width:100%;height:42px;padding:10px 46px 10px 40px;border:1px solid var(--border);border-radius:13px;background:var(--muted-surface);color:var(--text);outline:none;transition:border-color .18s,box-shadow .18s,background .18s}
-.global-search-input:focus{background:var(--surface);border-color:var(--primary);box-shadow:0 0 0 4px rgba(15,23,42,.1)}
+.global-search-input:focus{background:var(--surface);border-color:var(--primary);box-shadow:0 0 0 4px rgba(154,84,18,.12)}
 .global-search-kbd{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:11px;border:1px solid var(--border);background:var(--surface);padding:2px 6px;border-radius:6px;color:var(--muted)}
 .global-search-results{position:absolute;left:0;right:0;top:49px;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 18px 45px rgba(15,23,42,.18);overflow:hidden;z-index:90;max-height:min(70vh,520px);overflow-y:auto}
 .global-search-result{width:100%;border:0;background:transparent;color:var(--text);padding:12px 13px;display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;cursor:pointer}
@@ -1571,21 +1571,3 @@ body.sidebar-open .menu{position:relative;z-index:90}
 .toast{left:50%;right:auto;top:50%;transform:translate(-50%,-50%);z-index:230;width:min(380px,calc(100vw - 28px));}
 .toast-out{animation:rmcti-toast-out-center .18s ease forwards;}
 @keyframes rmcti-toast-out-center{to{transform:translate(-50%,-56%);opacity:0}}
-
-/* RMCTI warm cream and copper brand theme shared by every portal. */
-.side .nav a[aria-current="page"],.side .nav a.active,.side .nav button.active{background:color-mix(in srgb,var(--primary) 24%,var(--sidebar));color:#fff5e5}
-.side .nav a:hover,.side .nav button:hover{background:var(--sidebar-hover);color:#fff8ed}
-.id-card{border-color:#e6dccb;background:#fffdf9;color:#3b2918;box-shadow:0 10px 26px rgba(15,23,42,.1)}
-.id-field,.id-field b,.id-field span{color:#3b2918}
-.id-photo{border-color:#92500f;background:#f3ecdf}
-.id-card-header,.id-card-header{background:#92500f!important}
-.stat-blue{--stat:#92500f}.stat-purple{--stat:#b7792e}.stat-indigo{--stat:#d99a3f}.stat-orange{--stat:#a96117}
-.badge.scheduled,.badge.upcoming{color:#80430b;background:color-mix(in srgb,#d99a3f 18%,transparent)}
-.badge.partial{color:#8b4a0c;background:color-mix(in srgb,#d99a3f 20%,transparent)}
-.timeline-dot.partial{color:#8b4a0c}
-.fee-timeline-item.partial .fee-timeline-marker{background:color-mix(in srgb,#d99a3f 20%,transparent);color:#8b4a0c}
-html[data-theme=dark] .id-card{border-color:#263751;background:#111c2e;color:#f3f6fb;box-shadow:0 10px 26px rgba(0,0,0,.24)}
-html[data-theme=dark] .id-field,html[data-theme=dark] .id-field b,html[data-theme=dark] .id-field span{color:#f3e8d7}
-html[data-theme=dark] .id-photo{border-color:#52637a;background:#17253a}
-html[data-theme=dark] .badge.scheduled,html[data-theme=dark] .badge.upcoming,html[data-theme=dark] .badge.partial{color:#f1c77c}
-html[data-theme=dark] .timeline-dot.partial,html[data-theme=dark] .fee-timeline-item.partial .fee-timeline-marker{color:#f1c77c}

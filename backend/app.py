@@ -1,5 +1,5 @@
 import os
-from flask import Flask, jsonify, send_file
+from flask import Flask, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, get_jwt
 from sqlalchemy.exc import SQLAlchemyError
@@ -12,12 +12,6 @@ from .extensions import limiter
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
-    is_production = app.config["APP_ENV"] in {"production", "prod"} or bool(os.getenv("RENDER"))
-    if is_production:
-        for key in ("SECRET_KEY", "JWT_SECRET_KEY"):
-            secret = str(app.config.get(key) or "")
-            if len(secret) < 32 or secret == "change-me":
-                raise RuntimeError(f"Set a strong {key} of at least 32 characters before production startup.")
     db.init_app(app)
 
     jwt = JWTManager(app)
@@ -27,13 +21,33 @@ def create_app():
 
     CORS(
         app,
-        supports_credentials=True,
         resources={
             r"/api/*": {"origins": app.config["CORS_ORIGINS"]},
             r"/uploads/*": {"origins": app.config["CORS_ORIGINS"]},
         },
     )
     app.register_blueprint(api)
+
+    @app.before_request
+    def cleanup_expired_feedback():
+        # A lightweight request-triggered cleanup works on Render without a
+        # scheduler/worker. It runs at most once per six hours per worker.
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        last = app.extensions.get("rmcti_feedback_cleanup_at")
+        if last and (now - last).total_seconds() < 21600:
+            return None
+        app.extensions["rmcti_feedback_cleanup_at"] = now
+        try:
+            from .models import Complaint, Enquiry
+            cutoff = now.replace(tzinfo=None) - timedelta(days=10)
+            Complaint.query.filter(Complaint.created_at < cutoff).delete(synchronize_session=False)
+            Enquiry.query.filter(Enquiry.created_at < cutoff).delete(synchronize_session=False)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return None
 
     @jwt.token_in_blocklist_loader
     def is_token_revoked(jwt_header, jwt_payload):
@@ -58,6 +72,33 @@ def create_app():
     def health():
         return jsonify(success=True, message="API is healthy")
 
+    @app.get("/uploads/photos/<path:filename>")
+    def uploaded_photo(filename):
+        try:
+            from .models import PhotoAsset
+            asset = PhotoAsset.query.filter_by(id=filename).first()
+            if asset:
+                if asset.cloudinary_resource_type == "r2" and asset.storage_key:
+                    from .routes import _r2_client
+                    from flask import Response
+                    client,bucket=_r2_client(); obj=client.get_object(Bucket=bucket,Key=asset.storage_key)
+                    return Response(obj["Body"].read(),mimetype=asset.mime_type,headers={"Cache-Control":"public, max-age=86400"})
+                if asset.cloudinary_url:
+                    from flask import Response
+                    return Response("", status=302, headers={"Location": asset.cloudinary_url, "Cache-Control": "public, max-age=31536000, immutable"})
+                if asset.data:
+                    from flask import Response
+                    return Response(
+                        asset.data,
+                        mimetype=asset.mime_type,
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+                    )
+        except Exception:
+            db.session.rollback()
+        return send_from_directory(
+            os.path.join(os.path.dirname(__file__), "uploads", "photos"), filename
+        )
+
     @app.get("/")
     def frontend_home():
         return send_file(os.path.join(frontend_dir, "index.html"))
@@ -69,10 +110,7 @@ def create_app():
             response = send_file(target)
             # Long cache only for versioned/static assets. HTML remains revalidated.
             if path.lower().endswith((".css", ".js", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".ico", ".woff", ".woff2")):
-                if request_has_asset_version():
-                    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-                else:
-                    response.headers["Cache-Control"] = "public, max-age=3600, stale-while-revalidate=86400"
+                response.headers["Cache-Control"] = "public, max-age=31536000, stale-while-revalidate=604800"
             return response
         return jsonify(success=False, message="Resource not found"), 404
 
@@ -95,14 +133,6 @@ def create_app():
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        response.headers.setdefault(
-            "Content-Security-Policy",
-            "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
-            "form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com; "
-            "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
-            "img-src 'self' data: blob: https:; font-src 'self' data: https://cdnjs.cloudflare.com https://fonts.gstatic.com; "
-            "frame-src https://www.google.com; connect-src 'self' https://generativelanguage.googleapis.com http://127.0.0.1:5000 http://localhost:5000"
-        )
         # Render terminates HTTPS in production. Only send HSTS when the
         # request was HTTPS so local development is not accidentally pinned.
         if os.getenv("ENABLE_HSTS", "1").strip().lower() in {"1", "true", "yes", "on"} and request_is_https(response):
@@ -117,14 +147,6 @@ def request_is_https(response):
     from flask import request
     return request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
 
-
-def request_has_asset_version():
-    from flask import request
-    return bool(request.args.get("v") or request.args.get("version"))
-
-
-if __name__ == "__main__":
-    os.environ.setdefault("APP_ENV", "development")
 
 app = create_app()
 

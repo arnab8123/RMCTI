@@ -94,6 +94,3 @@ html[data-theme=dark] .ai-badge-warn{color:var(--warning)}
   .ai-actions{opacity:1}.ai-suggest{grid-template-columns:1fr}.ai-hint{display:none}.ai-composer{padding:10px}
 }
 @media(prefers-reduced-motion:reduce){.ai-orb,.ai-row{animation:none}.ai-chat{scroll-behavior:auto}}
-html[data-theme=dark] .ai-logo,html[data-theme=dark] .ai-avatar,html[data-theme=dark] .ai-orb{box-shadow:0 8px 22px rgba(0,0,0,.24)}
-html[data-theme=dark] .ai-suggest-card:hover{box-shadow:0 10px 26px rgba(0,0,0,.2)}
-html[data-theme=dark] .ai-input-wrap:focus-within{box-shadow:0 0 0 4px rgba(148,163,184,.16)}

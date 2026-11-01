@@ -52,13 +52,6 @@ CREATE TABLE IF NOT EXISTS token_blocklist (
  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- Single-use AI confirmation nonces shared across application workers.
-CREATE TABLE IF NOT EXISTS ai_action_nonces (
- nonce VARCHAR(64) PRIMARY KEY,
- expires_at DATETIME NOT NULL,
- INDEX idx_ai_action_nonces_expires(expires_at)
-) ENGINE=InnoDB;
-
 CREATE TABLE admins (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id BIGINT UNSIGNED NOT NULL UNIQUE,
  name VARCHAR(150) NOT NULL, email VARCHAR(255), phone VARCHAR(30),

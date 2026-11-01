@@ -8,6 +8,3 @@ services:
     startCommand: gunicorn --workers 1 --threads 4 --timeout 60 --keep-alive 5 backend.app:app
     healthCheckPath: /health
     autoDeployTrigger: commit
-    envVars:
-      - key: APP_ENV
-        value: production

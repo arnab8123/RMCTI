@@ -17,8 +17,11 @@ document.addEventListener('DOMContentLoaded', () => {
     toggle.title = showing ? 'Show password' : 'Hide password';
   });
 
-  // Authentication tokens stay in an HttpOnly server cookie, never browser storage.
-  if (localStorage.getItem('rmcti_user')) {
+  // A remembered token is stored only in localStorage; the password itself is
+  // never stored. The backend keeps remembered tokens valid for 365 days by
+  // default so the same device stays signed in across browser restarts.
+  const savedToken = localStorage.getItem('rmcti_token');
+  if (savedToken) {
     Api.get('/auth/me').then((user) => {
       location.href = user.role === 'admin'
         ? 'admin/dashboard.html'
@@ -26,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ? 'teacher/dashboard.html'
           : 'student/dashboard.html';
     }).catch(() => {
+      localStorage.removeItem('rmcti_token');
       localStorage.removeItem('rmcti_user');
     });
   }
@@ -45,10 +49,13 @@ document.addEventListener('DOMContentLoaded', () => {
       };
       const data = await Api.post('/auth/login', payload);
 
+      sessionStorage.setItem('token', data.token);
       sessionStorage.setItem('user', JSON.stringify(data.user));
       if (remember) {
+        localStorage.setItem('rmcti_token', data.token);
         localStorage.setItem('rmcti_user', JSON.stringify(data.user));
       } else {
+        localStorage.removeItem('rmcti_token');
         localStorage.removeItem('rmcti_user');
       }
 

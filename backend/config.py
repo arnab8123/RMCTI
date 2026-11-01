@@ -13,20 +13,14 @@ def _env_bool(name, default=False):
 
 
 class Config:
-    APP_ENV = os.getenv("APP_ENV", "production").strip().lower()
     SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
 
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(
         minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "120"))
     )
-    JWT_REMEMBER_ME_DAYS = int(os.getenv("JWT_REMEMBER_ME_DAYS", "30"))
-    JWT_TOKEN_LOCATION = ["cookies"]
-    JWT_COOKIE_CSRF_PROTECT = True
-    JWT_COOKIE_SAMESITE = "Lax"
-    JWT_COOKIE_SECURE = APP_ENV in {"production", "prod"} or bool(os.getenv("RENDER"))
-    JWT_ACCESS_COOKIE_PATH = "/api/"
-    JWT_ACCESS_CSRF_COOKIE_PATH = "/"
+    JWT_REMEMBER_ME_DAYS = int(os.getenv("JWT_REMEMBER_ME_DAYS", "365"))
+    JWT_TOKEN_LOCATION = ["headers"]
     JWT_ERROR_MESSAGE_KEY = "message"
 
     # Reject unexpectedly large request bodies before Flask parses them.
