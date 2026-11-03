@@ -1488,7 +1488,7 @@ const Page = (() => {
   }
 
   async function feePayment() {
-    const allStudents = await Api.get('/students', { status: 'active', select: '1', limit: 500 });
+    const allStudents = await Api.get('/students', { status: 'active' });
     const studentSelect = q('[data-student]');
     const search = q('[data-student-search]');
     const filter = q('[data-fee-filter]');
@@ -2135,7 +2135,7 @@ const Page = (() => {
     const loadRecipients=async()=>{
       if(!isAdmin)return;
       try{
-        const [students,classes]=await Promise.all([Api.get('/students',{status:'active',select:'1',limit:500}),Api.get('/classes',{status:'active'})]);
+        const [students,classes]=await Promise.all([Api.get('/students',{status:'active'}),Api.get('/classes',{status:'active'})]);
         fill(studentSelect,'<option value="">Select student</option>'+students.map(s=>`<option value="${s.id}">${U.esc(s.name)} · ${U.esc(s.student_id)}</option>`).join(''));
         fill(classSelect,'<option value="">Select class</option>'+classes.map(c=>`<option value="${c.id}">${U.esc(c.class_name)} · ${U.esc(c.batch)} · ${U.esc(c.subject)}${c.course_type==='free'?' · FREE':' · PAID'}</option>`).join(''));
       }catch(e){U.toast(e.message||'Could not load recipients','error');}

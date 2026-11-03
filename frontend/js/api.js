@@ -3,17 +3,6 @@ const API = ((window.location.hostname === 'localhost' || window.location.hostna
   : '/api';
 
 const Api = {
-  // Short-lived, per-tab GET cache plus in-flight request deduplication.
-  // Every write clears the cache so edits/payments are visible immediately.
-  _getCache: new Map(),
-  _getPending: new Map(),
-  _getTtl(path) {
-    return path.startsWith('/notifications') ? 2500 : 8000;
-  },
-  _clearGetCache() {
-    this._getCache.clear();
-    this._getPending.clear();
-  },
   csrfHeaders() {
     const csrf=document.cookie.split(";").map(x=>x.trim()).find(x=>x.startsWith("csrf_access_token="));
     return csrf ? {"X-CSRF-TOKEN":decodeURIComponent(csrf.slice("csrf_access_token=".length))} : {};
@@ -21,10 +10,7 @@ const Api = {
   async req(path, opt = {}) {
     const h = {"Content-Type":"application/json", ...(opt.headers || {})};
     const method=String(opt.method||"GET").toUpperCase();
-    if(!["GET","HEAD","OPTIONS"].includes(method)) {
-      Object.assign(h,this.csrfHeaders());
-      this._clearGetCache();
-    }
+    if(!["GET","HEAD","OPTIONS"].includes(method))Object.assign(h,this.csrfHeaders());
     const r = await fetch(API + path, {...opt, credentials:"include", headers:h});
     let d = {};
     try { d = await r.json(); } catch {}
@@ -38,21 +24,10 @@ const Api = {
   },
   get(p, q = {}) {
     const s = new URLSearchParams(Object.entries(q).filter(([,v]) => v !== "" && v != null));
-    const path = p + (s.toString() ? "?" + s : "");
-    const now = Date.now();
-    const cached = this._getCache.get(path);
-    if (cached && cached.expires > now) return Promise.resolve(cached.data);
-    if (this._getPending.has(path)) return this._getPending.get(path);
-    const pending = this.req(path).then(data => {
-      this._getCache.set(path, {data, expires: Date.now() + this._getTtl(p)});
-      return data;
-    }).finally(() => this._getPending.delete(path));
-    this._getPending.set(path, pending);
-    return pending;
+    return this.req(p + (s.toString() ? "?" + s : ""));
   },
   post(p, b) { return this.req(p, {method:"POST", body:JSON.stringify(b)}); },
   upload(p, file, field="photo") {
-    this._clearGetCache();
     const h = this.csrfHeaders();
     const fd = new FormData();
     fd.append(field, file);
@@ -70,7 +45,6 @@ const Api = {
     });
   },
   uploadFields(p, fields = {}) {
-    this._clearGetCache();
     const h = this.csrfHeaders();
     const fd = new FormData();
     Object.entries(fields).forEach(([k,v]) => {

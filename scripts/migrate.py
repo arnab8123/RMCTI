@@ -302,7 +302,6 @@ def ensure_performance_indexes():
         "schedule_exceptions": [
             ("idx_schedule_exceptions_week_kind_date_teacher", "week_start,kind,schedule_date,teacher_id"),
             ("idx_schedule_exceptions_date_kind", "schedule_date,kind"),
-            ("idx_schedule_exceptions_class_target", "class_id,target_date,kind"),
         ],
         "student_classes": [
             ("idx_student_classes_student_status", "student_id,status"),
@@ -311,7 +310,6 @@ def ensure_performance_indexes():
         "fee_payments": [
             ("idx_fee_payments_student_month", "student_id,fee_month"),
             ("idx_fee_payments_student_payment_date", "student_id,payment_date,id"),
-            ("idx_fee_payments_month_date", "fee_month,payment_date"),
         ],
         "fee_structures": [
             ("idx_fee_structures_class_status_effective", "class_id,status,effective_from"),
@@ -350,7 +348,6 @@ def ensure_performance_indexes():
         ],
         "classes": [
             ("idx_classes_status", "status"),
-            ("idx_classes_status_subject", "status,subject_id"),
         ],
     }
     for table, indexes in wanted.items():

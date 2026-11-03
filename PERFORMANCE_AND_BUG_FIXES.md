@@ -33,17 +33,3 @@
 - Extra classes can be scheduled during the current week; the existing backend validates the selected date against its week and still rejects past dates/times.
 
 After deploying, check the Render logs and confirm `GEMINI_API_KEY`, Cloudflare R2 environment variables, and database environment variables are configured. No schema migration is required for these changes.
-
-
-## November 2026 — responsiveness pass
-
-- Added an 8-second in-tab GET response cache with in-flight request deduplication. All JSON write requests and uploads invalidate it, so normal edits and fee payments are reflected immediately after a write.
-- Notification polling uses a shorter 2.5-second cache window.
-- Changed student dropdown/recipient-picker requests in Fee Collection and attachment targeting to use the existing lightweight `select=1` API mode. These pickers no longer load parent details, class memberships, or fee histories for every student.
-- Added a bounded 8-second process-local cache for bulk historical fee calculations. The cache is keyed by the exact sorted student-ID set, returns copies to callers, expires automatically, and does not write to or alter fee records.
-- Added idempotent covering indexes for fee-month/payment-date aggregation, active class/subject lookups, and class/target-date schedule exception lookups.
-- Kept the existing one-worker/four-thread Gunicorn configuration. Increasing worker count on Render's free instance without measuring memory can cause restarts or out-of-memory failures.
-
-### Performance notes
-
-The application still uses the existing Render free instance and external Aiven database. Cold-start delays from a sleeping free instance and network latency to Aiven cannot be eliminated by application code alone. The first uncached request can also still be expensive for very large historical fee datasets. Use Render request logs and browser Network timings after deployment to confirm the remaining bottleneck before changing hosting tiers or database regions.

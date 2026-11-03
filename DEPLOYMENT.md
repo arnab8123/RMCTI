@@ -1,55 +1,25 @@
-# RMCTI — deployment to the existing Render service
+# Deploying updates to the existing RMCTI Render service
 
-This package is prepared to be copied into the **existing Git repository** connected to the current Render web service. It does not require creating a new Render service or database.
+The repository's `render.yaml` keeps the current single-worker setup, sets production mode, and runs the idempotent database migration during the Render build before Gunicorn starts. The dependency install also adds Excel workbook export support. No separate migration command is needed when deploying through this Render blueprint.
 
-## Before pushing
+## Render environment variables
 
-1. In Render, open the existing `rmcti` web service and confirm it is still connected to the intended Git repository and branch.
-2. Back up the existing Aiven/MySQL database before deploying. The build runs `python scripts/migrate.py`, which applies schema/data migrations.
-3. In Render → Environment, keep the existing database and secret values. Confirm these keys exist:
-   - `APP_ENV=production`
-   - `SECRET_KEY` and `JWT_SECRET_KEY` (different random values, each at least 32 characters)
-   - `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
-   - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME` (needed for R2-backed uploads)
-   - `GEMINI_API_KEY` is optional.
-4. Do **not** upload the local `.env` file. It is intentionally excluded from this deployment package. Use Render's Environment settings for secrets.
+Keep the existing database and secret values in the Render dashboard. Confirm these are set:
 
-## Update the existing Git repository
+- `APP_ENV=production`
+- `SECRET_KEY` and `JWT_SECRET_KEY`, each a different random value at least 32 characters long
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`
+- `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET_NAME` for photo and file uploads
+- `CORS_ORIGINS` only if the frontend is served from a separate origin; include that exact HTTPS origin
 
-1. Extract this ZIP.
-2. Copy the **contents** of the extracted `RMCTI` project folder into the root of your existing RMCTI Git working copy, replacing matching project files. Do not create an extra nested `RMCTI/RMCTI` folder.
-3. Keep the repository's existing `.git` directory. Do not delete or reinitialize it.
-4. Review the changes, then commit and push to the same branch already connected to Render:
+`GEMINI_API_KEY` is optional and is only needed for the AI assistant. `RATELIMIT_STORAGE_URI` can stay unset for the current single-worker service. If the service is scaled to multiple instances, set it to a shared Redis URL first.
 
-   ```bash
-   git status
-   git add -A
-   git commit -m "Prepare RMCTI for production deployment"
-   git push
-   ```
+## Cloudflare R2
 
-5. Render should auto-deploy on the push. If auto-deploy is disabled, use **Manual Deploy → Deploy latest commit** on the existing service.
+The updated app does not create public object URLs. Disable public bucket/domain access in Cloudflare R2 to revoke direct links created by the previous app version. Existing R2 objects remain stored; the app continues to fetch them through authenticated routes.
 
-## Render build and start commands
+## Deploy
 
-The included `render.yaml` defines:
+Commit and push the updated project to the repository connected to the existing Render service, or trigger a deploy from the Render dashboard after syncing the files. The build installs the updated dependencies and runs `scripts/migrate.py`; the migration creates the AI confirmation nonce table and paging indexes and converts existing R2 photo references to authenticated app paths.
 
-- Build: `pip install -r requirements.txt && python scripts/migrate.py`
-- Start: `gunicorn --workers 1 --threads 4 --timeout 60 --keep-alive 5 backend.app:app`
-- Health check: `/health`
-
-The included `runtime.txt` pins Python 3.12.10 for a consistent Render runtime. If the existing service has manually configured commands, confirm they match the commands above before changing them.
-
-## After deployment
-
-1. Wait for the Render deploy to finish successfully.
-2. Open `https://YOUR-EXISTING-RMCTI-DOMAIN/health` and confirm it returns JSON with `success: true`.
-3. Test the public landing page, admin login, teacher login, student login, file/photo viewing, fee collection, and attendance.
-4. Check Render logs for database, R2, or missing-environment-variable errors.
-
-## Important
-
-- This package does not contain your `.env`, `.venv`, or Git metadata.
-- It does not create or reset a database and does not change your existing Render service configuration in the dashboard.
-- Keep the current Aiven database credentials and secrets unchanged unless you intentionally rotate them.
-- Take a database backup before the first deployment because the migration script can alter existing tables and update legacy photo references.
+After deployment, confirm the Render build completes, `GET /health` returns success, and an admin can sign in, view profile photos and the paged file inventory, and open the full Gemini or built-in institute report with CSV/Excel exports.

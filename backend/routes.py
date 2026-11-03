@@ -2667,7 +2667,7 @@ def _fee_for_month_from_rows(rows, month):
     return base + Decimal("50.00") * Decimal(max(0,penalty_cycles))
 
 
-def _fee_month_balances_bulk_uncached(student_ids):
+def _fee_month_balances_bulk(student_ids):
     """Calculate fee balances for many students with bounded DB work and linear
     payment processing.
 
@@ -2949,38 +2949,6 @@ def history(sid):
                     "status":x["status"],"payment_date":iso_ist(latest.payment_date) if latest else None,
                     "receipt_number":latest.receipt_number if latest else None})
     return out
-
-
-
-# Reuse expensive historical fee calculations briefly across dashboard/list
-# requests. The cache is process-local, bounded, and deliberately short-lived;
-# no fee records are written or altered. Writes become visible after at most
-# a few seconds, while the browser cache is invalidated immediately on writes.
-_FEE_BALANCE_CACHE = {}
-_FEE_BALANCE_CACHE_TTL = 8.0
-_FEE_BALANCE_CACHE_MAX = 24
-
-def _fee_month_balances_bulk(student_ids):
-    import time
-    from copy import deepcopy
-
-    ids = tuple(sorted({int(x) for x in student_ids if x}))
-    if not ids:
-        return {}
-    now = time.monotonic()
-    cached = _FEE_BALANCE_CACHE.get(ids)
-    if cached and cached[0] > now:
-        return deepcopy(cached[1])
-
-    result = _fee_month_balances_bulk_uncached(ids)
-    # Opportunistic pruning keeps memory bounded on long-lived instances.
-    expired = [key for key, value in _FEE_BALANCE_CACHE.items() if value[0] <= now]
-    for key in expired:
-        _FEE_BALANCE_CACHE.pop(key, None)
-    if len(_FEE_BALANCE_CACHE) >= _FEE_BALANCE_CACHE_MAX:
-        _FEE_BALANCE_CACHE.pop(next(iter(_FEE_BALANCE_CACHE)), None)
-    _FEE_BALANCE_CACHE[ids] = (now + _FEE_BALANCE_CACHE_TTL, deepcopy(result))
-    return result
 
 
 @api.get("/fees")
