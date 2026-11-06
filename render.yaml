@@ -1,5 +1,20 @@
 services:
   - type: web
+    name: rmcti-site
+    runtime: static
+    region: singapore
+    plan: free
+    buildCommand: ""
+    staticPublishPath: frontend
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://rmcti.onrender.com/api/*
+      - type: rewrite
+        source: /health
+        destination: https://rmcti.onrender.com/health
+    autoDeployTrigger: commit
+  - type: web
     name: rmcti
     runtime: python
     region: singapore

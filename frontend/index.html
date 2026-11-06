@@ -1482,11 +1482,22 @@
                     phone: form.phone.value.trim(),
                     message: form.message.value.trim()
                 };
-                let response = await fetch(`${LANDING_API}/public/enquiries`, {
+                const submit = () => fetch(`${LANDING_API}/public/enquiries`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 });
+                // A free Render API may need time to wake on the first request.
+                let response;
+                for (let attempt = 0; attempt < 12; attempt++) {
+                    try {
+                        response = await submit();
+                        if (![502, 503, 504].includes(response.status) || attempt === 11) break;
+                    } catch (error) {
+                        if (attempt === 11) throw error;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                }
                 // Compatibility fallback for an older deployed API.
                 if (response.status === 404) {
                     response = await fetch(`${LANDING_API}/enquiries`, {
@@ -1697,12 +1708,17 @@ document.querySelectorAll('[data-certificate]').forEach(btn => {
   });
 
   const statsApi=(location.hostname==='localhost'||location.hostname==='127.0.0.1')&&location.port==='5500'?'http://127.0.0.1:5000/api':'/api';
-  fetch(`${statsApi}/public/stats`).then(r=>r.json()).then(d=>{
+  const loadStats=()=>fetch(`${statsApi}/public/stats`).then(r=>{if(!r.ok)throw new Error('Stats unavailable');return r.json();}).then(d=>{
+    if(d.success===false)throw new Error(d.message||'Stats unavailable');
     const x=d.data||{};
     const studentCount=`${Number(x.total_students||0)}+`, teacherCount=`${Number(x.total_teachers||0)}+`;
     ['landingStudentCount','aboutStudentCount'].forEach(id=>{const node=document.getElementById(id);if(node)node.textContent=studentCount;});
     ['landingTeacherCount','aboutTeacherCount'].forEach(id=>{const node=document.getElementById(id);if(node)node.textContent=teacherCount;});
-  }).catch(()=>{});
+  });
+  const retryStats=(attempt=0)=>loadStats().catch(()=>{
+    if(attempt<17)setTimeout(()=>retryStats(attempt+1),5000);
+  });
+  retryStats();
 })();
 </script>
 

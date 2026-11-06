@@ -8,6 +8,7 @@ venv/
 .venv/
 __pycache__/
 *.pyc
+backend/uploads/
 
 # Local/editor files
 *.log

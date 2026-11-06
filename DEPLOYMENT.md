@@ -1,5 +1,11 @@
 # Deploying updates to the existing RMCTI Render service
 
+## Static landing page with the live API
+
+The root Render blueprint defines a new free Static Site named `rmcti-site` publishing the existing `frontend/` directory, and retains the existing free Flask Web Service named `rmcti`. The static site serves the existing landing page and portal files from one source. Rewrite rules forward `/api/*` and `/health` to `https://rmcti.onrender.com`, preserving same-origin browser URLs and the existing authentication cookie behavior. Attach `rmcti.in` and `www.rmcti.in` to the Static Site in Render and update DNS as Render instructs; remove those domains from the Flask service after the static site is verified. The existing Flask service remains on its current free plan with its database, secret, and storage environment variables. It may sleep and need time to wake; the static landing page remains available while the API starts. The page requests live stats on load and retries every five seconds for up to about 90 seconds while the API starts. Enquiry submissions retry on network failures and gateway errors during startup.
+
+The static service uses `frontend/index.html` directly; there is only one landing page source.
+
 The repository's `render.yaml` keeps the current single-worker setup, sets production mode, and runs the idempotent database migration during the Render build before Gunicorn starts. The dependency install also adds Excel workbook export support. No separate migration command is needed when deploying through this Render blueprint.
 
 ## Render environment variables

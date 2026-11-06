@@ -1575,7 +1575,7 @@ const Page = (() => {
         body.amount = Number(amountInput.value || 0);
          body.discount_amount = Number(discountInput?.value || 0);
          if(body.amount + body.discount_amount <= 0) throw Error('Enter a payment amount or a discount');
-         if(body.amount + body.discount_amount > Number(currentFeeData?.oldest_due_amount || 0)) throw Error('Payment + discount cannot exceed the remaining balance');
+        if(body.amount + body.discount_amount > Number(currentFeeData?.oldest_due_amount || 0)) throw Error('Payment + discount cannot exceed the remaining balance');
         const btn=e.currentTarget.querySelector('button[type="submit"]') || e.currentTarget.querySelector('button'); if(btn) btn.disabled=true;
         const r = await Api.post('/fees/payment', body);
         U.toast('Fee payment recorded');

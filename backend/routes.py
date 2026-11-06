@@ -2656,6 +2656,41 @@ def _fee_base_for_month(rows, month):
     return sum((Decimal(str(row.monthly_fee)) for row in latest.values()),Decimal("0.00"))
 
 
+def _fee_courses_for_month(rows, month):
+    """Return the paid courses and active teachers contributing to a fee month."""
+    applicable = {}
+    for structure in rows:
+        if (structure.effective_from <= month
+                and (structure.effective_to is None or structure.effective_to >= month)):
+            applicable.setdefault(structure.class_id, structure)
+    course_ids = list(applicable)
+    courses = {c.id: c for c in Class.query.filter(Class.id.in_(course_ids or [-1])).all()}
+    subject_ids = {c.subject_id for c in courses.values()}
+    subjects = {s.id: s for s in Subject.query.filter(Subject.id.in_(subject_ids or [-1])).all()}
+    teacher_rows = (db.session.query(TeacherClass.class_id, Teacher.name)
+        .join(Teacher, Teacher.id == TeacherClass.teacher_id)
+        .filter(TeacherClass.class_id.in_(course_ids or [-1]), TeacherClass.status == "active", Teacher.status == "active")
+        .order_by(TeacherClass.class_id, Teacher.name).all())
+    teachers_by_course = {}
+    for class_id, teacher_name in teacher_rows:
+        teachers_by_course.setdefault(class_id, [])
+        if teacher_name not in teachers_by_course[class_id]:
+            teachers_by_course[class_id].append(teacher_name)
+    details = []
+    for class_id in course_ids:
+        course = courses.get(class_id)
+        if not course:
+            continue
+        details.append({
+            "name": course.class_name,
+            "batch": course.batch,
+            "subject": subjects[course.subject_id].name if course.subject_id in subjects else "",
+            "monthly_fee": float(applicable[class_id].monthly_fee),
+            "teachers": teachers_by_course.get(class_id, []),
+        })
+    return details
+
+
 def _fee_for_month_from_rows(rows, month):
     m=month.replace(day=1)
     base=_fee_base_for_month(rows,m)
@@ -2811,6 +2846,9 @@ def _fee_month_balances_bulk(student_ids):
             )
             if paid_date is None:
                 continue
+            # Discounts settle the fee balance just like cash for fine
+            # eligibility; otherwise a full waiver is ignored and later
+            # fine cycles incorrectly add charges to an already-cleared month.
             running_total += Decimal(str(pay.amount)) + Decimal(str(pay.discount_amount or 0))
             payment_dates.append(paid_date)
             cumulative_paid.append(running_total)
@@ -3066,11 +3104,20 @@ def pay_fee():
         r=Receipt(fee_payment_id=p.id,receipt_number=rno); db.session.add(r)
         audit(current_user().id,"collect_fee","fee_payment",p.id,f"{rno}; payment=₹{amount:.2f}; discount=₹{discount:.2f}"); db.session.commit()
         a=Admin.query.filter_by(user_id=current_user().id).first()
-        sobj=student_obj(s); first=sobj["classes"][0] if sobj["classes"] else {}
+        # Describe the courses that actually contribute to this month's fee,
+        # rather than whichever class happens to appear first in the profile.
+        course_details = _fee_courses_for_month(rows, m)
+        course_label = ", ".join(
+            f"{c['name']} ({c['batch']})" if c["batch"] else c["name"]
+            for c in course_details
+        )
+        teacher_label = ", ".join(dict.fromkeys(
+            name for c in course_details for name in c["teachers"]
+        ))
         month_balance = next((x for x in _fee_month_balances(sid) if x["month"] == m), None)
         gross_due = month_balance["due"] if month_balance else oldest_balance
-        receipt_data={"receipt_number":rno,"student":s.name,"student_id":s.student_id,"class":first.get("class_name",""),
-                      "teacher":first.get("teacher_name",""),"fee_month":m.strftime("%B %Y"),"amount":float(p.amount),
+        receipt_data={"receipt_number":rno,"student":s.name,"student_id":s.student_id,"class":course_label,
+                      "courses":course_details,"teacher":teacher_label,"fee_month":m.strftime("%B %Y"),"amount":float(p.amount),
                       "discount":float(p.discount_amount or 0),"gross_due":float(gross_due),
                       "net_due":float(max(Decimal("0.00"),gross_due-discount)),
                       "total_adjustment":float(p.amount+(p.discount_amount or 0)),
@@ -3112,14 +3159,16 @@ def receipt(id):
     if not r:return err("Receipt not found",404)
     p=FeePayment.query.get(r.fee_payment_id)
     if not p:return err("Payment not found",404)
-    s=Student.query.get(p.student_id);a=Admin.query.filter_by(user_id=p.collected_by).first();classes=student_obj(s)["classes"] if s else []
-    first=classes[0] if classes else {}
+    s=Student.query.get(p.student_id);a=Admin.query.filter_by(user_id=p.collected_by).first()
+    course_details=_fee_courses_for_month(_fee_rows_for_student(p.student_id),p.fee_month)
+    course_label = ", ".join(f"{c['name']} ({c['batch']})" if c["batch"] else c["name"] for c in course_details)
+    teacher_label = ", ".join(dict.fromkeys(name for c in course_details for name in c["teachers"]))
     balances=_fee_month_balances(p.student_id)
     month_balance=next((x for x in balances if x["month"]==p.fee_month.replace(day=1)), None)
     remaining=month_balance["balance"] if month_balance else Decimal("0.00")
     gross_due = month_balance["due"] if month_balance else Decimal("0.00")
     return ok({"receipt_number":r.receipt_number,"student":s.name if s else "","student_id":s.student_id if s else "",
-               "class":first.get("class_name", ""),"teacher":first.get("teacher_name", ""),
+               "class":course_label,"courses":course_details,"teacher":teacher_label,
                "fee_month":p.fee_month.strftime("%B %Y"),"amount":float(p.amount),
                "discount":float(p.discount_amount or 0),"gross_due":float(gross_due),
                "net_due":float(max(Decimal("0.00"),gross_due-Decimal(str(p.discount_amount or 0)))),
