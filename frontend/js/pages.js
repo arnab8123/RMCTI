@@ -1580,7 +1580,6 @@ const Page = (() => {
         const r = await Api.post('/fees/payment', body);
         U.toast('Fee payment recorded');
         const receiptModal=await showReceipt(r.receipt,false);
-        if(receiptModal) receiptModal.addEventListener('click',(ev)=>{ if(ev.target===receiptModal || ev.target.closest('[data-close]')) setTimeout(()=>location.reload(),50); },{once:true});
         await load();
       } catch (x) { U.toast(x.message, 'error'); }
       finally { const btn=e.currentTarget.querySelector('button[type="submit"]') || e.currentTarget.querySelector('button'); if(btn)btn.disabled=false; }
