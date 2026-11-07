@@ -1448,7 +1448,8 @@ button{margin:5px;cursor:pointer;transition:transform .16s ease,box-shadow .16s 
   .schedule-calendar-panel{min-width:0;padding:10px}
   .schedule-calendar-toolbar,.schedule-calendar-toolbar .left,.schedule-calendar-toolbar .right{min-width:0}
   .schedule-calendar-toolbar .left,.schedule-calendar-toolbar .right{gap:6px;flex-wrap:wrap}
-  .schedule-week-grid{width:100%;min-width:0;grid-template-columns:repeat(7,minmax(0,1fr));border-radius:9px}
+  .schedule-week-grid{width:100%;min-width:0;grid-template-columns:repeat(2,minmax(0,1fr));border-radius:9px}
+  .schedule-day-column:not(.mobile-today):not(.mobile-tomorrow){display:none}
   .schedule-day-column{min-width:0;min-height:220px}
   .schedule-day-head{padding:6px 3px;display:grid;justify-content:center;gap:2px;text-align:center}
   .schedule-day-head b{font-size:9px;overflow-wrap:anywhere}

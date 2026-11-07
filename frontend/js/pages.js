@@ -1098,7 +1098,7 @@ const Page = (() => {
       const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
       const today=U.today();
       body.innerHTML=`<div class="schedule-week-grid">${dayNames.map((label,i)=>`
-        <div class="schedule-day-column ${dateShift(calendarWeek,i)===today?'today':''}">
+        <div class="schedule-day-column ${dateShift(calendarWeek,i)===today?'today':''} ${dateShift(calendarWeek,i)===today?'mobile-today':''} ${dateShift(calendarWeek,i)===dateShift(today,1)?'mobile-tomorrow':''}">
           <div class="schedule-day-head"><b>${label}</b><small>${U.date(dateShift(calendarWeek,i)).slice(0,5)}</small></div>
           <div class="schedule-day-items">${byDay[i].length?byDay[i].map(r=>{
             const isToday=r.date===today;
@@ -1370,7 +1370,7 @@ const Page = (() => {
           };
           await Api.put(`/teacher-classes/${id}`, payload);
           delete form.dataset.editId;
-          form.querySelector('button[type="submit"]').textContent='Allocate class';
+          form.querySelector('button[type="submit"]').textContent='Save Schedule';
           resetEditSchedulePanel();
           U.toast('Allocation updated');
         }
@@ -1433,7 +1433,7 @@ const Page = (() => {
           await Api.del(`/teacher-classes/${numericId}`);
           if (String(form.dataset.editId) === String(numericId)) {
             delete form.dataset.editId;
-            form.querySelector('button[type="submit"]').textContent = 'Allocate class';
+            form.querySelector('button[type="submit"]').textContent = 'Save Schedule';
           }
           await refreshAllocationData(courseId);
           U.toast('Schedule slot deleted');
